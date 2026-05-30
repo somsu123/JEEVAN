@@ -422,6 +422,7 @@ export default function App() {
             scannedHistory={scannedHistory}
             onNavigate={setCurrentView}
             activeAlert={activeAlert}
+            vitals={vitals}
           />
         );
       case 'live-vitals':

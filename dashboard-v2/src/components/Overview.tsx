@@ -18,18 +18,20 @@ import {
   ExternalLink,
   Table
 } from 'lucide-react';
-import { ScanResult } from '../types';
+import { ScanResult, VitalState } from '../types';
 
 interface OverviewProps {
   scannedHistory: ScanResult[];
   onNavigate: (view: any) => void;
   activeAlert: boolean;
+  vitals?: VitalState;
 }
 
 export default function Overview({
   scannedHistory,
   onNavigate,
-  activeAlert
+  activeAlert,
+  vitals
 }: OverviewProps) {
   // Active selected report index for in-depth dashboard analysis
   const [selectedReportIdx, setSelectedReportIdx] = useState<number>(0);
@@ -196,18 +198,28 @@ export default function Overview({
             <div>
               <div className="flex justify-between items-start">
                 <span className="text-[10px] text-slate-500 font-mono tracking-wider block">RESTING HEART RHYMTH</span>
-                <Heart className="h-4 w-4 text-emerald-400" />
+                <Heart className={`h-4 w-4 ${vitals && vitals.heartRate > 0 && vitals.fingerPresent ? "text-rose-400 animate-pulse" : "text-emerald-400"}`} />
               </div>
               <span className="text-3xl font-black text-white block mt-2 tracking-tight">
-                {metrics.heartRate} <span className="text-xs font-medium text-slate-400">BPM</span>
+                {vitals && vitals.heartRate > 0 ? vitals.heartRate : metrics.heartRate} <span className="text-xs font-medium text-slate-400">BPM</span>
               </span>
-              <span className="text-[10px] text-emerald-500 font-mono mt-0.5 block flex items-center gap-1">
-                <CheckCircle2 className="h-3 w-3 inline" /> Rhythm stable
-              </span>
+              {vitals && vitals.heartRate > 0 && vitals.fingerPresent ? (
+                <span className="text-[10px] text-rose-400 font-mono mt-0.5 block flex items-center gap-1">
+                  <span className="relative flex h-2 w-2 mr-1">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
+                  </span>
+                  Live tracking active
+                </span>
+              ) : (
+                <span className="text-[10px] text-emerald-500 font-mono mt-0.5 block flex items-center gap-1">
+                  <CheckCircle2 className="h-3 w-3 inline" /> Rhythm stable
+                </span>
+              )}
             </div>
             <div className="border-t border-slate-800/60 pt-2 mt-2">
               <span className="text-[9px] text-slate-500 font-mono block truncate">
-                Source: {metrics.hrSource ? metrics.hrSource : "Unspecified EKG"}
+                Source: {vitals && vitals.heartRate > 0 && vitals.fingerPresent ? "Real-time ESP32 Bracelet" : (metrics.hrSource ? metrics.hrSource : "Unspecified EKG")}
               </span>
             </div>
           </div>
