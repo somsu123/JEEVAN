@@ -2,16 +2,17 @@ from pymongo import MongoClient
 import time
 
 # Connect to local MongoDB
-client = MongoClient("mongodb://localhost:27017/")
+client = MongoClient("mongodb://localhost:27017")
 db = client["eldercare_db"]
 
 class DatabaseLayer:
     @staticmethod
     def initialize_db():
         """Ensure necessary collections and indexes exist."""
-        # Setup TTL index so raw fall logs auto-delete after 7 days
+        # Setup TTL index so raw logs auto-delete after 7 days
         try:
             db.fall_logs.create_index("timestamp", expireAfterSeconds=604800)
+            db.bpm_logs.create_index("timestamp", expireAfterSeconds=604800)
         except Exception:
             pass
         
@@ -25,11 +26,25 @@ class DatabaseLayer:
                 "next_reminder": None,
                 "last_torso_angle": 0.0,
                 "last_fps": 0.0,
+                "bpm": 72,
             }},
             upsert=True
         )
 
     # ── METRICS & STATE ────────────────────────────────────────────────
+
+    @staticmethod
+    def save_bpm(bpm: int):
+        """Save raw BPM readings in the same MongoDB connection."""
+        db.bpm_logs.insert_one({
+            "timestamp": time.time(),
+            "bpm": bpm
+        })
+        db.system_state.update_one(
+            {"_id": "current_state"},
+            {"$set": {"bpm": bpm, "last_bpm_time": time.time()}},
+            upsert=True
+        )
 
     @staticmethod
     def update_medicine_state(lid_open: bool = None, reminder_triggered: bool = None):

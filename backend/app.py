@@ -8,6 +8,19 @@ from database import DatabaseLayer
 app = Flask(__name__)
 CORS(app)
 
+# --- Heart Rate Endpoint ---
+@app.route('/api/heartrate', methods=['POST'])
+def update_heartrate():
+    try:
+        data = request.get_json()
+        if 'bpm' in data:
+            bpm = int(data['bpm'])
+            DatabaseLayer.save_bpm(bpm)
+            return jsonify({"status": "success", "bpm": bpm}), 200
+        return jsonify({"error": "Invalid format"}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 # --- Medicine Box Endpoint ---
 @app.route('/api/medicine', methods=['POST'])
 def update_medicine():

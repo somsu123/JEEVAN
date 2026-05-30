@@ -4,17 +4,17 @@ A comprehensive IoT and AI-powered system designed to assist with monitoring the
 
 ## Features
 
-1. **Vision-based Fall Detection** 
-   - Uses a webcam and MediaPipe Tasks API to analyze torso angle and bounding box aspect ratios to detect falls in real-time.
-   - Throttled REST API updates to prevent network flood.
-   - Triggers Gmail notifications (if configured).
+1. **Vision-based Fall Detection (Raspberry Pi Camera)** 
+   - Runs locally on an external Raspberry Pi using an on-device camera.
+   - Privacy-first: all CV/pose estimation runs locally on the Pi; no video stream is sent across the network.
+   - Sends real-time fall alert metadata over the local WiFi to the central dashboard.
 
 2. **IoT Integration (ESP32)**
    - Expects REST endpoints for hardware connections checking heart-rate (BPM) and medicine box status (Lid open/close).
 
-3. **Real-time Live Dashboard**
+3. **Real-time Live Dashboard (Vite + Express)**
    - Beautiful localized dashboard syncing every 1.5 seconds.
-   - Displays historic falls, current torso angle, FPS, heart-rate state, next medication doses, and total alerts all in real-time from the database.
+   - Displays historic falls, heart-rate state, next medication doses, and total alerts all in real-time from the database.
 
 4. **AI Voice Assistant**
    - Responds to audible triggers and fetches live hardware logs directly using the shared API to give vocal status updates regarding patient well-being and upcoming medicine schedules.
@@ -39,26 +39,25 @@ py -3.11 -m pip install -r requirements.txt
 ```
 *(If you do not have a requirements.txt file, ensure at least the following are installed via pip: `flask flask-cors pymongo requests mediapipe opencv-python pyttsx3 numpy`)*
 
-### 3. Model Download
-The Fall Detector requires the Heavy Pose Landmarker model to function.
-- Download the model from the official mediapipe repository: [pose_landmarker_heavy.task](https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/1/pose_landmarker_heavy.task).
-- Place the downloaded file directly inside the `vision/` directory.
+### 3. Raspberry Pi Fall Detector
+The vision-based camera fall detector is designed to be offloaded to a separate **Raspberry Pi** (running the code in `D:\elder care fall`). This ensures maximum local processing speed and leaves your central host PC free to run the backend, voice assistant, and dashboard without resource conflicts.
 
 ---
 
 ## 🚀 Running the System
 
-To launch the full suite, simply double-click the `start_system.bat` file, or open a Command Prompt / PowerShell in the root directory and run:
+To launch the central services, simply double-click the `start_system.bat` file, or open a Command Prompt / PowerShell in the root directory and run:
 
 ```powershell
 .\start_system.bat
 ```
 
-This batch file will boot 4 separate command windows sequentially:
+This batch file will boot 3 separate command windows sequentially:
 1. `backend/app.py` - Starts the central Flask API Server locally (port 5000), connecting to MongoDB.
-2. `ai_assistant/assistant.py` - Starts the background voice module.
-3. `vision/fall_detector.py` - Initiates the camera and MediaPipe engine to monitor falls.
-4. Opens `dashboard/index.html` in your default web browser for the Real-time UI.
+2. `ai_assistant/assistant.py` - Starts the background voice assistant module.
+3. Starts the Express/Node dashboard server (port 5050), which launches the Vite-based real-time UI.
+
+*Note: The Raspberry Pi fall detector runs separately on the Pi itself (using the `fall_detector.py` script).*
 
 ---
 
@@ -88,18 +87,17 @@ Assuming the computer running the backend has the local IP Address `192.168.1.50
 
 ---
 
-## 📩 Configuring Email Alerts 
+## 📩 Configuring Email & SMS Alerts 
 
-If you want the Fall Detector to send emergency emails upon detecting a fall, you must configure a Gmail App Password.
-1. Open `vision/fall_detector.py`
-2. Change `GMAIL_ENABLED = False` to `GMAIL_ENABLED = True`
-3. Enter your email in `GMAIL_SENDER` and `GMAIL_RECIPIENTS`
-4. Provide a 16-character **App Password** for `GMAIL_APP_PASSWORD` (Generate this by going to Google Account Settings -> Security -> 2-Step Verification -> App Passwords).
+Centralized notifications are handled directly by the dashboard server. Configure your preferences inside `dashboard-v2/.env`:
+1. Open the configuration file `dashboard-v2/.env`.
+2. Provide your caregiver email in `CAREGIVER_EMAIL`.
+3. Provide your Gmail login in `GMAIL_USER` and a 16-character Google App Password in `GMAIL_APP_PASSWORD`.
+4. (Optional) For SMS alerts, configure your Twilio account SID, token, from number, and caregiver phone number.
 
 ---
 
 ## Troubleshooting
 
-- **Black Screen / Errors on Camera open:** Ensure no other application (like Zoom or Teams) is using the webcam.
 - **`ModuleNotFoundError: No module named 'pymongo'`:** You are mistakenly using the wrong Python version (e.g., Python 3.13) to run the scripts. The `start_system.bat` explicitly uses `py -3.11`.
 - **Dashboard Data not changing:** Ensure MongoDB is actively running in the background (`mongod`). Open MongoDB Compass and confirm that the `eldercare_db` is populated.
