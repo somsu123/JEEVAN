@@ -1,0 +1,29 @@
+[
+  {
+    "event": "DOSE_TAKEN",
+    "box": 1,
+    "medicine": "Lisinopril",
+    "dosage": "10mg",
+    "timestamp": "12:19:10",
+    "deviceId": "medbox-01-sim",
+    "loggedAt": "2026-05-28T06:49:10.157Z"
+  },
+  {
+    "event": "DOSE_TAKEN",
+    "box": 3,
+    "medicine": "Aspirin",
+    "dosage": "81mg",
+    "timestamp": "23:31:12",
+    "deviceId": "medbox-01-sim",
+    "loggedAt": "2026-05-27T18:01:12.422Z"
+  },
+  {
+    "event": "DOSE_MISSED",
+    "box": 2,
+    "medicine": "Vitamin D",
+    "dosage": "1000IU",
+    "timestamp": "22:04:22",
+    "deviceId": "medbox-01-sim",
+    "loggedAt": "2026-05-27T16:34:22.373Z"
+  }
+]

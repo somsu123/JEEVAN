@@ -1,0 +1,69 @@
+# Dependency directories
+node_modules/
+jspm_packages/
+web_modules/
+
+# Build and distribution directories
+dist/
+build/
+out/
+bin/
+obj/
+*.egg-info/
+.serverless/
+.serverless_nextjs/
+.next/
+.nuxt/
+.cache/
+.parcel-cache/
+.eslintcache/
+
+# Python caching & environments
+__pycache__/
+*.py[cod]
+*$py.class
+.ipynb_checkpoints
+.pytest_cache/
+.tox/
+.nox/
+.coverage
+htmlcov/
+.venv/
+venv/
+ENV/
+env/
+
+# Arduino / Firmware build directories
+arduino-cli-bin/
+*.hex
+*.elf
+*.bin
+*.d
+
+# Environment files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.sync.profile.json
+
+# IDEs and editors
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.DS_Store
+Thumbs.db
+
+# Large installer and archive files
+*.msi
+*.zip
+*.exe
+*.tar.gz
+*.tgz
+*.rar
+

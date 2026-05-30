@@ -1,0 +1,185 @@
+@import "tailwindcss";
+
+/* ─── Design Tokens ──────────────────────────────────────── */
+:root {
+  --bg-primary: #0a0e1a;
+  --bg-secondary: #111827;
+  --bg-card: rgba(17, 24, 39, 0.7);
+  --bg-card-hover: rgba(30, 41, 59, 0.8);
+  --border-subtle: rgba(99, 102, 241, 0.15);
+  --border-glow: rgba(99, 102, 241, 0.3);
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --accent-green: #10b981;
+  --accent-emerald: #34d399;
+  --accent-cyan: #22d3ee;
+  --accent-red: #ef4444;
+  --accent-amber: #f59e0b;
+  --accent-indigo: #6366f1;
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+/* ─── Global Reset ───────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ─── Background Gradient Mesh ───────────────────────────── */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 600px 400px at 20% 20%, rgba(99, 102, 241, 0.08), transparent),
+    radial-gradient(ellipse 500px 500px at 80% 80%, rgba(16, 185, 129, 0.06), transparent),
+    radial-gradient(ellipse 400px 300px at 50% 50%, rgba(34, 211, 238, 0.04), transparent);
+  pointer-events: none;
+  z-index: 0;
+}
+
+#root {
+  position: relative;
+  z-index: 1;
+}
+
+/* ─── Glassmorphism Card ─────────────────────────────────── */
+.glass-card {
+  background: var(--bg-card);
+  backdrop-filter: blur(16px) saturate(1.2);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  border: 1px solid var(--border-subtle);
+  border-radius: 1.25rem;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.glass-card:hover {
+  border-color: var(--border-glow);
+  box-shadow: 0 0 30px rgba(99, 102, 241, 0.08);
+}
+
+/* ─── Heartbeat Pulse Animation ──────────────────────────── */
+@keyframes heartbeat {
+  0%, 100% { transform: scale(1); }
+  14%      { transform: scale(1.15); }
+  28%      { transform: scale(1); }
+  42%      { transform: scale(1.08); }
+  56%      { transform: scale(1); }
+}
+
+.heart-pulse {
+  animation: heartbeat 1s ease-in-out infinite;
+}
+
+/* Dynamically adjustable via CSS var */
+.heart-pulse-dynamic {
+  animation: heartbeat var(--pulse-duration, 1s) ease-in-out infinite;
+}
+
+/* ─── Glow Pulse for Status Dots ─────────────────────────── */
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 0 4px currentColor, 0 0 8px currentColor; opacity: 1; }
+  50%      { box-shadow: 0 0 8px currentColor, 0 0 20px currentColor; opacity: 0.7; }
+}
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  animation: glow-pulse 2s ease-in-out infinite;
+}
+
+/* ─── Fade-in animation ──────────────────────────────────── */
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in-up 0.5s ease-out forwards;
+}
+
+.animate-fade-in-delay-1 { animation-delay: 0.1s; opacity: 0; }
+.animate-fade-in-delay-2 { animation-delay: 0.2s; opacity: 0; }
+.animate-fade-in-delay-3 { animation-delay: 0.3s; opacity: 0; }
+.animate-fade-in-delay-4 { animation-delay: 0.4s; opacity: 0; }
+
+/* ─── BPM Number Glow ────────────────────────────────────── */
+.bpm-glow-green {
+  text-shadow: 0 0 20px rgba(16, 185, 129, 0.4), 0 0 60px rgba(16, 185, 129, 0.15);
+}
+
+.bpm-glow-amber {
+  text-shadow: 0 0 20px rgba(245, 158, 11, 0.4), 0 0 60px rgba(245, 158, 11, 0.15);
+}
+
+.bpm-glow-red {
+  text-shadow: 0 0 20px rgba(239, 68, 68, 0.4), 0 0 60px rgba(239, 68, 68, 0.15);
+}
+
+.bpm-glow-muted {
+  text-shadow: 0 0 10px rgba(100, 116, 139, 0.3);
+}
+
+/* ─── Chart Tooltip ──────────────────────────────────────── */
+.chart-tooltip {
+  background: rgba(15, 23, 42, 0.95) !important;
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: 0.75rem !important;
+  padding: 0.75rem 1rem !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4) !important;
+}
+
+/* ─── Scrollbar ──────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(99, 102, 241, 0.3);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(99, 102, 241, 0.5);
+}
+
+/* ─── Signal Bar Animation ───────────────────────────────── */
+@keyframes signal-bar {
+  0%, 100% { opacity: 0.4; }
+  50%      { opacity: 1; }
+}
+
+.signal-bar-animate {
+  animation: signal-bar 1.5s ease-in-out infinite;
+}
+
+.signal-bar-animate:nth-child(2) { animation-delay: 0.2s; }
+.signal-bar-animate:nth-child(3) { animation-delay: 0.4s; }
+.signal-bar-animate:nth-child(4) { animation-delay: 0.6s; }

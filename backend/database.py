@@ -20,7 +20,6 @@ class DatabaseLayer:
         db.system_state.update_one(
             {"_id": "current_state"},
             {"$setOnInsert": {
-                "bpm": 0,
                 "is_fall": False,
                 "lid_open": False,
                 "next_reminder": None,
@@ -31,13 +30,6 @@ class DatabaseLayer:
         )
 
     # ── METRICS & STATE ────────────────────────────────────────────────
-    @staticmethod
-    def update_bpm(bpm: int):
-        db.system_state.update_one(
-            {"_id": "current_state"},
-            {"$set": {"bpm": bpm, "last_bpm_time": time.time()}},
-            upsert=True
-        )
 
     @staticmethod
     def update_medicine_state(lid_open: bool = None, reminder_triggered: bool = None):
@@ -136,7 +128,7 @@ class DatabaseLayer:
         events = list(db.events.find({}, {"_id": 0}).sort("timestamp", -1).limit(limit))
         return events
 
-    # ── MEDICINE SCHEDULE ─────────────────────────────────────────────
+    # ── MEDICINE SCHEDULE (legacy simple list) ────────────────────────
     @staticmethod
     def save_schedule(schedule_list):
         db.system_state.update_one(
@@ -149,6 +141,96 @@ class DatabaseLayer:
     def get_schedule():
         state = db.system_state.find_one({"_id": "current_state"})
         return state.get("schedule", []) if state else []
+
+    # ── REPORTS — Scanned prescriptions/documents ─────────────────────
+    @staticmethod
+    def save_report(file_name: str, summary: str, medicines: list, scan_date: str):
+        """Save a scanned report with its summary and extracted medicines."""
+        doc = {
+            "fileName": file_name,
+            "scanDate": scan_date,
+            "summary": summary,
+            "medicines": medicines,   # list of { name, dosage, times[], purpose }
+            "createdAt": time.time(),
+        }
+        result = db.reports.insert_one(doc)
+        return str(result.inserted_id)
+
+    @staticmethod
+    def get_reports(limit: int = 20):
+        """Return the most recent scanned reports."""
+        docs = list(
+            db.reports.find({}, {"_id": 1, "fileName": 1, "scanDate": 1,
+                                 "summary": 1, "medicines": 1, "createdAt": 1})
+                      .sort("createdAt", -1)
+                      .limit(limit)
+        )
+        for d in docs:
+            d["id"] = str(d.pop("_id"))
+        return docs
+
+    # ── MEDICINES — Extracted from prescriptions ───────────────────────
+    @staticmethod
+    def save_medicines_from_scan(medicines: list, source: str = "scan"):
+        """
+        Upsert medicines extracted from a prescription scan.
+        medicines = [{ name, dosage, times, purpose }]
+        """
+        saved = []
+        for med in medicines:
+            name = med.get("name", "").strip()
+            if not name:
+                continue
+            doc = {
+                "name":    name,
+                "dosage":  med.get("dosage", ""),
+                "purpose": med.get("purpose", ""),
+                "times":   med.get("times", []),   # list of "HH:MM" strings
+                "source":  source,
+                "addedAt": time.time(),
+            }
+            db.medicines.update_one(
+                {"name": {"$regex": f"^{name}$", "$options": "i"}},
+                {"$set": doc},
+                upsert=True
+            )
+            saved.append(name)
+        return saved
+
+    @staticmethod
+    def get_all_medicines():
+        """Return all medicines in the database."""
+        docs = list(db.medicines.find({}, {"_id": 0}))
+        return docs
+
+    @staticmethod
+    def get_medicines_due_now(window_minutes: int = 2):
+        """
+        Return medicines whose scheduled time falls within ±window_minutes of now.
+        Used by the reminder cron to trigger voice alerts.
+        """
+        import datetime
+        now = datetime.datetime.now()
+        due = []
+        all_meds = list(db.medicines.find({}, {"_id": 0}))
+        for med in all_meds:
+            for t in med.get("times", []):
+                try:
+                    parts = t.split(":")
+                    med_hour, med_min = int(parts[0]), int(parts[1])
+                    diff_minutes = abs((now.hour * 60 + now.minute) - (med_hour * 60 + med_min))
+                    if diff_minutes <= window_minutes:
+                        due.append({**med, "scheduledTime": t})
+                        break
+                except (ValueError, IndexError):
+                    continue
+        return due
+
+    @staticmethod
+    def delete_medicine(name: str):
+        """Delete a medicine by name (case-insensitive)."""
+        result = db.medicines.delete_one({"name": {"$regex": f"^{name}$", "$options": "i"}})
+        return result.deleted_count > 0
 
     # ── COMBINED DASHBOARD STATE ──────────────────────────────────────
     @staticmethod
