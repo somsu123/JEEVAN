@@ -21,6 +21,15 @@ def update_heartrate():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/heartrate/history', methods=['GET'])
+def get_heartrate_history():
+    try:
+        limit = int(request.args.get('limit', 60))
+        history = DatabaseLayer.get_bpm_history(limit=limit)
+        return jsonify({"history": history}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 # --- Medicine Box Endpoint ---
 @app.route('/api/medicine', methods=['POST'])
 def update_medicine():
@@ -105,6 +114,18 @@ def get_events():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/events/log', methods=['POST'])
+def log_event():
+    try:
+        data = request.get_json()
+        event_type = data.get('type', 'info')
+        message = data.get('message', '')
+        severity = data.get('severity', 'info')
+        DatabaseLayer.log_event(event_type, message, severity)
+        return jsonify({"status": "success"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 # ─── REPORTS — Scanned prescriptions ────────────────────────────────────────
 
 @app.route('/api/reports', methods=['GET'])
@@ -126,8 +147,11 @@ def save_report():
         medicines  = data.get("medicines", [])   # list of { name, dosage, times, purpose }
         scan_date  = data.get("scanDate", "")
 
+        # Extract extra schema keys from data to save as structured fields
+        structured_data = {k: v for k, v in data.items() if k not in ["fileName", "summary", "medicines", "scanDate"]}
+
         # 1. Save the full report document
-        report_id = DatabaseLayer.save_report(file_name, summary, medicines, scan_date)
+        report_id = DatabaseLayer.save_report(file_name, summary, medicines, scan_date, structured_data)
 
         # 2. Upsert medicines into the medicines collection
         saved_names = []

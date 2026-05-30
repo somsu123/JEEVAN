@@ -41,7 +41,7 @@ const movementIcons: Record<string, React.ElementType> = {
 };
 
 // ─── Sparkline Component ───────────────────────────────────────────────────────
-function BPMSparkline({ history, currentBPM, fingerPresent }: { history: any[], currentBPM: number, fingerPresent: boolean }) {
+function BPMSparkline({ history, currentBPM, fingerPresent }: { history: any[], currentBPM: number | string, fingerPresent: boolean }) {
   if (!history || history.length === 0) {
     return <div className="h-16 flex items-center justify-center text-xs font-mono text-slate-500">Waiting for data...</div>;
   }
@@ -108,7 +108,7 @@ export default function LiveVitals({ vitals, hardwareOnline }: LiveVitalsProps) 
             </div>
             {vitals.fingerPresent ? (
                <Heart className="h-8 w-8 text-rose-400 animate-pulse ml-2" style={{
-                 animationDuration: vitals.heartRate > 0 ? `${(60 / vitals.heartRate).toFixed(2)}s` : '0s'
+                 animationDuration: typeof vitals.heartRate === 'number' && vitals.heartRate > 0 ? `${(60 / vitals.heartRate).toFixed(2)}s` : '0s'
                }} />
             ) : (
                <span className="text-[10px] text-amber-500 font-mono bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 ml-2">NO FINGER DETECTED</span>

@@ -4,14 +4,11 @@ echo ===================================================
 echo     Starting ElderCare Automation System
 echo ===================================================
 
-echo [1/3] Starting Central Backend API (MongoDB)...
+echo [1/2] Starting Central Backend API (MongoDB)...
 start "ElderCare: Backend" cmd /c "py -3.11 backend\app.py"
 timeout /t 4 /nobreak > nul
 
-echo [2/3] Starting AI Voice Assistant...
-start "ElderCare: AI Voice Assistant" cmd /c "py -3.11 ai_assistant\main_assistant.py"
-
-echo [3/3] Starting Dashboard (Vite + Express)...
+echo [2/2] Starting Dashboard (Vite + Express)...
 start "ElderCare: Dashboard" cmd /c "cd /d dashboard-v2 && npm run dev"
 
 echo ===================================================

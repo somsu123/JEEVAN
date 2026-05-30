@@ -25,7 +25,6 @@ const menuItems: { id: ViewType; name: string; icon: React.ElementType; badge?: 
   { id: 'live-vitals',      name: 'Live Vitals',        icon: Heart,          badge: 'LIVE', badgeType: 'ai' },
   { id: 'fall-alerts',      name: 'Fall Detection',     icon: ShieldAlert,    badge: 'alert', badgeType: 'alert' },
   { id: 'medicine',         name: 'Medicine Box',        icon: Pill,           badge: 'IoT', badgeType: 'ai' },
-  { id: 'voice-assistant',  name: 'AI Voice Assistant', icon: MessageCircleHeart, badge: 'AI', badgeType: 'ai' },
   { id: 'report-scanner',   name: 'Clinical Scanner',   icon: FileText,        badge: 'AI', badgeType: 'ai' },
 ];
 

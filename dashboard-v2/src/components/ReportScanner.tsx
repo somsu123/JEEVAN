@@ -10,11 +10,7 @@ import {
   Sparkles,
   RefreshCw,
   Eye,
-  FileSpreadsheet,
-  Pill,
-  Database,
-  Bell,
-  Trash2
+  FileSpreadsheet
 } from 'lucide-react';
 import { ScanResult } from '../types';
 
@@ -23,14 +19,12 @@ interface ReportScannerProps {
   scannedHistory: ScanResult[];
 }
 
-// Sample mock base64 image data strings so users can test immediately with preset reports
+// Preset reports for demonstration
 const SAMPLE_REPORTS = [
   {
     name: "Arthur_Blood_Lab_Result.png",
     type: "Blood Panel",
     mimeType: "image/jpeg",
-    // Small standard placeholder base64 to ensure it succeeds as a tiny valid jpeg / png structure
-    // This is a minimal transparent pixel base64 jpeg
     base64: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
     promptText: "Simulated Blood Panel Report: Hemoglobin 11.2 (Slightly low), Blood Urea Nitrogen (BUN) 28 (Slightly high), Blood Sugar 98 (Normal).",
     description: "Arthurs Blood Panel analysis (Anemia/Kidney marker evaluation)"
@@ -55,15 +49,20 @@ export default function ReportScanner({
   const [loadingMessage, setLoadingMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [activeReport, setActiveReport] = useState<ScanResult | null>(null);
-  const [extractedMedicines, setExtractedMedicines] = useState<Array<{
-    name: string; dosage: string; purpose: string; times: string[];
-  }>>([]);
-  const [savedToDb, setSavedToDb] = useState(false);
-  const [medicinesSaved, setMedicinesSaved] = useState<string[]>([]);
-  
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Parse markdown formatting beautifully to zero-dependency HTML elements with slate/emerald accents
+  // Helper function to extract **Bold** patterns and output as HTML nodes
+  const parseBoldText = (text: string) => {
+    const parts = text.split(/\*\*([^*]+)\*\*/g);
+    return parts.map((part, i) => {
+      if (i % 2 === 1) {
+        return <strong key={i} className="font-bold text-white text-emerald-400/95">{part}</strong>;
+      }
+      return part;
+    });
+  };
+
+  // Formats Markdown response into JSX elements
   const formatMarkdownToJSX = (text: string) => {
     if (!text) return null;
     
@@ -127,42 +126,12 @@ export default function ReportScanner({
     });
   };
 
-  // Helper function to extract **Bold** patterns and output as HTML nodes
-  const parseBoldText = (text: string) => {
-    const parts = text.split(/\*\*([^*]+)\*\*/g);
-    return parts.map((part, i) => {
-      // Every odd element is inside **bold**
-      if (i % 2 === 1) {
-        return <strong key={i} className="font-bold text-white text-emerald-400/95">{part}</strong>;
-      }
-      return part;
-    });
-  };
-
-  // File processing and base64 transmission
+  // Calls the backend endpoint to analyze the file
   const processDocumentAnalysis = async (fileBase64: string, nameOfFile: string, mime: string) => {
     setLoading(true);
     setErrorMessage(null);
-    setExtractedMedicines([]);
-    setSavedToDb(false);
-    setMedicinesSaved([]);
     setLoadingMessage("Calibrating secure gateway with clinical neural network...");
-
-    const messages = [
-      "Translating file format into digital diagnostic arrays...",
-      "Analyzing pathology data values against somatic standard protocols...",
-      "Extracting medicines and scheduled times from prescription...",
-      "Saving report and medicines to local database...",
-    ];
-
-    let msgIdx = 0;
-    const messageInterval = setInterval(() => {
-      if (msgIdx < messages.length) {
-        setLoadingMessage(messages[msgIdx]);
-        msgIdx++;
-      }
-    }, 1100);
-
+    
     try {
       const response = await fetch("/api/scan-report", {
         method: "POST",
@@ -175,8 +144,6 @@ export default function ReportScanner({
       });
 
       const data = await response.json();
-      clearInterval(messageInterval);
-
       if (!response.ok || !data.success) {
         throw new Error(data.error || "Gateway connection failed compiling Gemini extraction.");
       }
@@ -187,26 +154,16 @@ export default function ReportScanner({
         summary: data.summary
       };
 
-      // Store extracted medicines
-      if (Array.isArray(data.extractedMedicines)) {
-        setExtractedMedicines(data.extractedMedicines);
-      }
-      setSavedToDb(!!data.savedToDb);
-      setMedicinesSaved(data.medicinesSaved || []);
-
       onAddScanResult(newResult);
       setActiveReport(newResult);
       setLoading(false);
-
     } catch (err: any) {
-      clearInterval(messageInterval);
-      console.error(err);
       setErrorMessage(err?.message || "Internal transmission crash parsing documentation.");
       setLoading(false);
     }
   };
 
-  // Handle manual file drops & uploads
+  // Handles manual file drops & uploads
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -225,7 +182,7 @@ export default function ReportScanner({
       };
       reader.readAsDataURL(file);
     } else {
-      setFilePreview(null); // non-image (e.g., pdf or doc)
+      setFilePreview(null);
     }
 
     // Convert to base64 and process
@@ -252,12 +209,7 @@ export default function ReportScanner({
 
   // Trigger simulated scan using sample files
   const handleLoadPresetReport = (report: typeof SAMPLE_REPORTS[0]) => {
-    addLog(`Loading simulated diagnostic profile: ${report.name}...`);
     processDocumentAnalysis(report.base64, report.name, report.mimeType);
-  };
-
-  const addLog = (msg: string) => {
-    console.log(msg);
   };
 
   return (
@@ -284,7 +236,7 @@ export default function ReportScanner({
           <div 
             onDragOver={handleDragOver}
             onDrop={handleDrop}
-            className="p-6 bg-slate-905 border border-slate-800 rounded-2xl flex flex-col items-center justify-center text-center cursor-pointer hover:border-emerald-500/40 transition group relative py-10"
+            className="p-6 bg-slate-900 border border-slate-800 rounded-2xl flex flex-col items-center justify-center text-center cursor-pointer hover:border-emerald-500/40 transition group relative py-10"
             onClick={() => fileInputRef.current?.click()}
           >
             <input 
@@ -347,7 +299,7 @@ export default function ReportScanner({
 
           {/* Historic scanned files log list */}
           <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-5">
-            <h3 className="text-xs font-bold text-white uppercase tracking-widest font-mono border-b border-slate-805 pb-2 mb-3">
+            <h3 className="text-xs font-bold text-white uppercase tracking-widest font-mono border-b border-slate-850 pb-2 mb-3">
               Extraction Records Registry
             </h3>
 
@@ -388,7 +340,7 @@ export default function ReportScanner({
           
           {loading ? (
             /* Loading display card */
-            <div className="h-full min-h-[400px] bg-slate-905 border border-slate-800 rounded-2xl flex flex-col items-center justify-center text-center p-8 space-y-6">
+            <div className="h-full min-h-[400px] bg-slate-900 border border-slate-800 rounded-2xl flex flex-col items-center justify-center text-center p-8 space-y-6">
               
               <div className="relative">
                 <div className="h-16 w-16 rounded-full border-4 border-emerald-500/20 border-t-emerald-500 animate-spin" />
@@ -396,7 +348,7 @@ export default function ReportScanner({
               </div>
 
               <div className="space-y-2 max-w-md">
-                <h3 className="text-base font-bold text-white">Gemini Optical Extraction In Progress</h3>
+                <h3 className="text-base font-bold text-white">Optical Extraction In Progress</h3>
                 <p className="text-xs text-slate-400 font-mono animate-pulse">{loadingMessage}</p>
               </div>
 
@@ -406,7 +358,7 @@ export default function ReportScanner({
             </div>
           ) : errorMessage ? (
             /* Error banner */
-            <div className="bg-slate-905 border border-rose-950/40 rounded-2xl p-8 text-center min-h-[400px] flex flex-col items-center justify-center space-y-4">
+            <div className="bg-slate-900 border border-rose-950/40 rounded-2xl p-8 text-center min-h-[400px] flex flex-col items-center justify-center space-y-4">
               <div className="p-3 rounded-full bg-red-500/10 text-red-500 border border-red-500/30">
                 <AlertCircle className="h-8 w-8" />
               </div>
@@ -423,7 +375,7 @@ export default function ReportScanner({
             </div>
           ) : activeReport ? (
             /* Main markdown display container */
-            <div className="bg-slate-905 border border-slate-800 rounded-2xl overflow-hidden flex flex-col shadow-2xl animate-fadeIn">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden flex flex-col shadow-2xl animate-fadeIn">
               
               {/* Document identifier banner header */}
               <div className="p-4 bg-slate-950 border-b border-slate-850 flex justify-between items-center px-6">
@@ -438,20 +390,11 @@ export default function ReportScanner({
                 </div>
 
                 <div className="flex items-center gap-2">
-                  {/* MongoDB saved badge */}
-                  {savedToDb && (
-                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[10px] font-mono font-bold">
-                      <Database className="h-3 w-3" />
-                      SAVED TO DB
-                    </div>
-                  )}
                   <button
                     onClick={() => {
                       setActiveReport(null);
                       setSelectedFile(null);
                       setFilePreview(null);
-                      setExtractedMedicines([]);
-                      setSavedToDb(false);
                     }}
                     className="px-3 py-1.5 rounded-lg border border-slate-800 hover:bg-slate-900 font-mono text-[9px] text-slate-400 font-semibold"
                   >
@@ -459,63 +402,6 @@ export default function ReportScanner({
                   </button>
                 </div>
               </div>
-
-              {/* ── Extracted Medicines Table ── */}
-              {extractedMedicines.length > 0 && (
-                <div className="px-6 pt-5 pb-1">
-                  <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-xl p-4">
-                    <div className="flex items-center gap-2 mb-3">
-                      <Pill className="h-4 w-4 text-emerald-400" />
-                      <h4 className="text-xs font-bold text-emerald-400 uppercase tracking-wider font-mono">
-                        {extractedMedicines.length} Medicine{extractedMedicines.length > 1 ? 's' : ''} Extracted & Scheduled
-                      </h4>
-                      {savedToDb && (
-                        <span className="ml-auto text-[9px] font-mono text-emerald-500/70">✓ Reminders active</span>
-                      )}
-                    </div>
-
-                    <div className="space-y-2">
-                      {extractedMedicines.map((med, idx) => (
-                        <div key={idx} className="flex items-start justify-between p-3 bg-slate-950/60 rounded-lg border border-slate-800/80 gap-3">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-xs font-bold text-white">{med.name}</span>
-                              {med.dosage && (
-                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/10 border border-violet-500/20 text-violet-300 font-mono">
-                                  {med.dosage}
-                                </span>
-                              )}
-                            </div>
-                            {med.purpose && (
-                              <p className="text-[10px] text-slate-400 mt-0.5">{med.purpose}</p>
-                            )}
-                          </div>
-                          {/* Reminder times chips */}
-                          <div className="flex flex-wrap gap-1 shrink-0">
-                            {(med.times || []).map((t, ti) => {
-                              const [h, m] = t.split(':').map(Number);
-                              const period = h >= 12 ? 'PM' : 'AM';
-                              const h12 = h % 12 || 12;
-                              return (
-                                <div key={ti} className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-300 text-[9px] font-mono font-bold">
-                                  <Bell className="h-2.5 w-2.5" />
-                                  {h12}:{String(m).padStart(2,'0')} {period}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    {savedToDb && (
-                      <p className="text-[10px] text-slate-500 mt-3 font-mono">
-                        ✓ Saved to MongoDB · Voice assistant will remind at scheduled times
-                      </p>
-                    )}
-                  </div>
-                </div>
-              )}
 
               {/* Renders the markdown format */}
               <div className="p-6 md:p-8 space-y-4 overflow-y-auto max-h-[600px] text-left">
@@ -532,7 +418,7 @@ export default function ReportScanner({
             </div>
           ) : (
             /* Empty welcome placeholder banner */
-            <div className="bg-slate-905 border-2 border-dashed border-slate-800/80 rounded-2xl p-8 text-center min-h-[400px] flex flex-col items-center justify-center space-y-3">
+            <div className="bg-slate-900 border-2 border-dashed border-slate-800/80 rounded-2xl p-8 text-center min-h-[400px] flex flex-col items-center justify-center space-y-3">
               <FileText className="h-12 w-12 text-slate-600 animate-pulse" />
               <h3 className="text-base font-bold text-slate-300">Active Scan Readout Pane</h3>
               <p className="text-xs text-slate-500 max-w-sm leading-relaxed">

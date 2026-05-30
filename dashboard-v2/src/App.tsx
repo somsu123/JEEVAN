@@ -12,7 +12,6 @@ import ReportScanner from './components/ReportScanner';
 import LiveVitals from './components/LiveVitals';
 import FallAlerts from './components/FallAlerts';
 import MedicineBox from './components/MedicineBox';
-import VoiceAssistant from './components/VoiceAssistant';
 import {
   VitalState,
   ViewType,
@@ -25,7 +24,7 @@ import {
 
 // ─── Default state factories ──────────────────────────────────────────────────
 const makeDefaultVitals = (): VitalState => ({
-  heartRate: 72,
+  heartRate: '--',
   heartRateHistory: [],
   movementState: 'Resting',
   bloodLevelSeconds: 15,
@@ -92,9 +91,7 @@ export default function App() {
   });
 
 
-  // Voice assistant hardware status
-  const [voiceAssistantOnline, setVoiceAssistantOnline] = useState(false);
-  const [voiceAssistantState, setVoiceAssistantState]   = useState<string>('IDLE');
+
 
   // Medicine reminder alert (from server cron)
   const [medicineReminder, setMedicineReminder] = useState<{
@@ -174,6 +171,74 @@ export default function App() {
       .catch(() => {});
   }, []);
 
+  // ── Fetch dynamic medication schedule from MongoDB Atlas on mount ────────────
+  useEffect(() => {
+    fetch('/api/medication/schedule')
+      .then(r => r.json())
+      .then(data => {
+        if (data && Array.isArray(data.doses)) {
+          const updated: MedicineSlot[] = data.doses.map((d: any) => ({
+            id: `slot-${d.boxNumber}-${d.time}`,
+            slotNumber: d.boxNumber,
+            medicineName: d.medicine,
+            dosage: d.dosage,
+            scheduledTime: d.time,
+            taken: d.taken || false,
+            presenceConfirmed: d.presenceConfirmed || false,
+            touchVerified: d.touchVerified || false,
+            notes: d.notes || 'Persisted dynamic schedule',
+          }));
+          setMedicineSlots(updated);
+        }
+      })
+      .catch((err) => console.error("Failed to load database medicine schedule:", err));
+  }, []);
+
+  // ── Fetch saved clinical scanner reports from MongoDB Atlas on mount ─────────
+  useEffect(() => {
+    fetch('/api/saved-reports')
+      .then(r => r.json())
+      .then(data => {
+        if (data && Array.isArray(data.reports)) {
+          const formatted: ScanResult[] = data.reports.map((r: any) => ({
+            fileName: r.fileName || 'unnamed document',
+            timestamp: r.scanDate || new Date(r.createdAt * 1000).toLocaleString() || '',
+            summary: r.summary || ''
+          }));
+          
+          setScannedHistory(prev => {
+            const merged = [...formatted];
+            DEFAULT_SCAN_HISTORY.forEach(def => {
+              if (!merged.some(m => m.fileName === def.fileName)) {
+                merged.push(def);
+              }
+            });
+            return merged;
+          });
+        }
+      })
+      .catch((err) => console.error("Failed to load saved reports from DB:", err));
+  }, []);
+
+  // ── Fetch historical BPM telemetry logs from MongoDB Atlas on mount ─────────
+  useEffect(() => {
+    fetch('/api/heartrate/history?limit=60')
+      .then(r => r.json())
+      .then(data => {
+        if (data && Array.isArray(data.history)) {
+          const formattedHistory = data.history.map((h: any) => ({
+            time: new Date(h.timestamp * 1000).toISOString(),
+            value: h.bpm
+          }));
+          setVitals(prev => ({
+            ...prev,
+            heartRateHistory: formattedHistory
+          }));
+        }
+      })
+      .catch((err) => console.error("Failed to load BPM history from DB:", err));
+  }, []);
+
   // ── SSE listener for real-time events ────────────────────────────────────────
   useEffect(() => {
     let evtSource: EventSource | null = null;
@@ -237,12 +302,7 @@ export default function App() {
         setMedicineSlots(updated);
       });
 
-      // ── Voice Assistant (ESP32-S3) SSE events ───────────────────────────────
-      evtSource.addEventListener('voice_assistant_heartbeat', (e) => {
-        const data = JSON.parse(e.data) as { online: boolean; state: string };
-        setVoiceAssistantOnline(true);
-        setVoiceAssistantState(data.state ?? 'IDLE');
-      });
+
 
       // ── Real-time BPM from Bracelet SSE event ───────────────────────────────
       evtSource.addEventListener('vitals_update', (e) => {
@@ -255,7 +315,7 @@ export default function App() {
           if (newHistory.length > 60) newHistory.shift(); // keep last 60 points
           return {
             ...prev,
-            heartRate: data.bpm,
+            heartRate: data.bpm > 0 ? data.bpm : '--',
             fingerPresent: data.fingerPresent ?? false,
             heartRateHistory: newHistory,
             lastUpdated: now.toLocaleTimeString('en-US', { hour12: false }),
@@ -263,15 +323,24 @@ export default function App() {
         });
       });
 
-      evtSource.addEventListener('voice_assistant_offline', () => {
-        setVoiceAssistantOnline(false);
-        setVoiceAssistantState('OFFLINE');
+      evtSource.addEventListener('bracelet_heartbeat', (e) => {
+        const data = JSON.parse(e.data) as { online: boolean; bpm?: number; fingerPresent?: boolean };
+        setVitals(prev => ({
+          ...prev,
+          heartRate: data.online ? (data.bpm && data.bpm > 0 ? data.bpm : prev.heartRate) : '--',
+          fingerPresent: data.online ? (data.fingerPresent ?? false) : false,
+        }));
       });
 
-      evtSource.addEventListener('voice_assistant_query', (e) => {
-        const data = JSON.parse(e.data) as { reply: string };
-        console.log('[VA] Query complete:', data.reply?.substring(0, 60));
+      evtSource.addEventListener('bracelet_offline', () => {
+        setVitals(prev => ({
+          ...prev,
+          heartRate: '--',
+          fingerPresent: false,
+        }));
       });
+
+
 
       // ── Medicine reminder from server cron ──────────────────────────────────
       evtSource.addEventListener('medicine_reminder', (e) => {
@@ -307,12 +376,7 @@ export default function App() {
         });
       });
 
-      // voice_speak: log when server requests ESP32 to speak
-      evtSource.addEventListener('voice_speak', (e) => {
-        const data = JSON.parse(e.data) as { text: string; priority: string };
-        console.log('[SPEAK]', data.text);
-        // ESP32-S3 firmware listens to this same SSE and speaks it on the speaker
-      });
+
 
     } catch { /* SSE not available in some envs */ }
 
@@ -448,8 +512,7 @@ export default function App() {
             onUpdateSlots={handleUpdateSlots}
           />
         );
-      case 'voice-assistant':
-        return <VoiceAssistant scannedHistory={scannedHistory} />;
+
       case 'report-scanner':
         return (
           <ReportScanner
@@ -564,7 +627,7 @@ export default function App() {
                     {medicineReminder.dosage && <span className="text-amber-300 font-normal"> · {medicineReminder.dosage}</span>}
                   </p>
                   <p className="text-xs text-slate-300 mt-1 leading-relaxed">{medicineReminder.message}</p>
-                  <p className="text-[10px] text-amber-500/70 font-mono mt-1">Scheduled: {medicineReminder.time} · Via voice assistant</p>
+                  <p className="text-[10px] text-amber-500/70 font-mono mt-1">Scheduled: {medicineReminder.time}</p>
                 </div>
                 <button
                   onClick={() => setMedicineReminder(null)}

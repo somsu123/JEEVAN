@@ -1,8 +1,34 @@
 from pymongo import MongoClient
 import time
+import os
+import re
 
-# Connect to local MongoDB
-client = MongoClient("mongodb://localhost:27017")
+def get_mongodb_uri():
+    # 1. Try to read from dashboard-v2/.env, .env, or parent folder's .env
+    for path in ["dashboard-v2/.env", ".env", "../.env"]:
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        match = re.match(r"^\s*MONGODB_URI\s*=\s*[\"']?(.*?)[\"']?\s*$", line)
+                        if match:
+                            val = match.group(1).strip()
+                            if val:
+                                return val
+            except Exception as e:
+                print(f"[WARN] Failed to read environment file at {path}: {e}")
+                
+    # 2. Try os.environ
+    env_uri = os.environ.get("MONGODB_URI")
+    if env_uri:
+        return env_uri
+        
+    # 3. Default to local host
+    return "mongodb://localhost:27017"
+
+# Connect to MongoDB using the URI loaded from the .env file
+client_uri = get_mongodb_uri()
+client = MongoClient(client_uri)
 db = client["eldercare_db"]
 
 class DatabaseLayer:
@@ -45,6 +71,14 @@ class DatabaseLayer:
             {"$set": {"bpm": bpm, "last_bpm_time": time.time()}},
             upsert=True
         )
+
+    @staticmethod
+    def get_bpm_history(limit: int = 60):
+        """Retrieve recent BPM readings from the database."""
+        logs = list(db.bpm_logs.find({}, {"_id": 0}).sort("timestamp", -1).limit(limit))
+        # Return in ascending order of timestamp so it plots from left to right
+        logs.reverse()
+        return logs
 
     @staticmethod
     def update_medicine_state(lid_open: bool = None, reminder_triggered: bool = None):
@@ -159,7 +193,7 @@ class DatabaseLayer:
 
     # ── REPORTS — Scanned prescriptions/documents ─────────────────────
     @staticmethod
-    def save_report(file_name: str, summary: str, medicines: list, scan_date: str):
+    def save_report(file_name: str, summary: str, medicines: list, scan_date: str, structured_data: dict = None):
         """Save a scanned report with its summary and extracted medicines."""
         doc = {
             "fileName": file_name,
@@ -168,6 +202,8 @@ class DatabaseLayer:
             "medicines": medicines,   # list of { name, dosage, times[], purpose }
             "createdAt": time.time(),
         }
+        if structured_data:
+            doc.update(structured_data)
         result = db.reports.insert_one(doc)
         return str(result.inserted_id)
 

@@ -185,25 +185,23 @@ export default function Overview({
             <Sparkles className="h-3.5 w-3.5" /> Scan Records
           </button>
         </div>
-      </div>
-
-      {/* SECTION: EXTRACTED ANALYTICAL FIGURES FROM DOCUMENTS */}
+      </div>      {/* SECTION: EXTRACTED ANALYTICAL FIGURES FROM DOCUMENTS */}
       <div className="space-y-3">
-        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest font-mono">Synthesized Patient Analytics Summary (Extracted from Files)</h3>
+        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest font-mono">Synthesized Patient Analytics Summary</h3>
         
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="w-full max-w-sm">
           
           {/* Heart Rate Metric */}
           <div className="bg-slate-900/50 p-5 rounded-2xl border border-slate-800 hover:border-emerald-500/20 transition-all flex flex-col justify-between h-40">
             <div>
               <div className="flex justify-between items-start">
                 <span className="text-[10px] text-slate-500 font-mono tracking-wider block">RESTING HEART RHYMTH</span>
-                <Heart className={`h-4 w-4 ${vitals && vitals.heartRate > 0 && vitals.fingerPresent ? "text-rose-400 animate-pulse" : "text-emerald-400"}`} />
+                <Heart className={`h-4 w-4 ${vitals && typeof vitals.heartRate === 'number' && vitals.heartRate > 0 && vitals.fingerPresent ? "text-rose-400 animate-pulse" : "text-emerald-400"}`} />
               </div>
               <span className="text-3xl font-black text-white block mt-2 tracking-tight">
-                {vitals && vitals.heartRate > 0 ? vitals.heartRate : metrics.heartRate} <span className="text-xs font-medium text-slate-400">BPM</span>
+                {vitals ? vitals.heartRate : "--"} <span className="text-xs font-medium text-slate-400">BPM</span>
               </span>
-              {vitals && vitals.heartRate > 0 && vitals.fingerPresent ? (
+              {vitals && typeof vitals.heartRate === 'number' && vitals.heartRate > 0 && vitals.fingerPresent ? (
                 <span className="text-[10px] text-rose-400 font-mono mt-0.5 block flex items-center gap-1">
                   <span className="relative flex h-2 w-2 mr-1">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
@@ -219,70 +217,7 @@ export default function Overview({
             </div>
             <div className="border-t border-slate-800/60 pt-2 mt-2">
               <span className="text-[9px] text-slate-500 font-mono block truncate">
-                Source: {vitals && vitals.heartRate > 0 && vitals.fingerPresent ? "Real-time ESP32 Bracelet" : (metrics.hrSource ? metrics.hrSource : "Unspecified EKG")}
-              </span>
-            </div>
-          </div>
-
-          {/* Blood Pressure Metric */}
-          <div className="bg-slate-900/50 p-5 rounded-2xl border border-slate-800 hover:border-emerald-500/20 transition-all flex flex-col justify-between h-40">
-            <div>
-              <div className="flex justify-between items-start">
-                <span className="text-[10px] text-slate-500 font-mono tracking-wider block">BLOOD PRESSURE STATUS</span>
-                <Activity className="h-4 w-4 text-emerald-400" />
-              </div>
-              <span className="text-3xl font-black text-white block mt-2 tracking-tight">
-                {metrics.bp} <span className="text-xs font-medium text-slate-400">mmHg</span>
-              </span>
-              <span className="text-[10px] text-amber-400 font-mono mt-0.5 block flex items-center gap-1">
-                Ortostatic pressure check
-              </span>
-            </div>
-            <div className="border-t border-slate-800/60 pt-2 mt-2">
-              <span className="text-[9px] text-slate-500 font-mono block truncate">
-                Source: {metrics.bpSource ? metrics.bpSource : "Unspecified Note"}
-              </span>
-            </div>
-          </div>
-
-          {/* Hemoglobin Metric */}
-          <div className="bg-slate-900/50 p-5 rounded-2xl border border-slate-800 hover:border-emerald-500/20 transition-all flex flex-col justify-between h-40">
-            <div>
-              <div className="flex justify-between items-start">
-                <span className="text-[10px] text-slate-500 font-mono tracking-wider block">HEMOGLOBIN SCORE</span>
-                <Droplet className="h-4 w-4 text-teal-400" />
-              </div>
-              <span className="text-3xl font-black text-white block mt-2 tracking-tight">
-                {metrics.hemoglobin} <span className="text-xs font-medium text-slate-400">g/dL</span>
-              </span>
-              <span className="text-[10px] text-rose-400 font-mono mt-0.5 block flex items-center gap-1">
-                Anemia indicator: Low
-              </span>
-            </div>
-            <div className="border-t border-slate-800/60 pt-2 mt-2">
-              <span className="text-[9px] text-slate-505 font-mono block truncate">
-                Source: {metrics.hbSource ? metrics.hbSource : "Unspecified Lab"}
-              </span>
-            </div>
-          </div>
-
-          {/* Renal GFR Metric */}
-          <div className="bg-slate-900/50 p-5 rounded-2xl border border-slate-800 hover:border-emerald-500/20 transition-all flex flex-col justify-between h-40">
-            <div>
-              <div className="flex justify-between items-start">
-                <span className="text-[10px] text-slate-500 font-mono tracking-wider block">KIDNEY FILTRATION GFR</span>
-                <Layers className="h-4 w-4 text-violet-400" />
-              </div>
-              <span className="text-3xl font-black text-white block mt-2 tracking-tight">
-                {metrics.gfr} <span className="text-xs font-medium text-slate-400">mL/min</span>
-              </span>
-              <span className="text-[10px] text-amber-500 font-mono mt-0.5 block flex items-center gap-1">
-                Stage 3a filtration rate
-              </span>
-            </div>
-            <div className="border-t border-slate-800/60 pt-2 mt-2">
-              <span className="text-[9px] text-slate-500 font-mono block truncate">
-                Source: {metrics.gfrSource ? metrics.gfrSource : "Unspecified Lab"}
+                Source: {vitals && typeof vitals.heartRate === 'number' && vitals.heartRate > 0 ? "Real-time ESP32 Bracelet" : "No Device Connected"}
               </span>
             </div>
           </div>

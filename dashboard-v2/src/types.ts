@@ -8,7 +8,6 @@ export type ViewType =
   | 'live-vitals'
   | 'fall-alerts'
   | 'medicine'
-  | 'voice-assistant'
   | 'report-scanner';
 
 // ─── Live Vitals ─────────────────────────────────────────────────────────────
@@ -18,7 +17,7 @@ export interface VitalReading {
 }
 
 export interface VitalState {
-  heartRate: number;
+  heartRate: number | string;
   heartRateHistory: VitalReading[];
   movementState: 'Resting' | 'Gentle Walk' | 'Seated Activity' | 'Sleeping';
   bloodLevelSeconds: number;
@@ -69,16 +68,7 @@ export interface MedicineSlot {
   notes?: string;
 }
 
-// ─── Voice Assistant ─────────────────────────────────────────────────────────
-export type VoiceMessageRole = 'user' | 'assistant';
 
-export interface VoiceMessage {
-  id: string;
-  role: VoiceMessageRole;
-  content: string;
-  timestamp: string;
-  isLoading?: boolean;
-}
 
 // ─── Report Scanner ──────────────────────────────────────────────────────────
 export interface ScanResult {

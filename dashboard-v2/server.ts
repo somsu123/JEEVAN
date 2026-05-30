@@ -15,8 +15,7 @@ const FLASK_URL = process.env.FLASK_BACKEND_URL || "http://localhost:5000";
 
 app.use(express.json({ limit: "15mb" }));
 app.use(express.urlencoded({ extended: true, limit: "15mb" }));
-// Raw body parser for WAV audio uploads from ESP32-S3
-app.use("/api/voice-assistant/audio", express.raw({ type: "audio/wav", limit: "2mb" }));
+
 
 
 // CORS for development
@@ -27,8 +26,31 @@ app.use((_req, res, next) => {
   next();
 });
 
+// ─── Helper to load and clean API Key ─────────────────────────────────────────
+function getCleanApiKey(): string | undefined {
+  try {
+    const envPath = path.join(process.cwd(), ".env");
+    if (fs.existsSync(envPath)) {
+      const envContent = fs.readFileSync(envPath, "utf-8");
+      const match = envContent.match(/^GEMINI_API_KEY\s*=\s*["']?([^"'\r\n]+)["']?/m);
+      if (match && match[1]) {
+        const fileKey = match[1].trim();
+        if (fileKey && fileKey !== "your_gemini_api_key_here") {
+          return fileKey;
+        }
+      }
+    }
+  } catch (e) {
+    console.error("[WARN] Failed to read .env file directly for key:", e);
+  }
+
+  const envKey = process.env.GEMINI_API_KEY;
+  if (!envKey || envKey === "your_gemini_api_key_here") return undefined;
+  return envKey.replace(/^["']|["']$/g, "").trim();
+}
+
 // ─── Gemini SDK ───────────────────────────────────────────────────────────────
-const apiKey = process.env.GEMINI_API_KEY;
+const apiKey = getCleanApiKey();
 let ai: GoogleGenAI | null = null;
 
 if (apiKey) {
@@ -36,6 +58,7 @@ if (apiKey) {
     apiKey,
     httpOptions: { headers: { "User-Agent": "eldercare-dashboard-v2" } },
   });
+  console.log("[INFO] Gemini AI successfully initialized with API key from .env");
 } else {
   console.warn("[WARN] GEMINI_API_KEY not set — AI features will be disabled.");
 }
@@ -126,6 +149,17 @@ app.get("/api/vitals", async (_req, res) => {
       isFall: false, fallCount: 0, fallsToday: 0,
       _offline: true,
     });
+  }
+});
+
+// GET /api/heartrate/history — proxy to Flask to get historical BPM data from MongoDB
+app.get("/api/heartrate/history", async (req, res) => {
+  try {
+    const limit = req.query.limit || "60";
+    const data = await flaskGet(`/api/heartrate/history?limit=${limit}`);
+    return res.json(data);
+  } catch {
+    return res.json({ history: [] });
   }
 });
 
@@ -230,126 +264,7 @@ app.get("/api/bracelet/status", (_req, res) => {
 });
 
 
-// ─────────────────────────────────────────────────────────────────────────────
-// VOICE ASSISTANT — ESP32-S3 Hardware Integration
-// ─────────────────────────────────────────────────────────────────────────────
 
-// In-memory voice assistant status
-const vaStatus = {
-  online:     false,
-  lastSeen:   "",
-  state:      "IDLE",
-  deviceId:   "voice-assistant-01",
-  uptime:     0,
-  queryCount: 0,
-};
-
-// Auto-offline if no heartbeat for 30s
-setInterval(() => {
-  if (vaStatus.lastSeen) {
-    const age = Date.now() - new Date(vaStatus.lastSeen).getTime();
-    if (age > 30_000 && vaStatus.online) {
-      vaStatus.online = false;
-      broadcastSSE("voice_assistant_offline", { deviceId: vaStatus.deviceId });
-      console.log("[VA] Voice assistant went offline");
-    }
-  }
-}, 15_000);
-
-// POST /api/voice-assistant/audio
-// Receives raw WAV from ESP32-S3, sends to Gemini, returns { reply }
-app.post("/api/voice-assistant/audio", async (req, res) => {
-  try {
-    if (!ai) return res.status(500).json({ error: "Gemini AI not configured. Set GEMINI_API_KEY in .env" });
-
-    // req.body is a Buffer thanks to express.raw() middleware above
-    const wavBuffer: Buffer = req.body as Buffer;
-
-    if (!wavBuffer || wavBuffer.length < 100) {
-      return res.status(400).json({ error: "Audio too short or missing" });
-    }
-
-    console.log(`[VA] Received ${wavBuffer.length} bytes WAV audio`);
-
-    // Base64 encode for Gemini inline audio
-    const audioBase64 = wavBuffer.toString("base64");
-
-    const systemPrompt = `You are MITRA, a warm, patient AI health companion for elderly patients.
-Keep responses SHORT (2-3 sentences) since they will be spoken aloud.
-Do NOT use markdown, bullet points, or special characters.
-Speak naturally, like a caring family member.
-If you hear nothing clear, kindly ask them to speak again.
-Today: ${new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}
-Time: ${new Date().toLocaleTimeString("en-US", { hour12: true })}`;
-
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: {
-        parts: [
-          { inlineData: { mimeType: "audio/wav", data: audioBase64 } },
-          { text: "Please listen to this audio carefully and respond helpfully as MITRA." },
-        ],
-      },
-      config: { systemInstruction: systemPrompt },
-    });
-
-    const reply = response.text?.trim() || "I am sorry, I could not understand. Please try again.";
-    console.log(`[VA] Gemini reply: ${reply.substring(0, 80)}`);
-
-    vaStatus.queryCount++;
-    broadcastSSE("voice_assistant_query", { reply: reply.substring(0, 120), deviceId: vaStatus.deviceId });
-
-    return res.json({ reply });
-  } catch (err: any) {
-    console.error("[VA] Audio error:", err?.message);
-    return res.status(500).json({ error: err?.message || "Audio processing failed" });
-  }
-});
-
-
-// POST /api/voice-assistant/heartbeat
-app.post("/api/voice-assistant/heartbeat", (req, res) => {
-  const { deviceId, state, uptime } = req.body as {
-    deviceId?: string;
-    state?: string;
-    uptime?: number;
-  };
-  vaStatus.online   = true;
-  vaStatus.lastSeen = new Date().toISOString();
-  vaStatus.state    = state ?? "IDLE";
-  vaStatus.uptime   = uptime ?? 0;
-  vaStatus.deviceId = deviceId ?? "voice-assistant-01";
-  broadcastSSE("voice_assistant_heartbeat", vaStatus);
-  return res.json({ status: "ok" });
-});
-
-// POST /api/voice-assistant/event
-app.post("/api/voice-assistant/event", (req, res) => {
-  const { event, deviceId } = req.body as { event?: string; deviceId?: string };
-  broadcastSSE("voice_assistant_event", { event, deviceId, ts: new Date().toISOString() });
-  console.log(`[VA] Event: ${event} from ${deviceId}`);
-  return res.json({ received: true });
-});
-
-// GET /api/voice-assistant/status
-app.get("/api/voice-assistant/status", (_req, res) => {
-  return res.json(vaStatus);
-});
-
-// ── Pending-Speak Queue — ESP32-S3 polls this to get medicine reminder text ──
-// ESP32 cannot receive SSE. Instead it polls this endpoint every 30s.
-// When a medicine reminder fires, the text is queued here.
-const pendingSpeakQueue: Array<{ text: string; priority: string; queuedAt: string }> = [];
-
-// GET /api/voice-assistant/pending-speak — ESP32 polls this, gets next queued message
-app.get("/api/voice-assistant/pending-speak", (_req, res) => {
-  if (pendingSpeakQueue.length === 0) {
-    return res.json({ hasPending: false });
-  }
-  const next = pendingSpeakQueue.shift()!;  // pop oldest first
-  console.log(`[VA] Delivering queued speak: ${next.text.substring(0, 60)}`);
-  return res.json({ hasPending: true, text: next.text, priority: next.priority });
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // FALL ALERTS — Gmail + SMS notifications
@@ -672,11 +587,7 @@ setInterval(async () => {
         message:  speakText,
       });
 
-      // 2. Send speak command: SSE (for dashboard) + queue (for ESP32 polling)
-      broadcastSSE("voice_speak", { text: speakText, priority: "high" });
-      if (pendingSpeakQueue.length < 5) {  // cap queue size
-        pendingSpeakQueue.push({ text: speakText, priority: "high", queuedAt: now.toISOString() });
-      }
+
 
       console.log(`[REMINDER] ${speakText}`);
     }
@@ -688,109 +599,183 @@ setInterval(async () => {
 app.post("/api/scan-report", async (req, res) => {
   try {
     const { fileData, mimeType, fileName } = req.body;
-    if (!fileData) return res.status(400).json({ error: "Missing fileData" });
-    if (!ai) return res.status(500).json({ error: "Gemini AI not initialized. Configure GEMINI_API_KEY." });
 
-    const filePart = { inlineData: { mimeType: mimeType || "image/jpeg", data: fileData } };
+    if (!fileData) {
+      return res.status(400).json({ error: "Missing fileData (base64 string)" });
+    }
 
-    // ── Call 1: Patient-friendly summary (existing behaviour) ──────────────
-    const summaryPrompt = {
-      text: `You are an expert senior geriatric healthcare consultant and medical analyst named AI_CARE.
-Analyze this clinical report or medical document carefully.
-Provide a highly empathetic, clear, patient-friendly summary for an elderly patient.
-Format the output with rich Markdown structure, including:
-1. **Document Overview** (with file name: ${fileName || "unnamed document"})
-2. **Key Metrics & Readings** (highlighting any abnormal or concerning status)
-3. **Action Items & Lifestyle Recommendations** (written in highly encouraging and reassuring language)
-4. **Questions to Ask your Doctor** (so the patient is empowered for their next care visit)
+    // Dynamically load the API key from .env directly to pick up updates without restarting
+    dotenv.config({ override: true });
+    const currentApiKey = getCleanApiKey();
+    const activeAi = currentApiKey
+      ? new GoogleGenAI({ apiKey: currentApiKey, httpOptions: { headers: { "User-Agent": "eldercare-dashboard-v2" } } })
+      : null;
 
-Keep medical jargon explained in plain, humble, reassuring terminology.
-If there is nothing critical, emphasize that they are doing wonderfully.
-Always add a disclaimer at the bottom that this is an AI-assisted analysis and they should consult their personal physician.`,
+    if (!activeAi) {
+      return res.status(500).json({
+        error: "Gemini AI is not initialized. Please verify your GEMINI_API_KEY is configured in the Secrets manager.",
+      });
+    }
+
+    // Prepare multi-part content matching @google/genai SDK guidelines
+    const filePart = {
+      inlineData: {
+        mimeType: mimeType || "image/jpeg",
+        data: fileData,
+      },
     };
 
-    const summaryResponse = await ai.models.generateContent({
+    const textPart = {
+      text: `You are an expert senior geriatric healthcare consultant and medical analyst named AI_CARE. 
+      Analyze this clinical report or medical document carefully. 
+      Extract structured data matching the schema perfectly. Keep explanations patient-friendly and geriatric care-focused.`,
+    };
+
+    const response = await activeAi.models.generateContent({
       model: "gemini-2.5-flash",
-      contents: { parts: [filePart, summaryPrompt] },
+      contents: { parts: [filePart, textPart] },
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: "OBJECT",
+          properties: {
+            overview: { type: "STRING", description: "Brief patient-friendly overview of the clinical report and what was analyzed." },
+            metrics: {
+              type: "ARRAY",
+              description: "Extracted key readings or laboratory values with patient-focused status and explanation.",
+              items: {
+                type: "OBJECT",
+                properties: {
+                  name: { type: "STRING", description: "Name of the metric or test, e.g. BP, Hemoglobin, Heart Rate, GFR." },
+                  value: { type: "STRING", description: "The reading value, e.g. 138/84 mmHg, 11.2 g/dL." },
+                  status: { type: "STRING", description: "Geriatric clinical status, e.g. NORMAL, ELEVATED, CONCERNING." },
+                  interpretation: { type: "STRING", description: "Simple, highly reassuring explanation of what this reading means for the patient." }
+                },
+                required: ["name", "value", "status", "interpretation"]
+              }
+            },
+            actions: {
+              type: "ARRAY",
+              description: "List of reassuring action steps and lifestyle tips for the elderly individual.",
+              items: { type: "STRING" }
+            },
+            doctorQuestions: {
+              type: "ARRAY",
+              description: "Practical questions for the patient to bring up with their doctor during their next visit.",
+              items: { type: "STRING" }
+            },
+            disclaimer: { type: "STRING", description: "Empathetic medical disclaimer advising consulting their physician." },
+            medicines: {
+              type: "ARRAY",
+              description: "Extracted daily medications listed in the prescription or note. Extract all of them carefully.",
+              items: {
+                type: "OBJECT",
+                properties: {
+                  name: { type: "STRING", description: "Exact name of the medicine, e.g. Lisinopril, Metformin." },
+                  dosage: { type: "STRING", description: "Dosage detail, e.g. 10mg, 500mg, or leave blank if unspecified." },
+                  times: {
+                    type: "ARRAY",
+                    description: "Specific scheduled times in 24h format HH:MM (e.g. ['08:00', '20:00']). If times are not explicitly specified, map or extrapolate logical daily timings based on instructions (e.g., 'morning' -> ['08:00'], 'twice daily' -> ['08:00', '20:00']). Default to morning ['08:00'] if unspecified.",
+                    items: { type: "STRING" }
+                  },
+                  purpose: { type: "STRING", description: "Brief patient-friendly description of the clinical purpose." }
+                },
+                required: ["name", "times"]
+              }
+            }
+          },
+          required: ["overview", "metrics", "actions", "doctorQuestions", "disclaimer", "medicines"]
+        }
+      }
     });
-    const summary = summaryResponse.text || "No summary generated.";
 
-    // ── Call 2: Medicine extraction (structured JSON) ──────────────────────
-    const extractPrompt = {
-      text: `Look at this prescription or medical document carefully.
-Extract ALL medicines prescribed. For each medicine return a JSON array.
-Each item must have:
-  - "name": medicine name (string, e.g. "Lisinopril")
-  - "dosage": strength/dose (string, e.g. "10mg" or "1 tablet")
-  - "purpose": what it treats (string, e.g. "Blood pressure")
-  - "times": array of 24h times when to take it (e.g. ["08:00"] or ["08:00","20:00"])
-    Convert "morning" → "08:00", "afternoon/lunch" → "13:00", "evening" → "18:00", "night/bedtime" → "21:00"
-    If once daily and time not specified → ["08:00"]
-    If twice daily → ["08:00","20:00"]
-    If three times daily → ["08:00","13:00","20:00"]
+    const responseText = response.text;
+    if (!responseText) {
+      return res.status(500).json({ error: "Failed to generate structured scanner output from Gemini." });
+    }
 
-Return ONLY a valid JSON array. No markdown, no explanation, no code fences.
-If no medicines are found, return an empty array: []
-
-Example output:
-[{"name":"Metformin","dosage":"500mg","purpose":"Blood sugar control","times":["08:00","20:00"]},{"name":"Aspirin","dosage":"75mg","purpose":"Heart protection","times":["08:00"]}]`,
-    };
-
-    let extractedMedicines: Array<{ name: string; dosage: string; purpose: string; times: string[] }> = [];
+    // Parse the structured schema from Gemini
+    let schemaData;
     try {
-      const extractResponse = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: { parts: [filePart, extractPrompt] },
-      });
-      let raw = extractResponse.text?.trim() || "[]";
-      // Strip markdown fences if Gemini adds them
-      raw = raw.replace(/^```[a-z]*\n?/i, "").replace(/```$/,"").trim();
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) extractedMedicines = parsed;
-    } catch (e) {
-      console.warn("[SCAN] Medicine extraction JSON parse failed:", e);
+      schemaData = JSON.parse(responseText);
+    } catch (parseErr) {
+      console.warn("[WARN] Gemini did not return valid JSON. Falling back to plain text parsing.", parseErr);
+      schemaData = {
+        overview: responseText,
+        metrics: [],
+        actions: [],
+        doctorQuestions: [],
+        disclaimer: "Disclaimer: Always consult with a doctor.",
+        medicines: []
+      };
     }
 
-    // ── Save to MongoDB via Flask ──────────────────────────────────────────
-    const scanDate = new Date().toLocaleString("en-IN", {
-      dateStyle: "medium", timeStyle: "short", hour12: true,
-    });
+    // Construct a beautiful markdown summary out of the structured schema fields for backward-compatible rendering
+    const overviewSection = `## Document Overview\n${schemaData.overview || "No overview available."}\n\n`;
+    
+    let metricsSection = `## Key Metrics & Readings\n`;
+    if (Array.isArray(schemaData.metrics) && schemaData.metrics.length > 0) {
+      schemaData.metrics.forEach((m: any) => {
+        metricsSection += `* **${m.name}**: ${m.value} (${m.status}) — *${m.interpretation}*\n`;
+      });
+    } else {
+      metricsSection += `* No critical metrics recorded.\n`;
+    }
+    metricsSection += `\n`;
 
-    let savedToDb = false;
-    let reportId = "";
-    let medicinesSaved: string[] = [];
+    let actionsSection = `## Action Items & Lifestyle Recommendations\n`;
+    if (Array.isArray(schemaData.actions) && schemaData.actions.length > 0) {
+      schemaData.actions.forEach((a: string) => {
+        actionsSection += `* ${a}\n`;
+      });
+    } else {
+      actionsSection += `* Continue current daily routine as advised.\n`;
+    }
+    actionsSection += `\n`;
 
+    let questionsSection = `## Questions to Ask your Doctor\n`;
+    if (Array.isArray(schemaData.doctorQuestions) && schemaData.doctorQuestions.length > 0) {
+      schemaData.doctorQuestions.forEach((q: string) => {
+        questionsSection += `* ${q}\n`;
+      });
+    } else {
+      questionsSection += `* Ask if any medications require routine lab tests.\n`;
+    }
+    questionsSection += `\n`;
+
+    const disclaimerSection = `## Medical Disclaimer\n${schemaData.disclaimer || "Consult your physician for personalized medical advice."}`;
+
+    const summaryText = overviewSection + metricsSection + actionsSection + questionsSection + disclaimerSection;
+
+    // Automatically save the scanned report AND the raw extracted schema fields to MongoDB Atlas via Flask
     try {
-      const saveResult = await flaskPost("/api/reports/save", {
-        fileName:  fileName || "unnamed",
-        summary,
-        medicines: extractedMedicines,
-        scanDate,
+      await flaskPost("/api/reports/save", {
+        fileName: fileName || "unnamed document",
+        summary: summaryText,
+        scanDate: new Date().toLocaleTimeString("en-US", { hour12: false }) + " — " + new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+        medicines: schemaData.medicines || [],
+        overview: schemaData.overview,
+        metrics: schemaData.metrics,
+        actions: schemaData.actions,
+        doctorQuestions: schemaData.doctorQuestions,
+        disclaimer: schemaData.disclaimer
       });
-      savedToDb      = true;
-      reportId       = saveResult.reportId || "";
-      medicinesSaved = saveResult.medicinesSaved || [];
-      console.log(`[SCAN] Saved report ${reportId} with ${medicinesSaved.length} medicines`);
-    } catch (e: any) {
-      console.warn("[SCAN] MongoDB save failed (Flask offline?):", e?.message);
+      console.log(`[DB] Scanned report '${fileName}' saved to database successfully with full structured schema.`);
+      
+      // Broadcast extracted medicines to dashboard UI via SSE
+      if (schemaData.medicines && schemaData.medicines.length > 0) {
+        broadcastSSE("medicines_extracted", { medicines: schemaData.medicines, source: "scan" });
+      }
+    } catch (dbErr: any) {
+      console.error("[WARN] Failed to automatically save scanned report schema to database:", dbErr?.message);
     }
 
-    // ── Broadcast SSE so dashboard updates ────────────────────────────────
-    if (extractedMedicines.length > 0) {
-      broadcastSSE("medicines_extracted", { medicines: extractedMedicines, source: "scan" });
-    }
-
-    return res.json({
-      success: true,
-      summary,
-      extractedMedicines,
-      savedToDb,
-      reportId,
-      medicinesSaved,
-    });
+    return res.json({ success: true, summary: summaryText });
   } catch (error: any) {
-    console.error("Scan error:", error);
-    return res.status(500).json({ error: error?.message || "Internal error during scan." });
+    console.error("Gemini Scan Error:", error);
+    return res.status(500).json({
+      error: error?.message || "Internal server error occurred while scanning with Gemini.",
+    });
   }
 });
 
@@ -845,101 +830,7 @@ app.delete("/api/medicines/:name", async (req, res) => {
   }
 });
 
-// POST /api/voice-assistant/speak — trigger ESP32-S3 to speak a text (SSE + queue)
-app.post("/api/voice-assistant/speak", (req, res) => {
-  const { text, priority } = req.body as { text: string; priority?: string };
-  if (!text) return res.status(400).json({ error: "text required" });
-  const prio = priority || "normal";
-  broadcastSSE("voice_speak", { text, priority: prio });
-  if (pendingSpeakQueue.length < 5) {
-    pendingSpeakQueue.push({ text, priority: prio, queuedAt: new Date().toISOString() });
-  }
-  console.log(`[VA] Speak queued: ${text.substring(0, 60)}`);
-  return res.json({ sent: true, queued: pendingSpeakQueue.length });
-});
 
-// GET /api/voice-assistant/tts-pcm — fetches TTS audio and proxies raw bytes to ESP32
-// ESP32 calls this with ?text=... and receives the audio bytes to write to I2S speaker
-app.get("/api/voice-assistant/tts-pcm", async (req, res) => {
-  const text = (req.query.text as string || "").replace(/\+/g, " ").trim();
-  if (!text) return res.status(400).send("text required");
-
-  try {
-    const encoded = encodeURIComponent(text);
-    // Use Google Translate TTS — returns MP3 audio
-    const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=en&q=${encoded}`;
-    const ttsRes = await fetch(ttsUrl, {
-      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
-    });
-
-    if (!ttsRes.ok) {
-      console.error(`[TTS] Google TTS failed: ${ttsRes.status}`);
-      return res.status(502).send("TTS upstream error");
-    }
-
-    // Stream the MP3/audio bytes directly to ESP32
-    // ESP32 will play these bytes on the MAX98357 speaker
-    res.setHeader("Content-Type", "audio/mpeg");
-    const ttsBuffer = Buffer.from(await ttsRes.arrayBuffer());
-    console.log(`[TTS] Sending ${ttsBuffer.length} bytes TTS audio for: "${text.substring(0, 40)}"`);
-    return res.send(ttsBuffer);
-  } catch (err: any) {
-    console.error("[TTS] Proxy error:", err?.message);
-    return res.status(500).send("TTS error");
-  }
-});
-
-
-// ─────────────────────────────────────────────────────────────────────────────
-// VOICE ASSISTANT — Gemini conversational AI for elderly care
-// ─────────────────────────────────────────────────────────────────────────────
-app.post("/api/voice-chat", async (req, res) => {
-  try {
-    const { message, history, patientContext } = req.body;
-    if (!message) return res.status(400).json({ error: "message is required" });
-    if (!ai) return res.status(500).json({ error: "Gemini AI not initialized. Configure GEMINI_API_KEY." });
-
-    const systemPrompt = `You are MITRA, a warm, patient, and deeply empathetic AI health companion for elderly patients.
-You are speaking with ${patientContext?.name || "Arthur Pendelton"}, who is ${patientContext?.age || "82"} years old.
-${patientContext?.recentReports ? `Recent medical notes: ${patientContext.recentReports}` : ""}
-
-Your role:
-- Answer health questions in plain, kind language — no complex medical jargon
-- Give age-appropriate lifestyle tips (diet, gentle exercise, hydration, sleep hygiene)
-- Help them understand their medications, remind about doses and safety
-- Be warm, encouraging, and never alarming — they may be anxious
-- Keep responses concise (2-4 sentences unless detail is requested)
-- If they describe a MEDICAL EMERGENCY (chest pain, can't breathe, collapse), IMMEDIATELY tell them to call 112 or 911
-- Never diagnose — recommend professional consultation for clinical concerns
-- Remember you are on an IoT elderly care dashboard connected to real sensors
-
-Today: ${new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}
-Current time: ${new Date().toLocaleTimeString("en-US", { hour12: true })}`;
-
-    const messages: Array<{ role: string; parts: Array<{ text: string }> }> = [];
-    if (Array.isArray(history)) {
-      for (const msg of history.slice(-10)) {
-        if (msg.role === "user") {
-          messages.push({ role: "user", parts: [{ text: msg.content }] });
-        } else if (msg.role === "assistant") {
-          messages.push({ role: "model", parts: [{ text: msg.content }] });
-        }
-      }
-    }
-    messages.push({ role: "user", parts: [{ text: message }] });
-
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: messages,
-      config: { systemInstruction: systemPrompt },
-    });
-
-    return res.json({ success: true, reply: response.text || "I'm sorry, I couldn't generate a response." });
-  } catch (err: any) {
-    console.error("Voice chat error:", err);
-    return res.status(500).json({ error: err?.message || "Failed to get AI response." });
-  }
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MEDICINE BOX — ESP32 Hardware Integration
@@ -1095,10 +986,61 @@ async function sendMissedDoseAlert(medicine: string, time: string, dosage: strin
 }
 
 // ── GET /api/medication/schedule ──────────────────────────────────────────────
-app.get("/api/medication/schedule", (_req, res) => {
-  // Return today's schedule for the device — reads from schedule.json
-  const doses = readSchedule();
-  return res.json({ deviceId: "medbox-01", doses });
+app.get("/api/medication/schedule", async (_req, res) => {
+  try {
+    // 1. Fetch active medicines from MongoDB (via Flask API)
+    const data = await flaskGet("/api/medicines");
+    
+    if (data && Array.isArray(data.medicines)) {
+      const dbMeds = data.medicines;
+      
+      // 2. Sort by addedAt descending to get the most recent ones first
+      const sortedMeds = [...dbMeds].sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
+      
+      // 3. Take up to 2 most recent medicines to map to Box 1 and Box 2
+      const mappedMeds = sortedMeds.slice(0, 2);
+      
+      // 4. Read today's intake completion records from schedule.json to merge taken/missed statuses
+      const localSchedule = readSchedule();
+      
+      const doses: DoseEntry[] = [];
+      
+      mappedMeds.forEach((med, index) => {
+        const boxNumber = (index + 1) as 1 | 2;
+        const times = Array.isArray(med.times) && med.times.length > 0 ? med.times : ["08:00"];
+        
+        times.forEach((t: string) => {
+          // Check if this specific dose (medicine name + time + box) is already recorded today
+          const match = localSchedule.find(
+            (d) =>
+              d.boxNumber === boxNumber &&
+              d.time === t &&
+              d.medicine.toLowerCase() === med.name.toLowerCase()
+          );
+          
+          doses.push({
+            time: t,
+            medicine: med.name,
+            dosage: med.dosage || "—",
+            boxNumber: boxNumber,
+            taken: match ? match.taken : false,
+            takenAt: match ? match.takenAt : undefined,
+            missed: match ? match.missed : false,
+          });
+        });
+      });
+      
+      // 5. Dynamic schedule successfully mapped from database
+      console.log(`[SYNC] Dynamic schedule compiled from MongoDB: ${doses.length} doses mapped for ${mappedMeds.length} medicines.`);
+      return res.json({ deviceId: "medbox-01", doses });
+    }
+    
+    throw new Error("No medicines found in database");
+  } catch (err: any) {
+    console.warn(`[SYNC] MongoDB schedule fetch failed (${err.message}). Falling back to local schedule.json`);
+    const doses = readSchedule();
+    return res.json({ deviceId: "medbox-01", doses });
+  }
 });
 
 // ── POST /api/medication/schedule  (caregiver sets/updates schedule) ──────────
@@ -1163,6 +1105,23 @@ app.post("/api/hardware/medbox-event", async (req, res) => {
     deviceId:  deviceId || "medbox-01",
   };
   broadcastSSE(event === "DOSE_TAKEN" ? "medicine_taken" : "medicine_missed", ssePayload);
+
+  // Automatically save medbox event to MongoDB Atlas Database
+  try {
+    const severity = event === "DOSE_TAKEN" ? "info" : "warning";
+    const msg = event === "DOSE_TAKEN"
+      ? `Medication taken: ${medicine || slot?.medicine || "Unknown"} (Box ${box})`
+      : `Medication missed: ${medicine || slot?.medicine || "Unknown"} (Box ${box})`;
+    
+    await flaskPost("/api/events/log", {
+      type: "medicine",
+      message: msg,
+      severity: severity
+    });
+    console.log(`[DB] Medbox event successfully logged to database: ${msg}`);
+  } catch (dbErr: any) {
+    console.error("[WARN] Failed to log medbox event to database:", dbErr?.message);
+  }
 
   console.log(`[MEDBOX] ${event} — Box ${box} (${medicine}) @ ${timestamp}`);
   return res.json({ received: true });
