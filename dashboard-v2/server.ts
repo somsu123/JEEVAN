@@ -6,8 +6,115 @@ import { GoogleGenAI } from "@google/genai";
 import nodemailer from "nodemailer";
 import twilio from "twilio";
 import { createServer as createViteServer } from "vite";
+import { initializeApp, cert } from "firebase-admin/app";
+import { getFirestore, Firestore } from "firebase-admin/firestore";
 
 dotenv.config();
+
+// ─── Firebase Admin SDK Connection ───────────────────────────────────────────
+const FIREBASE_PROJECT = "rfidcamera-8681b";
+
+let fireDb: Firestore;
+
+function findServiceAccount(): string | null {
+  // Look in backend folder (sibling of dashboard-v2)
+  const searchDirs = [
+    path.join(process.cwd(), "..", "backend"),
+    path.join(process.cwd()),
+  ];
+  const priorityNames = [
+    "firebase-service-account.json",
+    "serviceAccountKey.json",
+    "service-account.json",
+  ];
+  for (const dir of searchDirs) {
+    for (const name of priorityNames) {
+      const p = path.join(dir, name);
+      if (fs.existsSync(p)) return p;
+    }
+    // Scan any JSON with type=service_account
+    try {
+      const files = fs.readdirSync(dir).filter((f) => f.endsWith(".json"));
+      for (const f of files) {
+        const p = path.join(dir, f);
+        try {
+          const content = JSON.parse(fs.readFileSync(p, "utf-8"));
+          if (content?.type === "service_account") return p;
+        } catch { /* skip unreadable files */ }
+      }
+    } catch { /* skip unreadable dirs */ }
+  }
+  return null;
+}
+
+async function connectFirebase() {
+  try {
+    const saPath = findServiceAccount();
+    if (saPath) {
+      const serviceAccount = JSON.parse(fs.readFileSync(saPath, "utf-8"));
+      initializeApp({
+        credential: cert(serviceAccount),
+        projectId: FIREBASE_PROJECT,
+      });
+      console.log(`[Firebase] ✅ Connected with service account: ${path.basename(saPath)}`);
+    } else {
+      console.error("[Firebase] ❌ Service account key not found!");
+      console.error("[Firebase] Place your downloaded JSON key in: d:\\Elder--Care\\backend\\");
+      console.error("[Firebase] Get it from: Firebase Console -> Project Settings -> Service Accounts");
+      return;
+    }
+    fireDb = getFirestore();
+    console.log(`[Firebase] Firestore ready -> ${FIREBASE_PROJECT}`);
+  } catch (err: any) {
+    console.error("[Firebase] ❌ Failed to initialize:", err.message);
+  }
+}
+
+// ── Firebase ready guard ──────────────────────────────────────────────────────
+function fireReady(): boolean {
+  return !!fireDb;
+}
+
+// ── Medbox schedule helpers (Firestore-backed) ────────────────────────────────
+async function readSchedule(): Promise<DoseEntry[]> {
+  if (!fireReady()) return [];
+  try {
+    const snap = await fireDb.collection("medbox_schedule").get();
+    return snap.docs.map((d) => d.data() as DoseEntry);
+  } catch {
+    return [];
+  }
+}
+
+async function writeSchedule(doses: DoseEntry[]): Promise<void> {
+  if (!fireReady()) return;
+  try {
+    const col = fireDb.collection("medbox_schedule");
+    // Delete all existing, then batch-write new ones
+    const existing = await col.get();
+    const batch = fireDb.batch();
+    existing.docs.forEach((d) => batch.delete(d.ref));
+    for (const dose of doses) {
+      batch.set(col.doc(), dose);
+    }
+    await batch.commit();
+  } catch (err: any) {
+    console.error("[Firebase] writeSchedule failed:", err.message);
+  }
+}
+
+async function appendMedboxEvent(entry: object): Promise<void> {
+  if (!fireReady()) return;
+  try {
+    await fireDb.collection("medbox_events").add({
+      ...entry,
+      loggedAt: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    console.error("[Firebase] appendMedboxEvent failed:", err.message);
+  }
+}
+
 
 const app = express();
 const PORT = parseInt(process.env.PORT || "5050", 10);
@@ -73,7 +180,7 @@ function broadcastSSE(eventName: string, data: object) {
   }
 }
 
-// ─── In-memory state (fall events ring buffer) ───────────────────────────────
+// ─── Fall event record shape ─────────────────────────────────────────────────
 interface FallEventRecord {
   id: string;
   timestamp: string;
@@ -86,7 +193,66 @@ interface FallEventRecord {
   resolvedAt?: string;
 }
 
-const fallEventBuffer: FallEventRecord[] = [];
+// ── MongoDB-backed fall event helpers ─────────────────────────────────────────
+async function saveFallEvent(event: FallEventRecord): Promise<void> {
+  if (!mongoReady()) return;
+  try {
+    await colFallEvents.insertOne({ ...event });
+  } catch (err: any) {
+    console.error("[MongoDB] saveFallEvent failed:", err.message);
+  }
+}
+
+async function getFallEvents(limit = 50): Promise<FallEventRecord[]> {
+  if (!mongoReady()) return [];
+  try {
+    const docs = await colFallEvents
+      .find({}, { projection: { _id: 0 } })
+      .sort({ isoTimestamp: -1 })
+      .limit(limit)
+      .toArray();
+    return docs as unknown as FallEventRecord[];
+  } catch {
+    return [];
+  }
+}
+
+async function resolveFallEvent(id: string): Promise<boolean> {
+  if (!mongoReady()) return false;
+  try {
+    const resolvedAt = new Date().toLocaleTimeString("en-US", { hour12: false });
+    const result = await colFallEvents.updateOne(
+      { id },
+      { $set: { status: "resolved", resolvedAt } }
+    );
+    return result.modifiedCount > 0;
+  } catch {
+    return false;
+  }
+}
+
+async function resolveAllFallEventsBySource(source: string): Promise<number> {
+  if (!mongoReady()) return 0;
+  try {
+    const resolvedAt = new Date().toLocaleTimeString("en-US", { hour12: false });
+    const result = await colFallEvents.updateMany(
+      { source, status: "active" },
+      { $set: { status: "resolved", resolvedAt } }
+    );
+    return result.modifiedCount;
+  } catch {
+    return 0;
+  }
+}
+
+async function getActiveFallCount(): Promise<number> {
+  if (!mongoReady()) return 0;
+  try {
+    return await colFallEvents.countDocuments({ status: "active" });
+  } catch {
+    return 0;
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PROXY helpers — forward requests to Flask backend
@@ -210,7 +376,7 @@ setInterval(() => {
 }, 30_000);
 
 // Mark bracelet offline if no heartbeat for 30 s
-setInterval(() => {
+setInterval(async () => {
   if (braceletStatus.lastSeen) {
     const age = Date.now() - new Date(braceletStatus.lastSeen).getTime();
     if (age > 30_000 && braceletStatus.online) {
@@ -218,19 +384,10 @@ setInterval(() => {
       broadcastSSE("bracelet_offline", { deviceId: braceletStatus.deviceId });
       console.log("[BRACELET] Went offline — no heartbeat for 30s");
 
-      // ── BUG FIX: auto-resolve any active bracelet fall events ─────────────
-      // A disconnected bracelet cannot sense falls. Stale "active" events from
-      // it should not remain open or re-trigger alerts after a server restart.
-      let resolved = 0;
-      for (const ev of fallEventBuffer) {
-        if (ev.source === "bracelet" && ev.status === "active") {
-          ev.status = "resolved";
-          ev.resolvedAt = new Date().toLocaleTimeString("en-US", { hour12: false });
-          resolved++;
-        }
-      }
+      // Auto-resolve stale bracelet fall events in MongoDB
+      const resolved = await resolveAllFallEventsBySource("bracelet");
       if (resolved > 0) {
-        console.log(`[BRACELET] Auto-resolved ${resolved} stale bracelet fall event(s)`);
+        console.log(`[BRACELET] Auto-resolved ${resolved} stale bracelet fall event(s) in MongoDB`);
         broadcastSSE("fall_resolved_batch", { source: "bracelet", count: resolved });
       }
     }
@@ -286,6 +443,15 @@ app.post("/api/bracelet/heartbeat", (req, res) => {
   braceletStatus.fingerPresent = fingerPresent ?? false;
   braceletStatus.uptime        = uptime ?? 0;
   braceletStatus.deviceId      = deviceId ?? "bracelet-01";
+
+  // Persist bracelet status to MongoDB
+  if (mongoReady()) {
+    colDeviceStatus.updateOne(
+      { _id: "bracelet" as any },
+      { $set: { ...braceletStatus, updatedAt: new Date().toISOString() } },
+      { upsert: true }
+    ).catch(() => {});
+  }
 
   broadcastSSE("bracelet_heartbeat", braceletStatus);
   return res.json({ status: "ok" });
@@ -509,8 +675,8 @@ app.post("/api/fall-event", async (req, res) => {
       status: "active",
     };
 
-    fallEventBuffer.unshift(event);
-    if (fallEventBuffer.length > 50) fallEventBuffer.pop();
+    // Persist to MongoDB Atlas
+    await saveFallEvent(event);
 
     // Forward to Flask backend
     try {
@@ -553,20 +719,23 @@ app.post("/api/fall-event", async (req, res) => {
 
 app.get("/api/fall-events", async (_req, res) => {
   try {
-    // Merge our buffer with Flask's events if available
-    const flaskEvents = await flaskGet("/api/events").catch(() => []);
-    return res.json({ events: fallEventBuffer, flaskEvents });
+    const [events, flaskEvents] = await Promise.allSettled([
+      getFallEvents(50),
+      flaskGet("/api/events").catch(() => []),
+    ]);
+    return res.json({
+      events: events.status === "fulfilled" ? events.value : [],
+      flaskEvents: flaskEvents.status === "fulfilled" ? flaskEvents.value : [],
+    });
   } catch {
-    return res.json({ events: fallEventBuffer, flaskEvents: [] });
+    return res.json({ events: [], flaskEvents: [] });
   }
 });
 
-app.patch("/api/fall-event/:id/resolve", (req, res) => {
+app.patch("/api/fall-event/:id/resolve", async (req, res) => {
   const { id } = req.params;
-  const event = fallEventBuffer.find((e) => e.id === id);
-  if (!event) return res.status(404).json({ error: "Event not found" });
-  event.status = "resolved";
-  event.resolvedAt = new Date().toLocaleTimeString("en-US", { hour12: false });
+  const ok = await resolveFallEvent(id);
+  if (!ok) return res.status(404).json({ error: "Event not found" });
   broadcastSSE("fall_resolved", { id });
   return res.json({ success: true });
 });
@@ -579,11 +748,7 @@ app.get("/api/medicine-schedule", async (_req, res) => {
     const data = await flaskGet("/api/schedule");
     return res.json(data);
   } catch {
-    // Default slots if Flask is offline - empty
-    return res.json({
-      schedule: [],
-      slots: []
-    });
+    return res.json({ schedule: [], slots: [] });
   }
 });
 
@@ -591,7 +756,7 @@ app.post("/api/medicine-schedule", async (req, res) => {
   try {
     const { slots } = req.body;
     
-    // Dynamically persist to local schedule.json database for medbox hardware sync
+    // Persist to MongoDB Atlas medbox_schedule collection
     if (Array.isArray(slots)) {
       const doses: DoseEntry[] = slots.map((s: any) => ({
         time: s.scheduledTime || "08:00",
@@ -602,16 +767,16 @@ app.post("/api/medicine-schedule", async (req, res) => {
         takenAt: s.takenAt,
         missed: s.missed || false,
       }));
-      writeSchedule(doses);
-      console.log(`[SYNC] Wrote ${doses.length} doses to schedule.json from medicine-schedule.`);
+      await writeSchedule(doses);
+      console.log(`[MongoDB] Wrote ${doses.length} doses to medbox_schedule.`);
     }
 
     const times = (slots || []).map((s: any) => s.scheduledTime).filter(Boolean);
     await flaskPost("/api/schedule", times).catch(() => {});
     
     broadcastSSE("medicine_schedule_updated", { slots });
-    // Also broadcast to hardware listeners
-    broadcastSSE("schedule_updated", { doses: readSchedule() });
+    const updatedDoses = await readSchedule();
+    broadcastSSE("schedule_updated", { doses: updatedDoses });
     
     return res.json({ success: true });
   } catch (err: any) {
@@ -623,10 +788,9 @@ app.post("/api/medicine-taken", async (req, res) => {
   try {
     const { slotId, lidOpen, touchVerified } = req.body;
     
-    // Update local schedule.json taken status
+    // Update medbox_schedule in MongoDB Atlas
     if (slotId && typeof slotId === 'string') {
       const parts = slotId.split('-');
-      // ID format is slot-boxNumber-time or scanned-index-timestamp
       let boxNumber = 1;
       let matched = false;
       
@@ -635,22 +799,21 @@ app.post("/api/medicine-taken", async (req, res) => {
         matched = true;
       }
       
-      const schedule = readSchedule();
+      const schedule = await readSchedule();
+      const takenAt = new Date().toLocaleTimeString("en-US", { hour12: false });
       const updatedSchedule = schedule.map((dose) => {
-        // If matched by boxNumber and not already taken
         if (matched && Number(dose.boxNumber) === boxNumber && !dose.taken) {
           dose.taken = true;
-          dose.takenAt = new Date().toLocaleTimeString("en-US", { hour12: false });
+          dose.takenAt = takenAt;
         } else if (!matched && dose.medicine.toLowerCase() === slotId.toLowerCase() && !dose.taken) {
-          // Fallback matching by name
           dose.taken = true;
-          dose.takenAt = new Date().toLocaleTimeString("en-US", { hour12: false });
+          dose.takenAt = takenAt;
         }
         return dose;
       });
       
-      writeSchedule(updatedSchedule);
-      console.log(`[SYNC] Marked box ${boxNumber} as TAKEN in schedule.json via medicine-taken.`);
+      await writeSchedule(updatedSchedule);
+      console.log(`[MongoDB] Marked box ${boxNumber} as TAKEN in medbox_schedule.`);
       broadcastSSE("schedule_updated", { doses: updatedSchedule });
     }
 
@@ -869,6 +1032,19 @@ app.post("/api/scan-report", async (req, res) => {
     }
     metricsSection += `\n`;
 
+    let medicinesSection = `## Prescribed Medications\n`;
+    if (Array.isArray(schemaData.medicines) && schemaData.medicines.length > 0) {
+      schemaData.medicines.forEach((m: any) => {
+        const timeList = Array.isArray(m.times) ? m.times.join(", ") : "";
+        const timeStr = timeList ? ` at ${timeList}` : "";
+        const purposeStr = m.purpose ? ` — *${m.purpose}*` : "";
+        medicinesSection += `* **${m.name}**${m.dosage ? ` (${m.dosage})` : ""}${timeStr}${purposeStr}\n`;
+      });
+    } else {
+      medicinesSection += `* No medications extracted from prescription.\n`;
+    }
+    medicinesSection += `\n`;
+
     let actionsSection = `## Action Items & Lifestyle Recommendations\n`;
     if (Array.isArray(schemaData.actions) && schemaData.actions.length > 0) {
       schemaData.actions.forEach((a: string) => {
@@ -891,7 +1067,7 @@ app.post("/api/scan-report", async (req, res) => {
 
     const disclaimerSection = `## Medical Disclaimer\n${schemaData.disclaimer || "Consult your physician for personalized medical advice."}`;
 
-    const summaryText = overviewSection + metricsSection + actionsSection + questionsSection + disclaimerSection;
+    const summaryText = overviewSection + metricsSection + medicinesSection + actionsSection + questionsSection + disclaimerSection;
 
     // Automatically save the scanned report AND the raw extracted schema fields to MongoDB Atlas via Flask
     try {
@@ -982,13 +1158,7 @@ app.delete("/api/medicines/:name", async (req, res) => {
 // MEDICINE BOX — ESP32 Hardware Integration
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ── File paths for JSON persistence ──────────────────────────────────────────
-const DATA_DIR = path.join(process.cwd(), "data");
-const SCHEDULE_FILE = path.join(DATA_DIR, "schedule.json");
-const EVENTS_FILE   = path.join(DATA_DIR, "events.json");
-
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-
+// DoseEntry schema (all persistence is in MongoDB medbox_schedule collection)
 interface DoseEntry {
   time: string;
   medicine: string;
@@ -997,32 +1167,6 @@ interface DoseEntry {
   taken: boolean;
   takenAt?: string;
   missed?: boolean;
-}
-
-function readSchedule(): DoseEntry[] {
-  try {
-    if (fs.existsSync(SCHEDULE_FILE)) {
-      return JSON.parse(fs.readFileSync(SCHEDULE_FILE, "utf-8")) as DoseEntry[];
-    }
-  } catch { /* ignore corrupt file */ }
-  // Default schedule - empty
-  return [];
-}
-
-function writeSchedule(doses: DoseEntry[]) {
-  fs.writeFileSync(SCHEDULE_FILE, JSON.stringify(doses, null, 2));
-}
-
-function appendEvent(entry: object) {
-  let events: object[] = [];
-  try {
-    if (fs.existsSync(EVENTS_FILE)) {
-      events = JSON.parse(fs.readFileSync(EVENTS_FILE, "utf-8"));
-    }
-  } catch { /* ignore */ }
-  events.unshift({ ...entry, loggedAt: new Date().toISOString() });
-  if (events.length > 200) events = events.slice(0, 200); // keep last 200
-  fs.writeFileSync(EVENTS_FILE, JSON.stringify(events, null, 2));
 }
 
 // ── Medbox device status ──────────────────────────────────────────────────────
@@ -1061,9 +1205,9 @@ setInterval(() => {
   }
 }, 15_000);
 
-// ── Helper: next dose time ────────────────────────────────────────────────────
-function getNextDoseTime(): string {
-  const schedule = readSchedule();
+// ── Helper: next dose time (async — reads from MongoDB) ─────────────────────
+async function getNextDoseTime(): Promise<string> {
+  const schedule = await readSchedule();
   const now = new Date();
   const nowMin = now.getHours() * 60 + now.getMinutes();
   const upcoming = schedule
@@ -1133,20 +1277,16 @@ async function sendMissedDoseAlert(medicine: string, time: string, dosage: strin
 // ── GET /api/medication/schedule ──────────────────────────────────────────────
 app.get("/api/medication/schedule", async (_req, res) => {
   try {
-    // 1. Fetch active medicines from MongoDB (via Flask API)
+    // 1. Fetch active medicines from MongoDB Atlas (via Flask API)
     const data = await flaskGet("/api/medicines");
     
     if (data && Array.isArray(data.medicines) && data.medicines.length > 0) {
       const dbMeds = data.medicines;
-      
-      // 2. Sort by addedAt descending to get the most recent ones first
       const sortedMeds = [...dbMeds].sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
-      
-      // 3. Take up to 2 most recent medicines to map to Box 1 and Box 2
       const mappedMeds = sortedMeds.slice(0, 2);
       
-      // 4. Read today's intake completion records from schedule.json to merge taken/missed statuses
-      const localSchedule = readSchedule();
+      // 2. Read today's intake completion from MongoDB medbox_schedule
+      const mongoSchedule = await readSchedule();
       
       const doses: DoseEntry[] = [];
       
@@ -1155,8 +1295,7 @@ app.get("/api/medication/schedule", async (_req, res) => {
         const times = Array.isArray(med.times) && med.times.length > 0 ? med.times : ["08:00"];
         
         times.forEach((t: string) => {
-          // Check if this specific dose (medicine name + time + box) is already recorded today
-          const match = localSchedule.find(
+          const match = mongoSchedule.find(
             (d) =>
               d.boxNumber === boxNumber &&
               d.time === t &&
@@ -1175,25 +1314,24 @@ app.get("/api/medication/schedule", async (_req, res) => {
         });
       });
       
-      // 5. Dynamic schedule successfully mapped from database
-      console.log(`[SYNC] Dynamic schedule compiled from MongoDB: ${doses.length} doses mapped for ${mappedMeds.length} medicines.`);
+      console.log(`[MongoDB] Dynamic schedule: ${doses.length} doses for ${mappedMeds.length} medicines.`);
       return res.json({ deviceId: "medbox-01", doses });
     }
     
     throw new Error("No medicines found in database");
   } catch (err: any) {
-    console.warn(`[SYNC] MongoDB schedule fetch failed (${err.message}). Falling back to local schedule.json`);
-    const doses = readSchedule();
+    console.warn(`[MongoDB] Schedule fetch failed (${err.message}). Falling back to medbox_schedule collection.`);
+    const doses = await readSchedule();
     return res.json({ deviceId: "medbox-01", doses });
   }
 });
 
 // ── POST /api/medication/schedule (caregiver sets/updates schedule) ──────────
-app.post(["/api/medication/schedule", "/api/medication/schedule-esp"], (req, res) => {
+app.post(["/api/medication/schedule", "/api/medication/schedule-esp"], async (req, res) => {
   try {
     const { doses } = req.body as { doses: DoseEntry[] };
     if (!Array.isArray(doses)) return res.status(400).json({ error: "doses array required" });
-    writeSchedule(doses);
+    await writeSchedule(doses);
     broadcastSSE("schedule_updated", { doses });
     return res.json({ success: true });
   } catch (err: any) {
@@ -1225,6 +1363,15 @@ app.post("/api/hardware/heartbeat", (req, res) => {
     medboxLidOpen = lidOpen;
   }
 
+  // Persist medbox status to MongoDB Atlas device_status
+  if (mongoReady()) {
+    colDeviceStatus.updateOne(
+      { _id: "medbox-01" as any },
+      { $set: { ...medboxStatus, updatedAt: new Date().toISOString() } },
+      { upsert: true }
+    ).catch(() => {});
+  }
+
   // Broadcast telemetry updates to the React UI via SSE
   broadcastSSE("medbox_heartbeat", medboxStatus);
 
@@ -1239,7 +1386,7 @@ app.post("/api/hardware/heartbeat", (req, res) => {
 });
 
 // ── POST /api/hardware/medbox-event (ESP32 pill intake confirmation) ──────────
-app.post("/api/hardware/medbox-event", (req, res) => {
+app.post("/api/hardware/medbox-event", async (req, res) => {
   const { event, box, medicine, dosage, timestamp, deviceId } = req.body as {
     event: string;
     box: number;
@@ -1252,21 +1399,12 @@ app.post("/api/hardware/medbox-event", (req, res) => {
   if (event === "DOSE_TAKEN") {
     console.log(`[EVENT] Box ${box}: ${medicine} (${dosage}) taken at ${timestamp} on ${deviceId}`);
     
-    // Log to events database/JSON
-    appendEvent({
-      event,
-      boxNumber: box,
-      medicine,
-      dosage,
-      timestamp,
-      deviceId
-    });
+    // Log to MongoDB medbox_events collection
+    await appendMedboxEvent({ event, boxNumber: box, medicine, dosage, timestamp, deviceId });
 
-    // Auto-update taken state in schedule.json
-    const schedule = readSchedule();
+    // Auto-update taken state in MongoDB medbox_schedule
+    const schedule = await readSchedule();
     let updated = false;
-
-    // Standardize comparison by extracting HH:MM from timestamp
     const payloadTimeHHMM = timestamp && timestamp.length >= 5 ? timestamp.substring(0, 5) : "";
 
     const updatedSchedule = schedule.map((dose) => {
@@ -1283,10 +1421,8 @@ app.post("/api/hardware/medbox-event", (req, res) => {
     });
 
     if (updated) {
-      writeSchedule(updatedSchedule);
-      // Broadcast schedule change to React UI via SSE
+      await writeSchedule(updatedSchedule);
       broadcastSSE("schedule_updated", { doses: updatedSchedule });
-      // Also broadcast specific taken status to animate slots in dashboard
       broadcastSSE("medicine_taken", { box: Number(box), timestamp });
     }
 
@@ -1347,12 +1483,13 @@ async function buildPatientSnapshot() {
   const minBpm = bpmVals.length ? Math.min(...bpmVals) : null;
   const abnormalBpm = bpmVals.filter((v) => v > 100 || v < 50);
 
-  // — Fall analytics (in-memory buffer + DB events) —
+  // — Fall analytics (from MongoDB Atlas fall_events collection) —
+  const mongoFalls = await getFallEvents(200);
   const allFalls = [
-    ...fallEventBuffer,
+    ...mongoFalls,
     ...events.filter((e) => e.type === "fall"),
   ];
-  const activeFalls = fallEventBuffer.filter((f) => f.status === "active");
+  const activeFallCount = await getActiveFallCount();
   const now = Date.now();
   const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
   const recentFalls = allFalls.filter((f) => {
@@ -1361,6 +1498,7 @@ async function buildPatientSnapshot() {
       : f.timestamp * 1000;
     return ts >= thirtyDaysAgo;
   });
+
 
   return {
     bpmHistory,
@@ -1373,7 +1511,7 @@ async function buildPatientSnapshot() {
       minBpm,
       abnormalBpmCount: abnormalBpm.length,
       totalFalls: allFalls.length,
-      activeFalls: activeFalls.length,
+      activeFalls: activeFallCount,
       recentFalls30Days: recentFalls.length,
     },
   };
@@ -1535,7 +1673,7 @@ Answer:`;
   }
 });
 
-// ── POST /api/hardware/medbox-event ──────────────────────────────────────────
+// ── POST /api/hardware/medbox-event (duplicate route — fully MongoDB-backed) ──
 app.post("/api/hardware/medbox-event", async (req, res) => {
   const { event, box, medicine, timestamp, deviceId, dosage } = req.body as {
     event: "DOSE_TAKEN" | "DOSE_MISSED";
@@ -1548,11 +1686,11 @@ app.post("/api/hardware/medbox-event", async (req, res) => {
 
   if (!event || !box) return res.status(400).json({ error: "event and box are required" });
 
-  // 1. Save to events.json log file
-  appendEvent({ event, box, medicine, dosage, timestamp, deviceId: deviceId || "medbox-01" });
+  // 1. Save to MongoDB medbox_events collection
+  await appendMedboxEvent({ event, box, medicine, dosage, timestamp, deviceId: deviceId || "medbox-01" });
 
-  // 2. Update matching slot in schedule.json
-  const schedule = readSchedule();
+  // 2. Update matching slot in MongoDB medbox_schedule
+  const schedule = await readSchedule();
   const slot = schedule.find((d) => d.boxNumber === box);
   if (slot) {
     if (event === "DOSE_TAKEN") {
@@ -1562,10 +1700,10 @@ app.post("/api/hardware/medbox-event", async (req, res) => {
     } else {
       slot.missed = true;
     }
-    writeSchedule(schedule);
+    await writeSchedule(schedule);
   }
 
-  // 3. If event === "DOSE_MISSED", trigger Gmail alert
+  // 3. If DOSE_MISSED, trigger Gmail alert
   if (event === "DOSE_MISSED") {
     sendMissedDoseAlert(
       medicine || slot?.medicine || "Unknown",
@@ -1585,21 +1723,16 @@ app.post("/api/hardware/medbox-event", async (req, res) => {
   };
   broadcastSSE(event === "DOSE_TAKEN" ? "medicine_taken" : "medicine_missed", ssePayload);
 
-  // Automatically save medbox event to MongoDB Atlas Database
+  // 5. Also log to Flask events collection in Atlas
   try {
     const severity = event === "DOSE_TAKEN" ? "info" : "warning";
     const msg = event === "DOSE_TAKEN"
       ? `Medication taken: ${medicine || slot?.medicine || "Unknown"} (Box ${box})`
       : `Medication missed: ${medicine || slot?.medicine || "Unknown"} (Box ${box})`;
-    
-    await flaskPost("/api/events/log", {
-      type: "medicine",
-      message: msg,
-      severity: severity
-    });
-    console.log(`[DB] Medbox event successfully logged to database: ${msg}`);
+    await flaskPost("/api/events/log", { type: "medicine", message: msg, severity });
+    console.log(`[MongoDB] Medbox event logged to Atlas: ${msg}`);
   } catch (dbErr: any) {
-    console.error("[WARN] Failed to log medbox event to database:", dbErr?.message);
+    console.error("[WARN] Failed to log medbox event via Flask:", dbErr?.message);
   }
 
   console.log(`[MEDBOX] ${event} — Box ${box} (${medicine}) @ ${timestamp}`);
@@ -1607,7 +1740,7 @@ app.post("/api/hardware/medbox-event", async (req, res) => {
 });
 
 // ── POST /api/hardware/heartbeat ──────────────────────────────────────────────
-app.post("/api/hardware/heartbeat", (req, res) => {
+app.post("/api/hardware/heartbeat", async (req, res) => {
   const { deviceId, state, presenceDetected, nextDoseTime, uptime } = req.body as {
     deviceId?: string;
     state?: string;
@@ -1616,14 +1749,22 @@ app.post("/api/hardware/heartbeat", (req, res) => {
     uptime?: number;
   };
 
-  // Update last-seen timestamp for this device
   medboxStatus.lastSeen        = new Date().toISOString();
   medboxStatus.state           = state || "IDLE";
   medboxStatus.presenceDetected = presenceDetected ?? false;
-  medboxStatus.nextDoseTime    = nextDoseTime || getNextDoseTime();
+  medboxStatus.nextDoseTime    = nextDoseTime || await getNextDoseTime();
   medboxStatus.uptime          = uptime ?? 0;
   medboxStatus.deviceId        = deviceId || "medbox-01";
-  medboxStatus.online          = true; // marked offline if no heartbeat in 30s
+  medboxStatus.online          = true;
+
+  // Persist to MongoDB Atlas device_status
+  if (mongoReady()) {
+    colDeviceStatus.updateOne(
+      { _id: "medbox-01" as any },
+      { $set: { ...medboxStatus, updatedAt: new Date().toISOString() } },
+      { upsert: true }
+    ).catch(() => {});
+  }
 
   broadcastSSE("medbox_heartbeat", medboxStatus);
   return res.json({ status: "ok", nextDose: medboxStatus.nextDoseTime });
@@ -1634,7 +1775,7 @@ app.get("/api/medbox-status", (_req, res) => {
   return res.json(medboxStatus);
 });
 
-// ── Hardware Simulation Mode ──────────────────────────────────────────────────
+// ── Hardware Simulation Mode (MongoDB-backed) ─────────────────────────────────
 if (process.env.VITE_HARDWARE_MODE === "simulated") {
   console.log("[SIM] Hardware simulation mode active — firing fake medbox events");
 
@@ -1642,20 +1783,26 @@ if (process.env.VITE_HARDWARE_MODE === "simulated") {
   let simStateIdx = 0;
 
   // Simulated heartbeat every 10 s
-  setInterval(() => {
+  setInterval(async () => {
     medboxStatus.lastSeen         = new Date().toISOString();
     medboxStatus.state            = simStates[simStateIdx % simStates.length];
     medboxStatus.online           = true;
     medboxStatus.presenceDetected = Math.random() > 0.5;
-    medboxStatus.nextDoseTime     = getNextDoseTime();
+    medboxStatus.nextDoseTime     = await getNextDoseTime();
     medboxStatus.uptime           = (medboxStatus.uptime || 0) + 10;
     simStateIdx++;
+    if (fireReady()) {
+      fireDb.collection("device_status").doc("medbox-01-sim").set(
+        { ...medboxStatus, updatedAt: new Date().toISOString() },
+        { merge: true }
+      ).catch(() => {});
+    }
     broadcastSSE("medbox_heartbeat", medboxStatus);
   }, 10_000);
 
   // Simulated DOSE_TAKEN / DOSE_MISSED every 3–8 minutes
-  const fireRandomEvent = () => {
-    const schedule = readSchedule();
+  const fireRandomEvent = async () => {
+    const schedule = await readSchedule();
     const pending = schedule.filter((d) => !d.taken && !d.missed);
     if (pending.length > 0) {
       const dose = pending[Math.floor(Math.random() * pending.length)];
@@ -1669,20 +1816,19 @@ if (process.env.VITE_HARDWARE_MODE === "simulated") {
         deviceId: "medbox-01-sim",
       };
 
-      // Run through the same real handler logic
-      appendEvent(payload);
+      // Persist to Firestore
+      await appendMedboxEvent(payload);
       if (eventType === "DOSE_TAKEN") {
         dose.taken  = true;
         dose.takenAt = payload.timestamp;
       } else {
         dose.missed = true;
       }
-      writeSchedule(schedule);
+      await writeSchedule(schedule);
       broadcastSSE(eventType === "DOSE_TAKEN" ? "medicine_taken" : "medicine_missed", payload);
       console.log(`[SIM] ${eventType} — Box ${dose.boxNumber} (${dose.medicine})`);
     }
 
-    // Schedule next event in 3–8 minutes
     const nextMs = (Math.random() * 5 + 3) * 60_000;
     setTimeout(fireRandomEvent, nextMs);
   };
@@ -1692,7 +1838,7 @@ if (process.env.VITE_HARDWARE_MODE === "simulated") {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Vite Integration
+// Startup — Firebase first, then Vite/Express
 // ─────────────────────────────────────────────────────────────────────────────
 async function setupViteIntegration() {
   if (process.env.NODE_ENV !== "production") {
@@ -1716,7 +1862,10 @@ async function setupViteIntegration() {
   });
 }
 
-setupViteIntegration().catch((e) => {
-  console.error("Fatal startup error:", e);
-  process.exit(1);
+// Connect to Firebase Firestore FIRST, then start Express + Vite
+connectFirebase().then(() => {
+  setupViteIntegration().catch((e) => {
+    console.error("Fatal startup error:", e);
+    process.exit(1);
+  });
 });

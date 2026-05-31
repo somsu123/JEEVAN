@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import time
 
-# Import our new MongoDB Database Layer
+# Import our Firebase Database Layer
 from database import DatabaseLayer
 
 app = Flask(__name__)

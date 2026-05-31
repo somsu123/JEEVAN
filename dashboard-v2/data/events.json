@@ -1,11 +1,1 @@
-[
-  {
-    "event": "DOSE_TAKEN",
-    "boxNumber": 1,
-    "medicine": "paracetamol",
-    "dosage": "500",
-    "timestamp": "09:08:43",
-    "deviceId": "medbox-01",
-    "loggedAt": "2026-05-31T03:38:43.715Z"
-  }
-]
+[]

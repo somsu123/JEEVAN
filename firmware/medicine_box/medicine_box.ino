@@ -126,7 +126,9 @@ void fetchDashboardSchedule() {
           activeHour = nextHour;
           activeMin = nextMin;
           medicineTaken = false;
-          Serial.println("[SCHEDULE] New upcoming dose registered.");
+          isReminderActive = true;  // Trigger alert immediately on setting timer!
+          statusMsg = "PENDING";     // Set alert screen status immediately!
+          Serial.println("[SCHEDULE] New upcoming dose registered. Triggering alarm instantly for testing!");
         }
         
         Serial.printf("[SCHEDULE] Next Dose: %s (%s) at %02d:%02d in Box Compartment %d\n",
@@ -304,10 +306,12 @@ void loop() {
     delay(100);
     digitalWrite(BUZZER_PIN, LOW);
     digitalWrite(LED_PIN,    LOW);
-    if (distance > 0 && distance < 30 && !isBoxOpen) {
+    
+    // Automatically open the lid immediately when reminder starts!
+    if (!isBoxOpen) {
       myServo.write(135);
       isBoxOpen = true;
-      Serial.println("[SERVO] Hand detected. Opening Lid.");
+      Serial.println("[SERVO] Reminder active. Opening Lid automatically.");
     }
   }
   

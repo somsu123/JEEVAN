@@ -1,276 +1,291 @@
-from pymongo import MongoClient
-import time
+"""
+Elder Care — Firebase Firestore Database Layer (Python / Flask)
+Uses firebase-admin SDK — bypasses security rules entirely (server-side).
+
+Collections managed here:
+  bpm_logs       — raw heart-rate readings
+  fall_logs      — raw fall-detection frames
+  system_state   — live device state (single document: 'current')
+  events         — system event log
+  medicines      — prescriptions / medicines catalogue
+  reports        — scanned prescription documents
+"""
+
 import os
-import re
+import time
+import datetime
+import pathlib
 
-def get_mongodb_uri():
-    # 1. Try to read from dashboard-v2/.env, .env, or parent folder's .env
-    for path in ["dashboard-v2/.env", ".env", "../.env"]:
-        if os.path.exists(path):
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    for line in f:
-                        match = re.match(r"^\s*MONGODB_URI\s*=\s*[\"']?(.*?)[\"']?\s*$", line)
-                        if match:
-                            val = match.group(1).strip()
-                            if val:
-                                return val
-            except Exception as e:
-                print(f"[WARN] Failed to read environment file at {path}: {e}")
-                
-    # 2. Try os.environ
-    env_uri = os.environ.get("MONGODB_URI")
-    if env_uri:
-        return env_uri
-        
-    # 3. Default to local host
-    return "mongodb://localhost:27017"
+import firebase_admin
+from firebase_admin import credentials, firestore
 
-# Connect to MongoDB using the URI loaded from the .env file
-client_uri = get_mongodb_uri()
-client = MongoClient(client_uri)
-db = client["eldercare_db"]
 
+# ── Firebase Configuration ─────────────────────────────────────────────────────
+FIREBASE_PROJECT = "rfidcamera-8681b"
+
+
+def _find_service_account() -> str | None:
+    """
+    Auto-detect the service account key JSON in the backend directory.
+    Accepts any .json file that contains 'type': 'service_account'.
+    """
+    import json
+    backend_dir = pathlib.Path(__file__).resolve().parent
+    # Check priority names first
+    priority_names = [
+        "firebase-service-account.json",
+        "serviceAccountKey.json",
+        "service-account.json",
+    ]
+    for name in priority_names:
+        p = backend_dir / name
+        if p.exists():
+            return str(p)
+    # Scan ALL .json files in the folder for the service_account marker
+    for p in backend_dir.glob("*.json"):
+        try:
+            content = json.loads(p.read_text(encoding="utf-8"))
+            if content.get("type") == "service_account":
+                return str(p)
+        except Exception:
+            continue
+    return None
+
+
+def _init_firebase():
+    """Initialize Firebase Admin SDK with the service account key."""
+    if firebase_admin._apps:
+        return firestore.client()
+
+    sa_path = _find_service_account()
+    if sa_path:
+        cred = credentials.Certificate(sa_path)
+        firebase_admin.initialize_app(cred)
+        print(f"[Firebase] Initialized with service account: {pathlib.Path(sa_path).name}")
+        return firestore.client()
+
+    backend_dir = pathlib.Path(__file__).resolve().parent
+    print()
+    print("=" * 60)
+    print("  [Firebase] SERVICE ACCOUNT KEY NOT FOUND")
+    print("=" * 60)
+    print(f"  Place the downloaded JSON key in: {backend_dir}")
+    print("  Get it from: Firebase Console -> Project Settings -> Service Accounts")
+    print()
+    raise FileNotFoundError(
+        f"Firebase service account key not found in {backend_dir}"
+    )
+
+
+db = _init_firebase()
+print(f"[Firebase] Firestore client ready -> {FIREBASE_PROJECT}")
+
+
+# ── DatabaseLayer ──────────────────────────────────────────────────────────────
 class DatabaseLayer:
+
     @staticmethod
     def initialize_db():
-        """Ensure necessary collections and indexes exist."""
-        # Setup TTL index so raw logs auto-delete after 7 days
-        try:
-            db.fall_logs.create_index("timestamp", expireAfterSeconds=604800)
-            db.bpm_logs.create_index("timestamp", expireAfterSeconds=604800)
-        except Exception:
-            pass
-        
-        # Always upsert the state document with all required fields
-        # This ensures new fields appear even after a code update
-        db.system_state.update_one(
-            {"_id": "current_state"},
-            {"$setOnInsert": {
+        """Seed the system_state document if it does not exist yet."""
+        doc_ref = db.collection("system_state").document("current")
+        doc = doc_ref.get()
+        if not doc.exists:
+            doc_ref.set({
                 "is_fall": False,
                 "lid_open": False,
                 "next_reminder": None,
                 "last_torso_angle": 0.0,
                 "last_fps": 0.0,
                 "bpm": 72,
-            }},
-            upsert=True
-        )
+            })
+            print("[Firebase] system_state/current document created.")
+        else:
+            print("[Firebase] system_state/current already exists.")
 
-    # ── METRICS & STATE ────────────────────────────────────────────────
+    # ── Heart Rate ─────────────────────────────────────────────────────────────
 
     @staticmethod
     def save_bpm(bpm: int):
-        """Save raw BPM readings in the same MongoDB connection."""
-        db.bpm_logs.insert_one({
-            "timestamp": time.time(),
-            "bpm": bpm
-        })
-        db.system_state.update_one(
-            {"_id": "current_state"},
-            {"$set": {"bpm": bpm, "last_bpm_time": time.time()}},
-            upsert=True
+        now = time.time()
+        db.collection("bpm_logs").add({"timestamp": now, "bpm": bpm})
+        db.collection("system_state").document("current").set(
+            {"bpm": bpm, "last_bpm_time": now}, merge=True
         )
 
     @staticmethod
-    def get_bpm_history(limit: int = 60):
-        """Retrieve recent BPM readings from the database."""
-        logs = list(db.bpm_logs.find({}, {"_id": 0}).sort("timestamp", -1).limit(limit))
-        # Return in ascending order of timestamp so it plots from left to right
-        logs.reverse()
-        return logs
+    def get_bpm_history(limit: int = 60) -> list:
+        docs = (
+            db.collection("bpm_logs")
+            .order_by("timestamp", direction=firestore.Query.DESCENDING)
+            .limit(limit)
+            .stream()
+        )
+        result = [d.to_dict() for d in docs]
+        result.reverse()
+        return result
+
+    # ── Medicine Box ───────────────────────────────────────────────────────────
 
     @staticmethod
     def update_medicine_state(lid_open: bool = None, reminder_triggered: bool = None):
-        update_fields = {"last_medicine_time": time.time()}
+        fields = {"last_medicine_time": time.time()}
         if lid_open is not None:
-            update_fields["lid_open"] = lid_open
+            fields["lid_open"] = lid_open
         if reminder_triggered is not None:
-            update_fields["reminder_triggered"] = reminder_triggered
-            
-        db.system_state.update_one(
-            {"_id": "current_state"},
-            {"$set": update_fields},
-            upsert=True
-        )
+            fields["reminder_triggered"] = reminder_triggered
+        db.collection("system_state").document("current").set(fields, merge=True)
 
-    # ── FALL TRACKING ────────────────────────────────────────────────
+    # ── Fall Detection ─────────────────────────────────────────────────────────
+
     @staticmethod
     def log_fall_frame(is_fall: bool, confidence: float, debug_info: dict):
-        """Log raw frame metrics (torso angle, fps, etc)."""
-        log_entry = {
-            "timestamp": time.time(),
-            "is_fall": is_fall,
-            "confidence": confidence,
-        }
-        log_entry.update(debug_info)
-        db.fall_logs.insert_one(log_entry)
+        entry = {"timestamp": time.time(), "is_fall": is_fall, "confidence": confidence}
+        entry.update(debug_info)
+        db.collection("fall_logs").add(entry)
 
-        # Build state update
         state_update = {"is_fall": is_fall, "last_fall_signal": time.time()}
-
-        # If this is an actual fall, snapshot the metrics into system_state
-        # so the dashboard can always read them fast without another query
         if is_fall:
             state_update["last_torso_angle"] = debug_info.get("torso_angle", 0.0)
             state_update["last_fps"] = debug_info.get("fps", 0.0)
-
-        db.system_state.update_one(
-            {"_id": "current_state"},
-            {"$set": state_update},
-            upsert=True
-        )
+        db.collection("system_state").document("current").set(state_update, merge=True)
 
     @staticmethod
-    def get_fall_stats():
-        """Count falls from fall_logs and get last fall metrics."""
-        import math
-        
-        # Get all distinct fall timestamps from fall_logs where is_fall=True
-        fall_frames = list(db.fall_logs.find(
-            {"is_fall": True}, 
-            {"timestamp": 1, "_id": 0}
-        ).sort("timestamp", 1))
-        
-        # Group consecutive fall frames into "incidents" 
-        # (frames within 10 seconds of each other = 1 incident)
-        incidents = []
-        last_incident_time = 0
-        for f in fall_frames:
-            ts = f["timestamp"]
-            if ts - last_incident_time > 10:  # new incident if >10s gap
+    def get_fall_stats() -> dict:
+        # Fetch recent fall_logs ordered by timestamp only (no composite index needed)
+        # Filter is_fall in Python to avoid Firestore composite index requirement
+        all_docs = (
+            db.collection("fall_logs")
+            .order_by("timestamp")
+            .limit(2000)
+            .stream()
+        )
+        frames = [d.to_dict() for d in all_docs if d.to_dict().get("is_fall")]
+
+        incidents, last_time = [], 0
+        for f in frames:
+            ts = f.get("timestamp", 0)
+            if ts - last_time > 10:
                 incidents.append(ts)
-            last_incident_time = ts
-        
+            last_time = ts
+
         total_falls = len(incidents)
-        
-        # Count today's falls
         start_of_today = time.time() - (time.time() % 86400)
         falls_today = len([t for t in incidents if t >= start_of_today])
-        
-        # Last fall time
         last_fall_time = incidents[-1] if incidents else None
-        
-        # Get the latest metrics from an actual fall frame
-        latest_fall_log = db.fall_logs.find_one({"is_fall": True}, sort=[("timestamp", -1)])
-        
+
+        # Latest fall frame (already in ascending order — take the last)
+        latest = frames[-1] if frames else {}
+
         return {
             "fall_count": total_falls,
             "falls_today": falls_today,
             "last_fall_time": last_fall_time,
-            "torso_angle": latest_fall_log.get("torso_angle", 0) if latest_fall_log else 0,
-            "fps": latest_fall_log.get("fps", 0) if latest_fall_log else 0.0,
+            "torso_angle": latest.get("torso_angle", 0),
+            "fps": latest.get("fps", 0.0),
         }
 
-    # ── EVENTS ───────────────────────────────────────────────────────
+    # ── Events ─────────────────────────────────────────────────────────────────
+
     @staticmethod
     def log_event(event_type: str, message: str, severity: str):
-        db.events.insert_one({
+        db.collection("events").add({
             "type": event_type,
             "message": message,
             "severity": severity,
-            "timestamp": time.time()
+            "timestamp": time.time(),
         })
 
     @staticmethod
-    def get_events(limit: int = 60):
-        events = list(db.events.find({}, {"_id": 0}).sort("timestamp", -1).limit(limit))
-        return events
+    def get_events(limit: int = 60) -> list:
+        docs = (
+            db.collection("events")
+            .order_by("timestamp", direction=firestore.Query.DESCENDING)
+            .limit(limit)
+            .stream()
+        )
+        return [d.to_dict() for d in docs]
 
-    # ── MEDICINE SCHEDULE (legacy simple list) ────────────────────────
+    # ── Medicine Schedule ──────────────────────────────────────────────────────
+
     @staticmethod
-    def save_schedule(schedule_list):
-        db.system_state.update_one(
-            {"_id": "current_state"},
-            {"$set": {"schedule": schedule_list}},
-            upsert=True
+    def save_schedule(schedule_list: list):
+        db.collection("system_state").document("current").set(
+            {"schedule": schedule_list}, merge=True
         )
 
     @staticmethod
-    def get_schedule():
-        state = db.system_state.find_one({"_id": "current_state"})
-        return state.get("schedule", []) if state else []
+    def get_schedule() -> list:
+        doc = db.collection("system_state").document("current").get()
+        return doc.to_dict().get("schedule", []) if doc.exists else []
 
-    # ── REPORTS — Scanned prescriptions/documents ─────────────────────
+    # ── Reports ────────────────────────────────────────────────────────────────
+
     @staticmethod
-    def save_report(file_name: str, summary: str, medicines: list, scan_date: str, structured_data: dict = None):
-        """Save a scanned report with its summary and extracted medicines."""
+    def save_report(file_name: str, summary: str, medicines: list,
+                    scan_date: str, structured_data: dict = None) -> str:
         doc = {
             "fileName": file_name,
             "scanDate": scan_date,
             "summary": summary,
-            "medicines": medicines,   # list of { name, dosage, times[], purpose }
+            "medicines": medicines,
             "createdAt": time.time(),
         }
         if structured_data:
             doc.update(structured_data)
-        result = db.reports.insert_one(doc)
-        return str(result.inserted_id)
+        _, ref = db.collection("reports").add(doc)
+        return ref.id
 
     @staticmethod
-    def get_reports(limit: int = 20):
-        """Return the most recent scanned reports."""
-        docs = list(
-            db.reports.find({}, {"_id": 1, "fileName": 1, "scanDate": 1,
-                                 "summary": 1, "medicines": 1, "createdAt": 1})
-                      .sort("createdAt", -1)
-                      .limit(limit)
+    def get_reports(limit: int = 20) -> list:
+        docs = (
+            db.collection("reports")
+            .order_by("createdAt", direction=firestore.Query.DESCENDING)
+            .limit(limit)
+            .stream()
         )
+        result = []
         for d in docs:
-            d["id"] = str(d.pop("_id"))
-        return docs
+            data = d.to_dict()
+            data["id"] = d.id
+            result.append(data)
+        return result
 
-    # ── MEDICINES — Extracted from prescriptions ───────────────────────
+    # ── Medicines ──────────────────────────────────────────────────────────────
+
     @staticmethod
-    def save_medicines_from_scan(medicines: list, source: str = "scan"):
-        """
-        Upsert medicines extracted from a prescription scan.
-        medicines = [{ name, dosage, times, purpose }]
-        """
+    def save_medicines_from_scan(medicines: list, source: str = "scan") -> list:
         saved = []
         for med in medicines:
             name = med.get("name", "").strip()
             if not name:
                 continue
-            doc = {
-                "name":    name,
-                "dosage":  med.get("dosage", ""),
+            doc_id = name.lower().replace(" ", "_")
+            db.collection("medicines").document(doc_id).set({
+                "name": name,
+                "dosage": med.get("dosage", ""),
                 "purpose": med.get("purpose", ""),
-                "times":   med.get("times", []),   # list of "HH:MM" strings
-                "source":  source,
+                "times": med.get("times", []),
+                "source": source,
                 "addedAt": time.time(),
-            }
-            db.medicines.update_one(
-                {"name": {"$regex": f"^{name}$", "$options": "i"}},
-                {"$set": doc},
-                upsert=True
-            )
+            })
             saved.append(name)
         return saved
 
     @staticmethod
-    def get_all_medicines():
-        """Return all medicines in the database."""
-        docs = list(db.medicines.find({}, {"_id": 0}))
-        return docs
+    def get_all_medicines() -> list:
+        docs = db.collection("medicines").stream()
+        return [d.to_dict() for d in docs]
 
     @staticmethod
-    def get_medicines_due_now(window_minutes: int = 2):
-        """
-        Return medicines whose scheduled time falls within ±window_minutes of now.
-        Used by the reminder cron to trigger voice alerts.
-        """
-        import datetime
+    def get_medicines_due_now(window_minutes: int = 2) -> list:
         now = datetime.datetime.now()
         due = []
-        all_meds = list(db.medicines.find({}, {"_id": 0}))
-        for med in all_meds:
+        for med in DatabaseLayer.get_all_medicines():
             for t in med.get("times", []):
                 try:
-                    parts = t.split(":")
-                    med_hour, med_min = int(parts[0]), int(parts[1])
-                    diff_minutes = abs((now.hour * 60 + now.minute) - (med_hour * 60 + med_min))
-                    if diff_minutes <= window_minutes:
+                    h, m = int(t.split(":")[0]), int(t.split(":")[1])
+                    diff = abs((now.hour * 60 + now.minute) - (h * 60 + m))
+                    if diff <= window_minutes:
                         due.append({**med, "scheduledTime": t})
                         break
                 except (ValueError, IndexError):
@@ -278,25 +293,26 @@ class DatabaseLayer:
         return due
 
     @staticmethod
-    def delete_medicine(name: str):
-        """Delete a medicine by name (case-insensitive)."""
-        result = db.medicines.delete_one({"name": {"$regex": f"^{name}$", "$options": "i"}})
-        return result.deleted_count > 0
+    def delete_medicine(name: str) -> bool:
+        doc_id = name.lower().replace(" ", "_")
+        ref = db.collection("medicines").document(doc_id)
+        if ref.get().exists:
+            ref.delete()
+            return True
+        return False
 
-    # ── COMBINED DASHBOARD STATE ──────────────────────────────────────
+    # ── Combined Dashboard State ───────────────────────────────────────────────
+
     @staticmethod
-    def get_full_state():
-        state = db.system_state.find_one({"_id": "current_state"}, {"_id": 0}) or {}
-        
-        # Merge dynamic fall stats (counts/last-time) from events collection
+    def get_full_state() -> dict:
+        doc = db.collection("system_state").document("current").get()
+        state = doc.to_dict() if doc.exists else {}
         stats = DatabaseLayer.get_fall_stats()
         state.update(stats)
-
-        # Expose last-fall metrics with simple names for the dashboard
         state["torso_angle"] = state.get("last_torso_angle", 0.0)
         state["fps"]         = state.get("last_fps", 0.0)
-        
         return state
 
-# Initialize database mapping when this file is imported
+
+# Initialise on import
 DatabaseLayer.initialize_db()

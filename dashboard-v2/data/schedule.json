@@ -1,18 +1,1 @@
-[
-  {
-    "time": "09:08",
-    "medicine": "paracetamol",
-    "dosage": "500",
-    "boxNumber": 1,
-    "taken": true,
-    "missed": false
-  },
-  {
-    "time": "09:11",
-    "medicine": "hchksdgksd",
-    "dosage": "—",
-    "boxNumber": 1,
-    "taken": false,
-    "missed": false
-  }
-]
+[]
