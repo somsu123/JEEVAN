@@ -371,7 +371,7 @@ function AddSlotForm({ onAdd, onClose }: {
   const [name, setName] = useState('');
   const [dosage, setDosage] = useState('');
   const [time, setTime] = useState('08:00');
-  const [box, setBox] = useState<1 | 2 | 3>(1);
+  const [box, setBox] = useState<1 | 2>(1);
   const [notes, setNotes] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -394,9 +394,9 @@ function AddSlotForm({ onAdd, onClose }: {
         <form onSubmit={handleSubmit} className="space-y-3">
           {/* Box Number */}
           <div>
-            <label className="block text-[10px] font-mono text-slate-400 mb-1">PHYSICAL BOX (1–3)</label>
+            <label className="block text-[10px] font-mono text-slate-400 mb-1">PHYSICAL BOX (1–2)</label>
             <div className="flex gap-2">
-              {([1, 2, 3] as const).map(n => (
+              {([1, 2] as const).map(n => (
                 <button
                   key={n}
                   type="button"

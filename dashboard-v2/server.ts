@@ -192,6 +192,23 @@ const braceletStatus = {
   deviceId: "bracelet-01",
 };
 
+// ── Camera online tracker (updated whenever Pi sends a fall-event) ────────────
+const cameraStatus = {
+  online: false,
+  lastSeen: "",   // ISO timestamp of last POST from Pi camera
+};
+
+// Mark camera offline if no event/heartbeat for 60 s
+setInterval(() => {
+  if (cameraStatus.lastSeen) {
+    const age = Date.now() - new Date(cameraStatus.lastSeen).getTime();
+    if (age > 60_000 && cameraStatus.online) {
+      cameraStatus.online = false;
+      console.log("[CAMERA] Went offline — no event received for 60s");
+    }
+  }
+}, 30_000);
+
 // Mark bracelet offline if no heartbeat for 30 s
 setInterval(() => {
   if (braceletStatus.lastSeen) {
@@ -200,6 +217,22 @@ setInterval(() => {
       braceletStatus.online = false;
       broadcastSSE("bracelet_offline", { deviceId: braceletStatus.deviceId });
       console.log("[BRACELET] Went offline — no heartbeat for 30s");
+
+      // ── BUG FIX: auto-resolve any active bracelet fall events ─────────────
+      // A disconnected bracelet cannot sense falls. Stale "active" events from
+      // it should not remain open or re-trigger alerts after a server restart.
+      let resolved = 0;
+      for (const ev of fallEventBuffer) {
+        if (ev.source === "bracelet" && ev.status === "active") {
+          ev.status = "resolved";
+          ev.resolvedAt = new Date().toLocaleTimeString("en-US", { hour12: false });
+          resolved++;
+        }
+      }
+      if (resolved > 0) {
+        console.log(`[BRACELET] Auto-resolved ${resolved} stale bracelet fall event(s)`);
+        broadcastSSE("fall_resolved_batch", { source: "bracelet", count: resolved });
+      }
     }
   }
 }, 15_000);
@@ -278,6 +311,18 @@ function isFallAlertCooling(key: string, cooldownMs = 5 * 60 * 1000): boolean {
 }
 function markFallAlerted(key: string) {
   lastFallAlertAt.set(key, Date.now());
+}
+
+// Per-device rate limit: hard block repeated fall POSTs from same device
+// This is the last line of defence — firmware cooldown + this = no spam
+const deviceFallRateLimit = new Map<string, number>();
+const DEVICE_FALL_RATE_MS = 2 * 60 * 1000; // 2 minutes per device
+function isDeviceFallRateLimited(deviceId: string): boolean {
+  const last = deviceFallRateLimit.get(deviceId) ?? 0;
+  return Date.now() - last < DEVICE_FALL_RATE_MS;
+}
+function markDeviceFallFired(deviceId: string) {
+  deviceFallRateLimit.set(deviceId, Date.now());
 }
 
 // ── Gmail alert for fall event ─────────────────────────────────────────────
@@ -402,6 +447,49 @@ app.post("/api/fall-event", async (req, res) => {
       return res.json({ received: true, ignored: "fall reset" });
     }
 
+    const source: string = body.source || "camera";
+
+    // ── BUG FIX: Validate source device is actually online ────────────────
+    // A device that is disconnected/offline cannot physically detect a fall.
+    // Accepting reports from offline devices causes ghost alerts.
+    if (source === "bracelet" && !braceletStatus.online) {
+      console.warn(`[FALL] REJECTED — bracelet source but bracelet is OFFLINE (deviceId=${braceletStatus.deviceId})`);
+      return res.status(409).json({
+        received: false,
+        rejected: "bracelet is offline — cannot report fall events while disconnected",
+      });
+    }
+    if (source === "camera" && !cameraStatus.online) {
+      // Camera gets a grace period: if it just came online it may not have
+      // sent a heartbeat yet. Only reject if it has been seen before but is now offline.
+      if (cameraStatus.lastSeen) {
+        console.warn(`[FALL] REJECTED — camera source but camera is OFFLINE (last seen: ${cameraStatus.lastSeen})`);
+        return res.status(409).json({
+          received: false,
+          rejected: "camera is offline — cannot report fall events while disconnected",
+        });
+      }
+      // First-time camera event: mark it online and allow through
+    }
+
+    // ── Update camera online status on every valid camera event ───────────
+    if (source === "camera") {
+      cameraStatus.online   = true;
+      cameraStatus.lastSeen = new Date().toISOString();
+    }
+
+    // ── Per-device rate limit: hard-block same device firing within 2 min ─
+    const deviceId: string = body.deviceId || source;
+    if (isDeviceFallRateLimited(deviceId)) {
+      console.warn(`[FALL] RATE-LIMITED — deviceId="${deviceId}" already fired within ${DEVICE_FALL_RATE_MS / 1000}s`);
+      return res.status(429).json({
+        received: false,
+        rateLimited: true,
+        retryAfter: `${DEVICE_FALL_RATE_MS / 1000}s`,
+      });
+    }
+    markDeviceFallFired(deviceId);
+
     const now = new Date();
     let type = "Stumble Warning";
     if ((body.confidence || 0) >= 0.85) type = "Critical Fall";
@@ -415,7 +503,7 @@ app.post("/api/fall-event", async (req, res) => {
         " — " +
         now.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
       type,
-      source: body.source || "camera",
+      source,
       location: body.location || "Living Room",
       confidence: parseFloat(body.confidence) || 0.5,
       status: "active",
@@ -491,14 +579,10 @@ app.get("/api/medicine-schedule", async (_req, res) => {
     const data = await flaskGet("/api/schedule");
     return res.json(data);
   } catch {
-    // Default slots if Flask is offline
+    // Default slots if Flask is offline - empty
     return res.json({
-      schedule: ["08:00", "13:00", "20:00"],
-      slots: [
-        { id: "slot-1", slotNumber: 1, medicineName: "Lisinopril", dosage: "10mg", scheduledTime: "08:00", taken: false, presenceConfirmed: false, touchVerified: false },
-        { id: "slot-2", slotNumber: 2, medicineName: "Metformin", dosage: "500mg", scheduledTime: "13:00", taken: false, presenceConfirmed: false, touchVerified: false },
-        { id: "slot-3", slotNumber: 3, medicineName: "Aspirin", dosage: "75mg", scheduledTime: "20:00", taken: false, presenceConfirmed: false, touchVerified: false },
-      ]
+      schedule: [],
+      slots: []
     });
   }
 });
@@ -506,9 +590,29 @@ app.get("/api/medicine-schedule", async (_req, res) => {
 app.post("/api/medicine-schedule", async (req, res) => {
   try {
     const { slots } = req.body;
+    
+    // Dynamically persist to local schedule.json database for medbox hardware sync
+    if (Array.isArray(slots)) {
+      const doses: DoseEntry[] = slots.map((s: any) => ({
+        time: s.scheduledTime || "08:00",
+        medicine: s.medicineName || "Unknown Medicine",
+        dosage: s.dosage || "—",
+        boxNumber: Number(s.slotNumber) || 1,
+        taken: s.taken || false,
+        takenAt: s.takenAt,
+        missed: s.missed || false,
+      }));
+      writeSchedule(doses);
+      console.log(`[SYNC] Wrote ${doses.length} doses to schedule.json from medicine-schedule.`);
+    }
+
     const times = (slots || []).map((s: any) => s.scheduledTime).filter(Boolean);
-    await flaskPost("/api/schedule", times);
+    await flaskPost("/api/schedule", times).catch(() => {});
+    
     broadcastSSE("medicine_schedule_updated", { slots });
+    // Also broadcast to hardware listeners
+    broadcastSSE("schedule_updated", { doses: readSchedule() });
+    
     return res.json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ error: err?.message });
@@ -518,11 +622,45 @@ app.post("/api/medicine-schedule", async (req, res) => {
 app.post("/api/medicine-taken", async (req, res) => {
   try {
     const { slotId, lidOpen, touchVerified } = req.body;
+    
+    // Update local schedule.json taken status
+    if (slotId && typeof slotId === 'string') {
+      const parts = slotId.split('-');
+      // ID format is slot-boxNumber-time or scanned-index-timestamp
+      let boxNumber = 1;
+      let matched = false;
+      
+      if (parts[0] === 'slot' && parts[1]) {
+        boxNumber = parseInt(parts[1], 10) || 1;
+        matched = true;
+      }
+      
+      const schedule = readSchedule();
+      const updatedSchedule = schedule.map((dose) => {
+        // If matched by boxNumber and not already taken
+        if (matched && Number(dose.boxNumber) === boxNumber && !dose.taken) {
+          dose.taken = true;
+          dose.takenAt = new Date().toLocaleTimeString("en-US", { hour12: false });
+        } else if (!matched && dose.medicine.toLowerCase() === slotId.toLowerCase() && !dose.taken) {
+          // Fallback matching by name
+          dose.taken = true;
+          dose.takenAt = new Date().toLocaleTimeString("en-US", { hour12: false });
+        }
+        return dose;
+      });
+      
+      writeSchedule(updatedSchedule);
+      console.log(`[SYNC] Marked box ${boxNumber} as TAKEN in schedule.json via medicine-taken.`);
+      broadcastSSE("schedule_updated", { doses: updatedSchedule });
+    }
+
     await flaskPost("/api/medicine", {
       lid_open: lidOpen ?? true,
       reminder_triggered: false,
-    });
+    }).catch(() => {});
+    
     broadcastSSE("medicine_taken", { slotId });
+    
     return res.json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ error: err?.message });
@@ -530,6 +668,14 @@ app.post("/api/medicine-taken", async (req, res) => {
 });
 
 app.get("/api/medicine-state", async (_req, res) => {
+  if (medboxStatus.online) {
+    return res.json({
+      lidOpen: medboxLidOpen,
+      reminderTriggered: medboxStatus.state === "PENDING" || medboxStatus.state === "REMINDER",
+      nextReminder: medboxStatus.nextDoseTime || null,
+    });
+  }
+
   try {
     const state = await flaskGet("/api/state");
     return res.json({
@@ -859,12 +1005,8 @@ function readSchedule(): DoseEntry[] {
       return JSON.parse(fs.readFileSync(SCHEDULE_FILE, "utf-8")) as DoseEntry[];
     }
   } catch { /* ignore corrupt file */ }
-  // Default schedule
-  return [
-    { time: "08:00", medicine: "Lisinopril", dosage: "10mg",   boxNumber: 1, taken: false },
-    { time: "14:00", medicine: "Vitamin D",  dosage: "1000IU", boxNumber: 2, taken: false },
-    { time: "20:00", medicine: "Aspirin",    dosage: "81mg",   boxNumber: 3, taken: false },
-  ];
+  // Default schedule - empty
+  return [];
 }
 
 function writeSchedule(doses: DoseEntry[]) {
@@ -903,6 +1045,9 @@ const medboxStatus: MedboxStatusRecord = {
   uptime: 0,
   deviceId: "medbox-01",
 };
+
+let remoteOpenFlag = false;
+let medboxLidOpen = false;
 
 // Mark offline if no heartbeat for 30 s
 setInterval(() => {
@@ -991,7 +1136,7 @@ app.get("/api/medication/schedule", async (_req, res) => {
     // 1. Fetch active medicines from MongoDB (via Flask API)
     const data = await flaskGet("/api/medicines");
     
-    if (data && Array.isArray(data.medicines)) {
+    if (data && Array.isArray(data.medicines) && data.medicines.length > 0) {
       const dbMeds = data.medicines;
       
       // 2. Sort by addedAt descending to get the most recent ones first
@@ -1043,8 +1188,8 @@ app.get("/api/medication/schedule", async (_req, res) => {
   }
 });
 
-// ── POST /api/medication/schedule  (caregiver sets/updates schedule) ──────────
-app.post("/api/medication/schedule-esp", (req, res) => {
+// ── POST /api/medication/schedule (caregiver sets/updates schedule) ──────────
+app.post(["/api/medication/schedule", "/api/medication/schedule-esp"], (req, res) => {
   try {
     const { doses } = req.body as { doses: DoseEntry[] };
     if (!Array.isArray(doses)) return res.status(400).json({ error: "doses array required" });
@@ -1053,6 +1198,340 @@ app.post("/api/medication/schedule-esp", (req, res) => {
     return res.json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ error: err?.message });
+  }
+});
+
+// ── POST /api/hardware/heartbeat (ESP32 heartbeat telemetry) ──────────────────
+app.post("/api/hardware/heartbeat", (req, res) => {
+  const { deviceId, state, presenceDetected, nextDoseTime, uptime, lidOpen } = req.body as {
+    deviceId: string;
+    state: string;
+    presenceDetected: boolean;
+    nextDoseTime: string;
+    uptime: number;
+    lidOpen?: boolean;
+  };
+
+  medboxStatus.online = true;
+  medboxStatus.lastSeen = new Date().toISOString();
+  medboxStatus.state = state || "UNKNOWN";
+  medboxStatus.presenceDetected = presenceDetected ?? false;
+  medboxStatus.nextDoseTime = nextDoseTime || "";
+  medboxStatus.uptime = uptime ?? 0;
+  medboxStatus.deviceId = deviceId || "medbox-01";
+
+  // Dynamically record physical lid-open state
+  if (lidOpen !== undefined) {
+    medboxLidOpen = lidOpen;
+  }
+
+  // Broadcast telemetry updates to the React UI via SSE
+  broadcastSSE("medbox_heartbeat", medboxStatus);
+
+  // Send remote lid-open request active status
+  const response = { remoteOpen: remoteOpenFlag };
+  if (remoteOpenFlag) {
+    console.log(`[HEARTBEAT] Served remote lid-open request to medbox. Resetting flag.`);
+    remoteOpenFlag = false;
+  }
+
+  return res.json(response);
+});
+
+// ── POST /api/hardware/medbox-event (ESP32 pill intake confirmation) ──────────
+app.post("/api/hardware/medbox-event", (req, res) => {
+  const { event, box, medicine, dosage, timestamp, deviceId } = req.body as {
+    event: string;
+    box: number;
+    medicine: string;
+    dosage: string;
+    timestamp: string;
+    deviceId: string;
+  };
+
+  if (event === "DOSE_TAKEN") {
+    console.log(`[EVENT] Box ${box}: ${medicine} (${dosage}) taken at ${timestamp} on ${deviceId}`);
+    
+    // Log to events database/JSON
+    appendEvent({
+      event,
+      boxNumber: box,
+      medicine,
+      dosage,
+      timestamp,
+      deviceId
+    });
+
+    // Auto-update taken state in schedule.json
+    const schedule = readSchedule();
+    let updated = false;
+
+    // Standardize comparison by extracting HH:MM from timestamp
+    const payloadTimeHHMM = timestamp && timestamp.length >= 5 ? timestamp.substring(0, 5) : "";
+
+    const updatedSchedule = schedule.map((dose) => {
+      const medicineMatches = dose.medicine.toLowerCase().trim() === medicine.toLowerCase().trim();
+      const timeMatches = dose.time === payloadTimeHHMM || (timestamp && timestamp.includes(dose.time));
+      const boxMatches = Number(dose.boxNumber) === Number(box);
+
+      if (medicineMatches && timeMatches && boxMatches) {
+        dose.taken = true;
+        dose.takenAt = timestamp;
+        updated = true;
+      }
+      return dose;
+    });
+
+    if (updated) {
+      writeSchedule(updatedSchedule);
+      // Broadcast schedule change to React UI via SSE
+      broadcastSSE("schedule_updated", { doses: updatedSchedule });
+      // Also broadcast specific taken status to animate slots in dashboard
+      broadcastSSE("medicine_taken", { box: Number(box), timestamp });
+    }
+
+    return res.json({ success: true, matched: updated });
+  }
+
+  return res.status(400).json({ error: "Unknown event type" });
+});
+
+// ── POST /api/hardware/remote-open (Caregiver triggers remote open lid) ────────
+app.post(["/api/hardware/remote-open", "/api/medicine-remote-open"], (req, res) => {
+  remoteOpenFlag = true;
+  medboxLidOpen = true; // immediately update lid state in server memory
+  console.log("[MEDBOX] Remote lid-open request registered.");
+  return res.json({ success: true, message: "Remote open lid request queued." });
+});
+
+// ── AI COMPANION (OLLAMA RASPBERRY PI) INTEGRATION ───────────────────────────
+let assistantIp: string | null = null;
+
+// POST /api/assistant/heartbeat - Raspberry Pi registers its IP address dynamically
+app.post("/api/assistant/heartbeat", (req, res) => {
+  const { ip, port } = req.body as { ip: string; port?: number };
+  if (ip) {
+    assistantIp = `http://${ip}:${port || 8080}`;
+    console.log(`[ASSISTANT] Dynamic AI Companion registered at: ${assistantIp}`);
+    return res.json({ status: "ok" });
+  }
+  return res.status(400).json({ error: "ip required" });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AI DICTATOR — Gemini-powered clinical summary (PC-native, no Pi/Ollama needed)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Helper: build a rich patient data snapshot from all MongoDB sources via Flask */
+async function buildPatientSnapshot() {
+  const [heartRes, medRes, eventsRes, reportsRes] = await Promise.allSettled([
+    flaskGet("/api/heartrate/history?limit=120"),
+    flaskGet("/api/medicines"),
+    flaskGet("/api/events"),
+    flaskGet("/api/reports"),
+  ]);
+
+  const bpmHistory: Array<{ bpm: number; timestamp: number }> =
+    heartRes.status === "fulfilled" ? (heartRes.value.history || []) : [];
+  const medicines: any[] =
+    medRes.status === "fulfilled" ? (medRes.value.medicines || []) : [];
+  const events: any[] =
+    eventsRes.status === "fulfilled" ? (Array.isArray(eventsRes.value) ? eventsRes.value : []) : [];
+  const reports: any[] =
+    reportsRes.status === "fulfilled" ? (reportsRes.value.reports || []) : [];
+
+  // — BPM analytics —
+  const bpmVals = bpmHistory.map((b) => b.bpm).filter((v) => v > 0);
+  const avgBpm = bpmVals.length ? Math.round(bpmVals.reduce((a, b) => a + b, 0) / bpmVals.length) : null;
+  const maxBpm = bpmVals.length ? Math.max(...bpmVals) : null;
+  const minBpm = bpmVals.length ? Math.min(...bpmVals) : null;
+  const abnormalBpm = bpmVals.filter((v) => v > 100 || v < 50);
+
+  // — Fall analytics (in-memory buffer + DB events) —
+  const allFalls = [
+    ...fallEventBuffer,
+    ...events.filter((e) => e.type === "fall"),
+  ];
+  const activeFalls = fallEventBuffer.filter((f) => f.status === "active");
+  const now = Date.now();
+  const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
+  const recentFalls = allFalls.filter((f) => {
+    const ts = f.isoTimestamp
+      ? new Date(f.isoTimestamp).getTime()
+      : f.timestamp * 1000;
+    return ts >= thirtyDaysAgo;
+  });
+
+  return {
+    bpmHistory,
+    medicines,
+    events,
+    reports,
+    analytics: {
+      avgBpm,
+      maxBpm,
+      minBpm,
+      abnormalBpmCount: abnormalBpm.length,
+      totalFalls: allFalls.length,
+      activeFalls: activeFalls.length,
+      recentFalls30Days: recentFalls.length,
+    },
+  };
+}
+
+/** Helper: build the Gemini clinical summary prompt */
+function buildDictatorPrompt(snap: Awaited<ReturnType<typeof buildPatientSnapshot>>): string {
+  const { analytics, medicines, reports, events } = snap;
+
+  const medLines = medicines.length
+    ? medicines
+        .map((m) => `${m.name}${m.dosage ? " " + m.dosage : ""}${m.times?.length ? " at " + m.times.join(", ") : ""}${m.purpose ? " (" + m.purpose + ")" : ""}`)
+        .join("; ")
+    : "No prescriptions found in patient records.";
+
+  const reportLines = reports.slice(0, 3).length
+    ? reports
+        .slice(0, 3)
+        .map((r: any) => `[${r.scanDate || "Unknown date"}] ${r.fileName}: ${(r.overview || r.summary || "").slice(0, 200)}`)
+        .join("\n")
+    : "No scanned reports available.";
+
+  const recentEvents = events.slice(0, 5).map((e: any) => e.message || "").filter(Boolean).join("; ") || "No recent events.";
+
+  const bpmSummary = analytics.avgBpm !== null
+    ? `Average ${analytics.avgBpm} BPM (Max ${analytics.maxBpm}, Min ${analytics.minBpm}). ${analytics.abnormalBpmCount} abnormal readings detected.`
+    : "No heart rate data available in records.";
+
+  return `You are Mitra, a senior clinical AI assistant briefing a physician. Generate a professional, structured, doctor-oriented verbal summary of the following patient data. Be factual, concise, and use natural spoken English. Maximum 8 sentences. Do NOT use markdown, bullet points, or headers. Do NOT hallucinate — if data is missing, say so clearly.
+
+PATIENT: Arthur Pendelton, Age 82. Cardiology & IoT Monitoring Program.
+
+HEART RATE (last 120 readings): ${bpmSummary}
+
+FALL EVENTS: ${analytics.recentFalls30Days} fall(s) in the last 30 days. ${analytics.activeFalls} currently active/unresolved. ${analytics.totalFalls} total recorded falls.
+
+CURRENT MEDICATIONS: ${medLines}
+
+RECENT LAB REPORTS:
+${reportLines}
+
+RECENT SYSTEM EVENTS: ${recentEvents}
+
+Provide the verbal clinical briefing now. Begin with "Doctor," and end with a recommendation for the physician's attention.`;
+}
+
+// POST /api/ai-dictator/trigger — Gemini-powered clinical summary (PC-native)
+app.post("/api/ai-dictator/trigger", async (_req, res) => {
+  try {
+    // Reload API key dynamically to pick up .env changes without restart
+    dotenv.config({ override: true });
+    const currentApiKey = getCleanApiKey();
+    const activeAi = currentApiKey
+      ? new GoogleGenAI({ apiKey: currentApiKey, httpOptions: { headers: { "User-Agent": "eldercare-dashboard-v2" } } })
+      : null;
+
+    if (!activeAi) {
+      return res.status(500).json({
+        error: "Gemini AI is not initialized. Please set GEMINI_API_KEY in the .env file.",
+      });
+    }
+
+    console.log("[DICTATOR] Compiling clinical patient data from MongoDB...");
+
+    // 1. Gather all patient data
+    const snap = await buildPatientSnapshot();
+
+    // 2. Build prompt and call Gemini
+    const prompt = buildDictatorPrompt(snap);
+    console.log("[DICTATOR] Sending data to Gemini for clinical summary generation...");
+
+    const response = await activeAi.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: prompt,
+      config: { temperature: 0.3 },
+    });
+
+    const summary = (response.text || "").trim();
+    if (!summary) {
+      throw new Error("Gemini returned an empty summary.");
+    }
+
+    console.log("[DICTATOR] Clinical summary generated successfully.");
+    console.log("[DICTATOR] Summary preview:", summary.slice(0, 120) + "...");
+
+    return res.json({
+      success: true,
+      summary,
+      patientName: "Arthur Pendelton",
+      analytics: snap.analytics,
+    });
+  } catch (err: any) {
+    console.error("[DICTATOR] Summary generation failed:", err.message);
+    return res.status(500).json({ error: `AI Dictator failed: ${err.message}` });
+  }
+});
+
+// POST /api/ai-dictator/ask — Doctor Q&A grounded in MongoDB patient data only
+app.post("/api/ai-dictator/ask", async (req, res) => {
+  try {
+    const { question } = req.body as { question: string };
+    if (!question?.trim()) {
+      return res.status(400).json({ error: "question is required" });
+    }
+
+    dotenv.config({ override: true });
+    const currentApiKey = getCleanApiKey();
+    const activeAi = currentApiKey
+      ? new GoogleGenAI({ apiKey: currentApiKey, httpOptions: { headers: { "User-Agent": "eldercare-dashboard-v2" } } })
+      : null;
+
+    if (!activeAi) {
+      return res.status(500).json({ error: "Gemini AI not initialized." });
+    }
+
+    // Fetch fresh patient data to ground the answer
+    const snap = await buildPatientSnapshot();
+    const { analytics, medicines, reports, events } = snap;
+
+    const medLines = medicines.length
+      ? medicines.map((m: any) => `${m.name} ${m.dosage || ""} — ${m.purpose || "purpose unknown"}`).join("; ")
+      : "None on record.";
+
+    const recentReportSummaries = reports
+      .slice(0, 5)
+      .map((r: any) => `${r.fileName} (${r.scanDate || "?"}): ${(r.overview || r.summary || "").slice(0, 300)}`)
+      .join("\n");
+
+    const recentEvents = events
+      .slice(0, 10)
+      .map((e: any) => `[${e.type}] ${e.message}`)
+      .join("; ");
+
+    const qaPrompt = `You are Mitra, a clinical AI assistant for the ElderCare monitoring system. A physician is asking you a question about patient Arthur Pendelton (Age 82). Answer ONLY using the patient data provided below. If the answer is not found in the data, say exactly: "Information not available in patient records." Keep your answer concise (2–4 sentences), factual, and professional.
+
+PATIENT DATA:
+Heart Rate: Average ${analytics.avgBpm ?? "N/A"} BPM, Max ${analytics.maxBpm ?? "N/A"}, Min ${analytics.minBpm ?? "N/A"}. Abnormal readings: ${analytics.abnormalBpmCount}.
+Falls (last 30 days): ${analytics.recentFalls30Days}. Total recorded: ${analytics.totalFalls}. Active unresolved: ${analytics.activeFalls}.
+Medications: ${medLines}
+Recent Lab Reports:
+${recentReportSummaries || "No reports available."}
+Recent System Events: ${recentEvents || "None."}
+
+DOCTOR'S QUESTION: ${question.trim()}
+
+Answer:`;
+
+    const response = await activeAi.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: qaPrompt,
+      config: { temperature: 0.2 },
+    });
+
+    const answer = (response.text || "").trim() || "Information not available in patient records.";
+    return res.json({ success: true, answer });
+  } catch (err: any) {
+    console.error("[DICTATOR/ASK] Q&A failed:", err.message);
+    return res.status(500).json({ error: `Q&A failed: ${err.message}` });
   }
 });
 

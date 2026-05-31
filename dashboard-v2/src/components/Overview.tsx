@@ -19,6 +19,7 @@ import {
   Table
 } from 'lucide-react';
 import { ScanResult, VitalState } from '../types';
+import AiDictator from './AiDictator';
 
 interface OverviewProps {
   scannedHistory: ScanResult[];
@@ -35,6 +36,13 @@ export default function Overview({
 }: OverviewProps) {
   // Active selected report index for in-depth dashboard analysis
   const [selectedReportIdx, setSelectedReportIdx] = useState<number>(0);
+
+  // AI Dictator modal state (button opens modal; modal handles all Gemini + TTS)
+  const [dictatorOpen, setDictatorOpen] = useState(false);
+
+  const handleTriggerAiDictator = () => {
+    setDictatorOpen(true);
+  };
 
   // NLP Parser to extract metrics dynamically from the scanned medical reports
   const extractMetricsFromReports = () => {
@@ -165,7 +173,8 @@ export default function Overview({
   };
 
   return (
-    <div className="space-y-6" id="report-analytics-dashboard">
+    <>
+      <div className="space-y-6" id="report-analytics-dashboard">
       
       {/* Overview Headway Banner */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800/60 pb-5">
@@ -178,6 +187,14 @@ export default function Overview({
             <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
             <span className="text-xs font-semibold text-emerald-400 font-mono">CLINICAL DATABASE ONLINE</span>
           </div>
+          <button 
+            onClick={handleTriggerAiDictator}
+            className="px-3.5 py-1.5 font-bold text-xs rounded-xl transition flex items-center gap-1.5 shadow-lg bg-violet-600 hover:bg-violet-500 text-white shadow-violet-600/10"
+          >
+            <Sparkles className="h-3.5 w-3.5 shrink-0 animate-pulse" />
+            <span>AI Dictator 🎙️</span>
+          </button>
+
           <button 
             onClick={() => onNavigate('report-scanner')}
             className="px-3.5 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold text-xs rounded-xl transition flex items-center gap-1.5 shadow-lg shadow-emerald-500/10"
@@ -374,5 +391,9 @@ export default function Overview({
       </div>
 
     </div>
+
+    {/* AI Dictator modal — mounts here, invisible until dictatorOpen = true */}
+    <AiDictator open={dictatorOpen} onClose={() => setDictatorOpen(false)} />
+  </>
   );
 }

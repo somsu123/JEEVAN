@@ -5,7 +5,11 @@ import json
 import os
 import time
 import threading
-import keyboard
+try:
+    import keyboard
+    HAS_KEYBOARD = True
+except (ImportError, RuntimeError):
+    HAS_KEYBOARD = False
 import re
 import random
 from datetime import datetime, timedelta
@@ -27,7 +31,49 @@ except ImportError:
 
 
 
-OLLAMA_MODEL = "llama3:latest"
+def discover_ollama_model():
+    """Dynamically discover the best installed Ollama model, preferring llama3.2."""
+    # 1. Check environment variable override
+    if "OLLAMA_MODEL" in os.environ:
+        return os.environ["OLLAMA_MODEL"]
+    
+    # 2. Check installed models dynamically
+    try:
+        import ollama
+        res = ollama.list()
+        installed = []
+        if hasattr(res, "models"):
+            installed = [m.model for m in res.models if hasattr(m, "model")]
+        elif isinstance(res, dict) and "models" in res:
+            installed = [m.get("model") for m in res["models"] if isinstance(m, dict)]
+        else:
+            installed = [getattr(m, "model", "") or m.get("model", "") for m in res]
+        
+        # Clean list
+        installed = [m for m in installed if m]
+        
+        # Priority list of models we prefer
+        preferred = ["llama3.2:latest", "llama3.2", "llama3:latest", "llama3", "phi3:latest", "gemma2:latest", "gemma:latest", "mistral:latest"]
+        for p in preferred:
+            if p in installed:
+                return p
+        
+        # If any preferred model is a partial match
+        for p in preferred:
+            p_base = p.split(":")[0]
+            for inst in installed:
+                if inst.startswith(p_base):
+                    return inst
+                    
+        # If we have any installed model, use it
+        if installed:
+            return installed[0]
+    except Exception as e:
+        print(f"[WARN]: Dynamic model discovery failed: {e}")
+        
+    return "llama3.2:latest"  # Ultimate fallback
+
+OLLAMA_MODEL = discover_ollama_model()
 WEATHER_CITY = "Kolkata"
 SLEEP_TIMEOUT_SECONDS = 30
 WAKE_KEY = "g"
@@ -1235,11 +1281,15 @@ class ElderCareAssistant:
                     self._handle_reminder(reminder)
                 return
 
-            if keyboard.is_pressed(WAKE_KEY):
-                self.is_sleeping = False
-                self.voice.speak("I am awake now! How can I help you, Srijan?")
-                time.sleep(0.5)
-                return
+            if HAS_KEYBOARD:
+                try:
+                    if keyboard.is_pressed(WAKE_KEY):
+                        self.is_sleeping = False
+                        self.voice.speak("I am awake now! How can I help you, Srijan?")
+                        time.sleep(0.5)
+                        return
+                except Exception:
+                    pass
 
             time.sleep(0.2)
 
@@ -1578,7 +1628,128 @@ class ElderCareAssistant:
 
 
 # ══════════════════════════════════════════════════
-# 18. ENTRY POINT
+# 18. CENTRALIZED AI DICTATOR TRIGGERS & HTTP SERVER
+# ══════════════════════════════════════════════════
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import socket
+
+def get_local_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
+def register_with_server():
+    server_ip = "10.206.196.135"  # Central Dashboard PC IP
+    try:
+        # Give a small 3-second delay to ensure local networking has fully initialized
+        time.sleep(3)
+        local_ip = get_local_ip()
+        print(f"[INIT]: Local IP is {local_ip}. Registering with central dashboard...")
+        import requests
+        requests.post(f"http://{server_ip}:5050/api/assistant/heartbeat", json={
+            "ip": local_ip,
+            "port": 8080
+        }, timeout=4)
+        print("[INIT]: Registered successfully with central dashboard!")
+    except Exception as e:
+        print(f"[WARN]: Failed to register companion IP with dashboard: {e}")
+
+def run_ai_dictation_walkthrough(payload):
+    try:
+        import ollama
+        print("\n[DICTATOR]: Triggered! Compiling clinical patient health data...")
+        
+        patient_name = payload.get("patientName", "Arthur Pendelton")
+        bpm_history = payload.get("bpmHistory", [])
+        fall_events = payload.get("fallEvents", [])
+        medicines = payload.get("medicines", [])
+        logs = payload.get("logs", [])
+        
+        bpm_vals = [b.get("bpm", b.get("value", 72)) for b in bpm_history if b]
+        avg_bpm = sum(bpm_vals) / len(bpm_vals) if bpm_vals else 72
+        max_bpm = max(bpm_vals) if bpm_vals else 72
+        min_bpm = min(bpm_vals) if bpm_vals else 72
+        
+        active_falls = [f for f in fall_events if f.get("status") == "active"]
+        
+        med_list = []
+        for m in medicines:
+            med_list.append(f"{m.get('name')} ({m.get('dosage')}) scheduled at {', '.join(m.get('times', []))}")
+        
+        prompt = (
+            f"You are Mitra, a professional clinical AI health assistant. Summarize this patient's data for the doctor:\n"
+            f"Patient: {patient_name}\n"
+            f"Vitals: Average Heart Rate {avg_bpm:.1f} BPM (Max {max_bpm}, Min {min_bpm})\n"
+            f"Falls: {len(fall_events)} occurrences total, with {len(active_falls)} currently active/unresolved.\n"
+            f"Prescriptions: {'; '.join(med_list)}\n"
+            f"Recent logs: {', '.join([l.get('message') for l in logs[:3]])}\n\n"
+            f"Provide a highly professional, structured, yet reassuring verbal summary for the physician. "
+            f"Speak naturally, under 6 sentences. Do NOT use markdown list formatting."
+        )
+        
+        response = ollama.chat(
+            model=OLLAMA_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            options={"temperature": 0.3}
+        )
+        
+        summary = response["message"]["content"].strip()
+        summary = summary.replace("**", "").replace("*", "").replace("#", "")
+        
+        print("\n=== AI DICTATOR CLINICAL SUMMARY ===")
+        print(summary)
+        print("=====================================\n")
+        
+        # Physically read aloud using VoiceEngine
+        voice = VoiceEngine()
+        voice.speak(f"Doctor, here is the AI Dictator clinical summary for {patient_name}.")
+        voice.speak(summary)
+        
+    except Exception as e:
+        print(f"[ERROR]: AI Dictator walkthrough failed — {e}")
+
+class TriggerHandler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        if self.path == '/api/ai-dictator/trigger':
+            try:
+                content_length = int(self.headers['Content-Length'])
+                post_data = self.rfile.read(content_length)
+                payload = json.loads(post_data.decode('utf-8'))
+                
+                # Trigger AI dictation physically in a background thread so the HTTP response returns immediately
+                threading.Thread(target=run_ai_dictation_walkthrough, args=(payload,), daemon=True).start()
+                
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"success": True}).encode('utf-8'))
+            except Exception as e:
+                self.send_response(500)
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
+        else:
+            self.send_response(404)
+            self.end_headers()
+            
+    def log_message(self, format, *args):
+        # Suppress HTTP server logging in stdout to keep assistant log clean
+        return
+
+def start_trigger_server():
+    try:
+        server = HTTPServer(('0.0.0.0', 8080), TriggerHandler)
+        print("[INIT]: AI Dictator HTTP trigger server listening on port 8080...")
+        server.serve_forever()
+    except Exception as e:
+        print(f"[ERROR]: Failed to start HTTP trigger server: {e}")
+
+# ══════════════════════════════════════════════════
+# 19. ENTRY POINT
 # ══════════════════════════════════════════════════
 if __name__ == "__main__":
     print("[INFO]: Checking dependencies...")
@@ -1592,10 +1763,8 @@ if __name__ == "__main__":
         import pyttsx3
     except ImportError:
         missing.append("pyttsx3")
-    try:
-        import keyboard
-    except ImportError:
-        missing.append("keyboard")
+    if not HAS_KEYBOARD:
+        missing.append("keyboard (optional, physical G-key sleep wake-up will be disabled)")
     try:
         import requests
     except ImportError:
@@ -1611,7 +1780,7 @@ if __name__ == "__main__":
         for pkg in missing:
             print(f"         - {pkg}")
         print("         Install with: pip install SpeechRecognition pyttsx3 keyboard ollama pyaudio requests")
-        if any(p in ["SpeechRecognition", "pyttsx3", "keyboard"] for p in missing):
+        if any(p in ["SpeechRecognition", "pyttsx3"] for p in missing):
             print("[ERROR]: Critical dependencies missing. Exiting.")
             exit(1)
 
@@ -1622,6 +1791,12 @@ if __name__ == "__main__":
     print(f"[INFO]: Chat history file: {CHAT_HISTORY_FILE}")
     print(f"[INFO]: Log file: {LOG_FILE}")
     print("")
+
+    # Start the HTTP trigger server for dashboard communications
+    threading.Thread(target=start_trigger_server, daemon=True).start()
+    
+    # Register this companion IP address with the Express server dynamically
+    threading.Thread(target=register_with_server, daemon=True).start()
 
     assistant = ElderCareAssistant()
     assistant.run()

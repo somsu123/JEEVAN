@@ -36,11 +36,7 @@ const makeDefaultVitals = (): VitalState => ({
   lastUpdated: new Date().toLocaleTimeString('en-US', { hour12: false }),
 });
 
-const DEFAULT_SLOTS: MedicineSlot[] = [
-  { id: 'slot-1', slotNumber: 1, medicineName: 'Lisinopril',  dosage: '10mg',  scheduledTime: '08:00', taken: false, presenceConfirmed: false, touchVerified: false, notes: 'Take with water in the morning' },
-  { id: 'slot-2', slotNumber: 2, medicineName: 'Metformin',   dosage: '500mg', scheduledTime: '13:00', taken: false, presenceConfirmed: false, touchVerified: false, notes: 'Take after lunch' },
-  { id: 'slot-3', slotNumber: 3, medicineName: 'Aspirin',     dosage: '75mg',  scheduledTime: '20:00', taken: false, presenceConfirmed: false, touchVerified: false, notes: 'Evening dose with dinner' },
-];
+const DEFAULT_SLOTS: MedicineSlot[] = [];
 
 const DEFAULT_SCAN_HISTORY: ScanResult[] = [
   {

@@ -8,7 +8,15 @@ export type ViewType =
   | 'live-vitals'
   | 'fall-alerts'
   | 'medicine'
-  | 'report-scanner';
+  | 'report-scanner'
+  | 'ai-dictator';
+
+// ─── AI Dictator Q&A ─────────────────────────────────────────────────────────
+export interface AiDictatorMessage {
+  role: 'assistant' | 'doctor';
+  text: string;
+  timestamp: string;
+}
 
 // ─── Live Vitals ─────────────────────────────────────────────────────────────
 export interface VitalReading {
