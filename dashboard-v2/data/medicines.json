@@ -1,0 +1,106 @@
+[
+  {
+    "name": "Numlo-TM",
+    "times": [
+      "21:00"
+    ],
+    "dosage": "5mg",
+    "purpose": "To help manage your blood pressure.",
+    "addedAt": 1780220637576
+  },
+  {
+    "name": "Vylda-DM",
+    "times": [
+      "08:00"
+    ],
+    "dosage": "100/1000mg",
+    "purpose": "To help control your blood sugar levels, commonly used for diabetes.",
+    "addedAt": 1780220637576
+  },
+  {
+    "name": "Melmet SR",
+    "times": [
+      "08:00"
+    ],
+    "dosage": "500mg",
+    "purpose": "Another medication to help control your blood sugar levels, commonly used for diabetes.",
+    "addedAt": 1780220637576
+  },
+  {
+    "name": "Ecaspirin-AV",
+    "times": [
+      "22:00"
+    ],
+    "dosage": "75/10mg",
+    "purpose": "To protect your heart and help manage cholesterol levels.",
+    "addedAt": 1780220637576
+  },
+  {
+    "name": "Rabinos-D",
+    "times": [
+      "07:00"
+    ],
+    "dosage": "1 capsule",
+    "purpose": "To reduce stomach acid and prevent heartburn or indigestion.",
+    "addedAt": 1780220637576
+  },
+  {
+    "name": "Vibrante",
+    "times": [
+      "13:00"
+    ],
+    "dosage": "1 tablet",
+    "purpose": "For general well-being or as a nutritional supplement.",
+    "addedAt": 1780220637576
+  },
+  {
+    "name": "Zerodol-P",
+    "times": [
+      "09:00",
+      "21:00"
+    ],
+    "dosage": "1 tablet",
+    "purpose": "To relieve pain and reduce inflammation for a short period (for 5 days).",
+    "addedAt": 1780220637576
+  },
+  {
+    "name": "Candid-V ointment",
+    "times": [
+      "08:00"
+    ],
+    "dosage": "apply locally",
+    "purpose": "A topical cream to be applied to the affected area as directed by your doctor.",
+    "addedAt": 1780220637576
+  },
+  {
+    "name": "Alkalol Syrup",
+    "times": [
+      "08:00",
+      "14:00",
+      "20:00"
+    ],
+    "dosage": "2 tsp with one glass of water",
+    "purpose": "To help with burning sensation during urination for 7 days.",
+    "addedAt": 1780220360177
+  },
+  {
+    "name": "Lfx",
+    "times": [
+      "21:00"
+    ],
+    "dosage": "750mg",
+    "purpose": "An antibiotic to treat bacterial infections, possibly related to urinary issues (for 7 days).",
+    "addedAt": 1780220637576
+  },
+  {
+    "name": "Syn. Alkalol",
+    "times": [
+      "08:00",
+      "14:00",
+      "20:00"
+    ],
+    "dosage": "2 teaspoonfuls",
+    "purpose": "To help make your urine less acidic and relieve urinary discomfort (for 7 days).",
+    "addedAt": 1780220637576
+  }
+]

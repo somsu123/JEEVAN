@@ -1,1 +1,26 @@
-[]
+[
+  {
+    "type": "scan",
+    "message": "Prescription report 'WhatsApp Image 2026-05-30 at 16.13.28.jpeg' scanned successfully",
+    "severity": "info",
+    "timestamp": 1780220666
+  },
+  {
+    "type": "scan",
+    "message": "Prescription report 'WhatsApp Image 2026-05-31 at 13.54.39.jpeg' scanned successfully",
+    "severity": "info",
+    "timestamp": 1780220637
+  },
+  {
+    "type": "fall",
+    "message": "Fall detected: Stumble Warning at Living Room",
+    "severity": "critical",
+    "timestamp": 1780220580
+  },
+  {
+    "type": "scan",
+    "message": "Prescription report 'WhatsApp Image 2026-05-31 at 13.54.39.jpeg' scanned successfully",
+    "severity": "info",
+    "timestamp": 1780220360
+  }
+]

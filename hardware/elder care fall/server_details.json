@@ -1,0 +1,27 @@
+{
+  "wifi": {
+    "ssid": "ElderCare",
+    "password": "ami bolbona"
+  },
+  "dashboard_server": {
+    "host_ip": "10.206.196.135",
+    "port": 5050,
+    "base_url": "http://10.206.196.135:5050",
+    "fall_alert_endpoint": "http://10.206.196.135:5050/api/fall-event"
+  },
+  "flask_backend_server": {
+    "host_ip": "10.206.196.135",
+    "port": 5000,
+    "base_url": "http://10.206.196.135:5000",
+    "fall_update_endpoint": "http://10.206.196.135:5000/api/fall"
+  },
+  "wearable_bracelet": {
+    "device_id": "bracelet-01",
+    "vitals_endpoint": "http://10.206.196.135:5050/api/bracelet/vitals",
+    "heartbeat_endpoint": "http://10.206.196.135:5050/api/bracelet/heartbeat"
+  },
+  "pi_camera_sensor": {
+    "device_id": "pi-camera-01",
+    "location": "Living Room"
+  }
+}

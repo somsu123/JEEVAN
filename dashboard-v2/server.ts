@@ -193,62 +193,71 @@ interface FallEventRecord {
   resolvedAt?: string;
 }
 
-// ── MongoDB-backed fall event helpers ─────────────────────────────────────────
+// ── Firebase-backed fall event helpers ─────────────────────────────────────────
 async function saveFallEvent(event: FallEventRecord): Promise<void> {
-  if (!mongoReady()) return;
+  if (!fireReady()) return;
   try {
-    await colFallEvents.insertOne({ ...event });
+    await fireDb.collection("fall_events").doc(event.id).set({ ...event });
   } catch (err: any) {
-    console.error("[MongoDB] saveFallEvent failed:", err.message);
+    console.error("[Firebase] saveFallEvent failed:", err.message);
   }
 }
 
 async function getFallEvents(limit = 50): Promise<FallEventRecord[]> {
-  if (!mongoReady()) return [];
+  if (!fireReady()) return [];
   try {
-    const docs = await colFallEvents
-      .find({}, { projection: { _id: 0 } })
-      .sort({ isoTimestamp: -1 })
+    const snap = await fireDb.collection("fall_events")
+      .orderBy("isoTimestamp", "desc")
       .limit(limit)
-      .toArray();
-    return docs as unknown as FallEventRecord[];
-  } catch {
+      .get();
+    return snap.docs.map((d) => d.data() as FallEventRecord);
+  } catch (err: any) {
+    console.error("[Firebase] getFallEvents failed:", err.message);
     return [];
   }
 }
 
 async function resolveFallEvent(id: string): Promise<boolean> {
-  if (!mongoReady()) return false;
+  if (!fireReady()) return false;
   try {
     const resolvedAt = new Date().toLocaleTimeString("en-US", { hour12: false });
-    const result = await colFallEvents.updateOne(
-      { id },
-      { $set: { status: "resolved", resolvedAt } }
-    );
-    return result.modifiedCount > 0;
+    await fireDb.collection("fall_events").doc(id).update({
+      status: "resolved",
+      resolvedAt
+    });
+    return true;
   } catch {
     return false;
   }
 }
 
 async function resolveAllFallEventsBySource(source: string): Promise<number> {
-  if (!mongoReady()) return 0;
+  if (!fireReady()) return 0;
   try {
     const resolvedAt = new Date().toLocaleTimeString("en-US", { hour12: false });
-    const result = await colFallEvents.updateMany(
-      { source, status: "active" },
-      { $set: { status: "resolved", resolvedAt } }
-    );
-    return result.modifiedCount;
+    const snap = await fireDb.collection("fall_events")
+      .where("source", "==", source)
+      .where("status", "==", "active")
+      .get();
+    if (snap.empty) return 0;
+    const batch = fireDb.batch();
+    snap.docs.forEach((doc) => {
+      batch.update(doc.ref, { status: "resolved", resolvedAt });
+    });
+    await batch.commit();
+    return snap.size;
   } catch {
     return 0;
   }
 }
 
 async function getActiveFallCount(): Promise<number> {
-  if (!mongoReady()) return 0;
+  if (!fireReady()) return 0;
   try {
-    return await colFallEvents.countDocuments({ status: "active" });
+    const snap = await fireDb.collection("fall_events")
+      .where("status", "==", "active")
+      .get();
+    return snap.size;
   } catch {
     return 0;
   }
@@ -334,6 +343,7 @@ app.post("/api/vitals", async (req, res) => {
   try {
     const body = req.body;
     if (body.bpm !== undefined) {
+      saveBpmLocally(body.bpm);
       await flaskPost("/api/heartrate", { bpm: body.bpm }).catch(() => {});
     }
     broadcastSSE("vitals_update", body);
@@ -386,6 +396,7 @@ setInterval(async () => {
 
       // Auto-resolve stale bracelet fall events in MongoDB
       const resolved = await resolveAllFallEventsBySource("bracelet");
+      resolveAllFallEventsBySourceLocally("bracelet");
       if (resolved > 0) {
         console.log(`[BRACELET] Auto-resolved ${resolved} stale bracelet fall event(s) in MongoDB`);
         broadcastSSE("fall_resolved_batch", { source: "bracelet", count: resolved });
@@ -412,6 +423,9 @@ app.post("/api/bracelet/vitals", async (req, res) => {
 
   // Broadcast to dashboard via SSE
   broadcastSSE("vitals_update", { heartRate: bpm, bpm, alert, fingerPresent });
+
+  // Save BPM locally
+  saveBpmLocally(bpm);
 
   // Forward to Flask for DB persistence
   if (bpm > 0) {
@@ -444,13 +458,12 @@ app.post("/api/bracelet/heartbeat", (req, res) => {
   braceletStatus.uptime        = uptime ?? 0;
   braceletStatus.deviceId      = deviceId ?? "bracelet-01";
 
-  // Persist bracelet status to MongoDB
-  if (mongoReady()) {
-    colDeviceStatus.updateOne(
-      { _id: "bracelet" as any },
-      { $set: { ...braceletStatus, updatedAt: new Date().toISOString() } },
-      { upsert: true }
-    ).catch(() => {});
+  // Persist bracelet status to Firebase
+  if (fireReady()) {
+    fireDb.collection("device_status").doc("bracelet").set({
+      ...braceletStatus,
+      updatedAt: new Date().toISOString()
+    }, { merge: true }).catch(() => {});
   }
 
   broadcastSSE("bracelet_heartbeat", braceletStatus);
@@ -675,8 +688,10 @@ app.post("/api/fall-event", async (req, res) => {
       status: "active",
     };
 
-    // Persist to MongoDB Atlas
+    // Persist to Firebase and Local files
     await saveFallEvent(event);
+    saveFallEventLocally(event);
+    logEventLocally("fall", `Fall detected: ${event.type} at ${event.location}`, "critical");
 
     // Forward to Flask backend
     try {
@@ -734,6 +749,7 @@ app.get("/api/fall-events", async (_req, res) => {
 
 app.patch("/api/fall-event/:id/resolve", async (req, res) => {
   const { id } = req.params;
+  resolveFallEventLocally(id);
   const ok = await resolveFallEvent(id);
   if (!ok) return res.status(404).json({ error: "Event not found" });
   broadcastSSE("fall_resolved", { id });
@@ -768,6 +784,7 @@ app.post("/api/medicine-schedule", async (req, res) => {
         missed: s.missed || false,
       }));
       await writeSchedule(doses);
+      saveScheduleLocally(doses);
       console.log(`[MongoDB] Wrote ${doses.length} doses to medbox_schedule.`);
     }
 
@@ -813,6 +830,7 @@ app.post("/api/medicine-taken", async (req, res) => {
       });
       
       await writeSchedule(updatedSchedule);
+      saveScheduleLocally(updatedSchedule);
       console.log(`[MongoDB] Marked box ${boxNumber} as TAKEN in medbox_schedule.`);
       broadcastSSE("schedule_updated", { doses: updatedSchedule });
     }
@@ -1071,10 +1089,26 @@ app.post("/api/scan-report", async (req, res) => {
 
     // Automatically save the scanned report AND the raw extracted schema fields to MongoDB Atlas via Flask
     try {
+      const scanDate = new Date().toLocaleTimeString("en-US", { hour12: false }) + " — " + new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+      saveReportLocally({
+        fileName: fileName || "unnamed document",
+        summary: summaryText,
+        scanDate,
+        overview: schemaData.overview,
+        metrics: schemaData.metrics,
+        actions: schemaData.actions,
+        doctorQuestions: schemaData.doctorQuestions,
+        disclaimer: schemaData.disclaimer
+      });
+      if (schemaData.medicines && schemaData.medicines.length > 0) {
+        saveMedicinesLocally(schemaData.medicines);
+      }
+      logEventLocally("scan", `Prescription report '${fileName}' scanned successfully`, "info");
+
       await flaskPost("/api/reports/save", {
         fileName: fileName || "unnamed document",
         summary: summaryText,
-        scanDate: new Date().toLocaleTimeString("en-US", { hour12: false }) + " — " + new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+        scanDate,
         medicines: schemaData.medicines || [],
         overview: schemaData.overview,
         metrics: schemaData.metrics,
@@ -1128,6 +1162,8 @@ app.post("/api/medicines/add", async (req, res) => {
       name: string; dosage?: string; purpose?: string; times?: string[];
     };
     if (!name) return res.status(400).json({ error: "name required" });
+    saveMedicinesLocally([{ name, dosage: dosage || "", purpose: purpose || "", times: times || ["08:00"] }]);
+    logEventLocally("medicine", `Medicine '${name}' added manually`, "info");
     await flaskPost("/api/medicines/save", {
       medicines: [{ name, dosage: dosage || "", purpose: purpose || "", times: times || ["08:00"] }],
       source: "manual",
@@ -1143,6 +1179,8 @@ app.post("/api/medicines/add", async (req, res) => {
 app.delete("/api/medicines/:name", async (req, res) => {
   const { name } = req.params;
   try {
+    deleteMedicineLocally(name);
+    logEventLocally("medicine", `Medicine '${name}' deleted`, "info");
     const result = await fetch(`${FLASK_URL}/api/medicines/${encodeURIComponent(name)}`, { method: "DELETE" });
     const data = await result.json();
     broadcastSSE("medicine_deleted", { name });
@@ -1363,13 +1401,12 @@ app.post("/api/hardware/heartbeat", (req, res) => {
     medboxLidOpen = lidOpen;
   }
 
-  // Persist medbox status to MongoDB Atlas device_status
-  if (mongoReady()) {
-    colDeviceStatus.updateOne(
-      { _id: "medbox-01" as any },
-      { $set: { ...medboxStatus, updatedAt: new Date().toISOString() } },
-      { upsert: true }
-    ).catch(() => {});
+  // Persist medbox status to Firebase
+  if (fireReady()) {
+    fireDb.collection("device_status").doc("medbox-01").set({
+      ...medboxStatus,
+      updatedAt: new Date().toISOString()
+    }, { merge: true }).catch(() => {});
   }
 
   // Broadcast telemetry updates to the React UI via SSE
@@ -1458,7 +1495,149 @@ app.post("/api/assistant/heartbeat", (req, res) => {
 // AI DICTATOR — Gemini-powered clinical summary (PC-native, no Pi/Ollama needed)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Helper: build a rich patient data snapshot from all MongoDB sources via Flask */
+// ── Local File Persistence Helpers for Robust Fallback ─────────────────────────
+function saveBpmLocally(bpm: number) {
+  const filePath = path.join(process.cwd(), "data", "bpm.json");
+  let list: Array<{ bpm: number; timestamp: number }> = [];
+  try {
+    if (fs.existsSync(filePath)) {
+      list = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+    }
+  } catch {}
+  list.push({ bpm, timestamp: Math.floor(Date.now() / 1000) });
+  if (list.length > 200) list.shift();
+  try {
+    fs.writeFileSync(filePath, JSON.stringify(list, null, 2), "utf-8");
+  } catch (err: any) {
+    console.error("Failed to write local bpm file:", err.message);
+  }
+}
+
+function saveFallEventLocally(event: FallEventRecord) {
+  const filePath = path.join(process.cwd(), "data", "fall_events.json");
+  let list: FallEventRecord[] = [];
+  try {
+    if (fs.existsSync(filePath)) {
+      list = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+    }
+  } catch {}
+  list.unshift(event);
+  if (list.length > 100) list.pop();
+  try {
+    fs.writeFileSync(filePath, JSON.stringify(list, null, 2), "utf-8");
+  } catch (err: any) {
+    console.error("Failed to write local fall_events file:", err.message);
+  }
+}
+
+function resolveFallEventLocally(id: string) {
+  const filePath = path.join(process.cwd(), "data", "fall_events.json");
+  try {
+    if (fs.existsSync(filePath)) {
+      let list: FallEventRecord[] = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+      const resolvedAt = new Date().toLocaleTimeString("en-US", { hour12: false });
+      list = list.map((f) => (f.id === id ? { ...f, status: "resolved" as const, resolvedAt } : f));
+      fs.writeFileSync(filePath, JSON.stringify(list, null, 2), "utf-8");
+    }
+  } catch (err: any) {
+    console.error("Failed to update local fall_events file:", err.message);
+  }
+}
+
+function resolveAllFallEventsBySourceLocally(source: string) {
+  const filePath = path.join(process.cwd(), "data", "fall_events.json");
+  try {
+    if (fs.existsSync(filePath)) {
+      let list: FallEventRecord[] = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+      const resolvedAt = new Date().toLocaleTimeString("en-US", { hour12: false });
+      list = list.map((f) => (f.source === source && f.status === "active" ? { ...f, status: "resolved" as const, resolvedAt } : f));
+      fs.writeFileSync(filePath, JSON.stringify(list, null, 2), "utf-8");
+    }
+  } catch (err: any) {
+    console.error("Failed to update local fall_events file:", err.message);
+  }
+}
+
+function saveScheduleLocally(doses: DoseEntry[]) {
+  const filePath = path.join(process.cwd(), "data", "schedule.json");
+  try {
+    fs.writeFileSync(filePath, JSON.stringify(doses, null, 2), "utf-8");
+  } catch (err: any) {
+    console.error("Failed to write local schedule file:", err.message);
+  }
+}
+
+function saveMedicinesLocally(medicines: any[]) {
+  const filePath = path.join(process.cwd(), "data", "medicines.json");
+  let existing: any[] = [];
+  try {
+    if (fs.existsSync(filePath)) {
+      existing = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+    }
+  } catch {}
+  for (const med of medicines) {
+    const idx = existing.findIndex((m) => m.name.toLowerCase() === med.name.toLowerCase());
+    if (idx >= 0) {
+      existing[idx] = { ...existing[idx], ...med, addedAt: Date.now() };
+    } else {
+      existing.push({ ...med, addedAt: Date.now() });
+    }
+  }
+  try {
+    fs.writeFileSync(filePath, JSON.stringify(existing, null, 2), "utf-8");
+  } catch (err: any) {
+    console.error("Failed to write local medicines file:", err.message);
+  }
+}
+
+function deleteMedicineLocally(name: string) {
+  const filePath = path.join(process.cwd(), "data", "medicines.json");
+  try {
+    if (fs.existsSync(filePath)) {
+      let list: any[] = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+      list = list.filter((m) => m.name.toLowerCase() !== name.toLowerCase());
+      fs.writeFileSync(filePath, JSON.stringify(list, null, 2), "utf-8");
+    }
+  } catch (err: any) {
+    console.error("Failed to delete local medicine:", err.message);
+  }
+}
+
+function logEventLocally(type: string, message: string, severity: string) {
+  const filePath = path.join(process.cwd(), "data", "events.json");
+  let list: any[] = [];
+  try {
+    if (fs.existsSync(filePath)) {
+      list = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+    }
+  } catch {}
+  list.unshift({ type, message, severity, timestamp: Math.floor(Date.now() / 1000) });
+  if (list.length > 100) list.pop();
+  try {
+    fs.writeFileSync(filePath, JSON.stringify(list, null, 2), "utf-8");
+  } catch (err: any) {
+    console.error("Failed to write local events file:", err.message);
+  }
+}
+
+function saveReportLocally(report: { fileName: string; summary: string; scanDate: string; [key: string]: any }) {
+  const filePath = path.join(process.cwd(), "data", "reports.json");
+  let list: any[] = [];
+  try {
+    if (fs.existsSync(filePath)) {
+      list = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+    }
+  } catch {}
+  list.unshift({ ...report, createdAt: Math.floor(Date.now() / 1000) });
+  if (list.length > 50) list.pop();
+  try {
+    fs.writeFileSync(filePath, JSON.stringify(list, null, 2), "utf-8");
+  } catch (err: any) {
+    console.error("Failed to write local reports file:", err.message);
+  }
+}
+
+/** Helper: build a rich patient data snapshot from all sources (Flask / Firebase / Local files) */
 async function buildPatientSnapshot() {
   const [heartRes, medRes, eventsRes, reportsRes] = await Promise.allSettled([
     flaskGet("/api/heartrate/history?limit=120"),
@@ -1467,29 +1646,75 @@ async function buildPatientSnapshot() {
     flaskGet("/api/reports"),
   ]);
 
+  // Read local file fallbacks
+  let localBpm: any[] = [];
+  try {
+    const p = path.join(process.cwd(), "data", "bpm.json");
+    if (fs.existsSync(p)) localBpm = JSON.parse(fs.readFileSync(p, "utf-8"));
+  } catch {}
+
+  let localMeds: any[] = [];
+  try {
+    const p = path.join(process.cwd(), "data", "medicines.json");
+    if (fs.existsSync(p)) localMeds = JSON.parse(fs.readFileSync(p, "utf-8"));
+  } catch {}
+
+  let localEvents: any[] = [];
+  try {
+    const p = path.join(process.cwd(), "data", "events.json");
+    if (fs.existsSync(p)) localEvents = JSON.parse(fs.readFileSync(p, "utf-8"));
+  } catch {}
+
+  let localReports: any[] = [];
+  try {
+    const p = path.join(process.cwd(), "data", "reports.json");
+    if (fs.existsSync(p)) localReports = JSON.parse(fs.readFileSync(p, "utf-8"));
+  } catch {}
+
+  let localFallEvents: any[] = [];
+  try {
+    const p = path.join(process.cwd(), "data", "fall_events.json");
+    if (fs.existsSync(p)) localFallEvents = JSON.parse(fs.readFileSync(p, "utf-8"));
+  } catch {}
+
   const bpmHistory: Array<{ bpm: number; timestamp: number }> =
-    heartRes.status === "fulfilled" ? (heartRes.value.history || []) : [];
+    heartRes.status === "fulfilled" && heartRes.value.history?.length
+      ? heartRes.value.history
+      : localBpm;
   const medicines: any[] =
-    medRes.status === "fulfilled" ? (medRes.value.medicines || []) : [];
+    medRes.status === "fulfilled" && medRes.value.medicines?.length
+      ? medRes.value.medicines
+      : localMeds;
   const events: any[] =
-    eventsRes.status === "fulfilled" ? (Array.isArray(eventsRes.value) ? eventsRes.value : []) : [];
+    eventsRes.status === "fulfilled" && Array.isArray(eventsRes.value) && eventsRes.value.length
+      ? eventsRes.value
+      : localEvents;
   const reports: any[] =
-    reportsRes.status === "fulfilled" ? (reportsRes.value.reports || []) : [];
+    reportsRes.status === "fulfilled" && reportsRes.value.reports?.length
+      ? reportsRes.value.reports
+      : localReports;
 
   // — BPM analytics —
-  const bpmVals = bpmHistory.map((b) => b.bpm).filter((v) => v > 0);
+  const bpmVals = bpmHistory.map((b) => b.bpm || (b as any).value).filter((v) => typeof v === "number" && v > 0);
   const avgBpm = bpmVals.length ? Math.round(bpmVals.reduce((a, b) => a + b, 0) / bpmVals.length) : null;
   const maxBpm = bpmVals.length ? Math.max(...bpmVals) : null;
   const minBpm = bpmVals.length ? Math.min(...bpmVals) : null;
   const abnormalBpm = bpmVals.filter((v) => v > 100 || v < 50);
 
-  // — Fall analytics (from MongoDB Atlas fall_events collection) —
-  const mongoFalls = await getFallEvents(200);
+  // — Fall analytics (from Firebase and Local files) —
+  let dbFalls: any[] = [];
+  try {
+    dbFalls = await getFallEvents(200);
+  } catch {
+    dbFalls = localFallEvents;
+  }
+  
   const allFalls = [
-    ...mongoFalls,
+    ...(dbFalls.length ? dbFalls : localFallEvents),
     ...events.filter((e) => e.type === "fall"),
   ];
-  const activeFallCount = await getActiveFallCount();
+  
+  const activeFallCount = allFalls.filter((f) => f.status === "active").length;
   const now = Date.now();
   const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
   const recentFalls = allFalls.filter((f) => {
@@ -1498,7 +1723,6 @@ async function buildPatientSnapshot() {
       : f.timestamp * 1000;
     return ts >= thirtyDaysAgo;
   });
-
 
   return {
     bpmHistory,
@@ -1757,13 +1981,12 @@ app.post("/api/hardware/heartbeat", async (req, res) => {
   medboxStatus.deviceId        = deviceId || "medbox-01";
   medboxStatus.online          = true;
 
-  // Persist to MongoDB Atlas device_status
-  if (mongoReady()) {
-    colDeviceStatus.updateOne(
-      { _id: "medbox-01" as any },
-      { $set: { ...medboxStatus, updatedAt: new Date().toISOString() } },
-      { upsert: true }
-    ).catch(() => {});
+  // Persist to Firebase device_status
+  if (fireReady()) {
+    fireDb.collection("device_status").doc("medbox-01").set({
+      ...medboxStatus,
+      updatedAt: new Date().toISOString()
+    }, { merge: true }).catch(() => {});
   }
 
   broadcastSSE("medbox_heartbeat", medboxStatus);

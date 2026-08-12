@@ -1,0 +1,92 @@
+========================================================================
+             ELDERCARE SYSTEM — HARDWARE COLLABORATION GUIDE
+========================================================================
+
+This folder contains the complete fall detection program designed to run 
+locally on your Raspberry Pi using a connected camera. 
+
+When a fall is detected by the Pi, it automatically communicates with the 
+central Dashboard running on your main computer via your local WiFi network.
+
+------------------------------------------------------------------------
+1. NETWORK & WIFI DETAILS
+------------------------------------------------------------------------
+To allow all devices (Raspberry Pi, ESP32 bracelet, and central Dashboard) 
+to communicate, they MUST be connected to the SAME WiFi network.
+
+WiFi SSID:     ElderCare
+WiFi Password: ami bolbona
+
+------------------------------------------------------------------------
+2. CENTRAL SERVER DETAILS (YOUR MAIN PC)
+------------------------------------------------------------------------
+The Dashboard and Backend services run on your main PC. Based on the 
+network configuration, your PC's local IP address on the WiFi is:
+
+PC WiFi IP Address:  10.206.196.135
+
+• Central API (Flask Server):
+  - Local URL:       http://localhost:5000
+  - Network URL:     http://10.206.196.135:5000
+
+• Modern UI Dashboard (Vite + Node Server):
+  - Local URL:       http://localhost:5050
+  - Network URL:     http://10.206.196.135:5050
+
+• Fall Detection API Endpoint:
+  - URL:             http://10.206.196.135:5050/api/fall-event
+  - Method:          POST
+  - Payload Format:  JSON
+    {
+      "event": "FALL_DETECTED",
+      "deviceId": "pi-camera-01",
+      "location": "Living Room",
+      "timestamp": "2026-05-30T13:00:00Z",
+      "confidence": 0.92,
+      "source": "camera"
+    }
+
+------------------------------------------------------------------------
+3. RASPBERRY PI SETUP INSTRUCTIONS
+------------------------------------------------------------------------
+Step 1: Connect your Raspberry Pi to the "ElderCare" WiFi network.
+
+Step 2: Copy the files in this folder ("D:\elder care fall") onto your 
+        Raspberry Pi (e.g., via USB drive or SCP/SSH transfer).
+
+Step 3: Open a terminal on your Raspberry Pi, navigate to the folder, 
+        and install the required Python packages:
+        
+        pip3 install -r requirements.txt
+
+        *Note: If you are using a newer version of Raspberry Pi OS, you 
+        might need to run the command in a virtual environment or add 
+        the --break-system-packages flag:*
+        pip3 install -r requirements.txt --break-system-packages
+
+Step 4: Run the fall detection program:
+        
+        python3 fall_detector.py
+
+------------------------------------------------------------------------
+4. HOW THE SYSTEM COLLABORATES
+------------------------------------------------------------------------
+1. CENTRAL HOST (Your Main PC):
+   Runs the central Flask backend (`backend\app.py`) on port 5000 and the 
+   Express/Vite dashboard (`dashboard-v2`) on port 5050.
+   
+2. RASPBERRY PI (Vision Sensor):
+   Runs `fall_detector.py` using its local camera. It runs pose estimation 
+   locally (privacy-first!). When it detects a fall, it sends a POST request 
+   over WiFi to the dashboard server at http://10.206.196.135:5050/api/fall-event.
+   
+3. SMART BRACELET (Wearable Sensor):
+   Runs firmware `bpm_bracelet.ino` on ESP32, connected to the same "ElderCare" 
+   WiFi network. It continuously streams heart rate (BPM) data and fall 
+   impacts to http://10.206.196.135:5050/api/bracelet/vitals.
+
+4. WEB DASHBOARD:
+   Instantly captures alerts from both the Raspberry Pi and the ESP32 Bracelet.
+   It plays alarms, highlights the map/location of the fall, logs the fall event,
+   and fires automated SMS and Email alerts to your configured caregiver.
+========================================================================

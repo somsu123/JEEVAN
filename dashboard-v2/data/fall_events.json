@@ -1,0 +1,12 @@
+[
+  {
+    "id": "fall-1780220580108",
+    "isoTimestamp": "2026-05-31T09:43:00.108Z",
+    "timestamp": "15:13:00 — May 31, 2026",
+    "type": "Stumble Warning",
+    "source": "camera",
+    "location": "Living Room",
+    "confidence": 0.589,
+    "status": "active"
+  }
+]
