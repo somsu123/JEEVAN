@@ -1,12 +1,12 @@
 /**
  * ============================================================
- *  server.js — BPM Backend Server
+ *  server.js — BPM + SpO₂ Backend Server
  * ============================================================
  *  Architecture:
  *
  *   ESP32 ──ws://──→ Express/ws ──Socket.IO──→ Dashboard(s)
  *
- *  • Raw WebSocket on /ws/esp32  — receives data from ESP32
+ *  • Raw WebSocket on /ws/esp32  — receives vitals from ESP32
  *  • Socket.IO on same HTTP server — pushes to dashboards
  *  • REST endpoints for history, status, health
  * ============================================================
@@ -28,7 +28,7 @@ const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:5173';
 
 // ─── Express App ────────────────────────────────────────────
 const app = express();
-app.use(cors({ origin: CORS_ORIGIN }));
+app.use(cors({ origin: '*' }));   // allow all origins (local LAN access)
 app.use(express.json());
 
 // Health check
@@ -36,12 +36,12 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', uptime: process.uptime() });
 });
 
-// Get last N BPM readings
+// Get last N vitals readings (BPM + SpO₂)
 app.get('/api/bpm/history', (req, res) => {
   const n = Math.min(parseInt(req.query.n, 10) || 60, 300);
   res.json({
     history: bpmStore.getHistory(n),
-    stats: bpmStore.getStats(),
+    stats:   bpmStore.getStats(),
   });
 });
 
@@ -55,9 +55,9 @@ const server = http.createServer(app);
 
 // ─── Socket.IO — dashboard clients ─────────────────────────
 const io = new SocketIOServer(server, {
-  cors: { origin: CORS_ORIGIN, methods: ['GET', 'POST'] },
-  pingInterval: 10000,
-  pingTimeout: 5000,
+  cors:          { origin: '*', methods: ['GET', 'POST'] },
+  pingInterval:  10000,
+  pingTimeout:   5000,
 });
 
 let dashboardClients = 0;
@@ -102,7 +102,7 @@ wss.on('connection', (ws, req) => {
       // Store
       bpmStore.push(cleaned);
 
-      // Broadcast to all dashboards
+      // Broadcast vitals (bpm + spo2 + all fields) to all dashboards
       io.emit('bpm:data', cleaned);
 
     } catch (err) {
@@ -135,12 +135,13 @@ server.on('upgrade', (request, socket, head) => {
 });
 
 // ─── Start ──────────────────────────────────────────────────
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log();
-  console.log('╔══════════════════════════════════════════════╗');
-  console.log('║   BPM Server v1.0                            ║');
-  console.log(`║   HTTP + Socket.IO : http://localhost:${PORT}    ║`);
-  console.log(`║   ESP32 WebSocket  : ws://localhost:${PORT}/ws/esp32 ║`);
-  console.log('╚══════════════════════════════════════════════╝');
+  console.log('╔══════════════════════════════════════════════════╗');
+  console.log('║   Elder-Care Vitals Server v2.0                  ║');
+  console.log(`║   HTTP + Socket.IO : http://0.0.0.0:${PORT}         ║`);
+  console.log(`║   ESP32 WebSocket  : ws://0.0.0.0:${PORT}/ws/esp32  ║`);
+  console.log('║   Metrics: BPM + SpO₂ (MAX30102)                 ║');
+  console.log('╚══════════════════════════════════════════════════╝');
   console.log();
 });

@@ -1,9 +1,10 @@
 /**
  * ============================================================
- *  App.jsx — BPM Dashboard Main Layout
+ *  App.jsx — Elder-Care Vitals Dashboard (BPM + SpO₂)
  * ============================================================
- *  Assembles all components into a responsive grid layout.
- *  Dark glassmorphism UI with gradient mesh background.
+ *  Layout:
+ *   Left column  (4/12) — BpmCard + SpO₂Card + Connection + Sensor
+ *   Right column (8/12) — Dual-metric live chart
  * ============================================================
  */
 
@@ -11,6 +12,7 @@ import React, { useState, useEffect } from 'react';
 import { Heart, Activity } from 'lucide-react';
 import useSocket from './hooks/useSocket.js';
 import BpmCard from './components/BpmCard.jsx';
+import SpO2Card from './components/SpO2Card.jsx';
 import BpmChart from './components/BpmChart.jsx';
 import ConnectionStatus from './components/ConnectionStatus.jsx';
 import SensorStatus from './components/SensorStatus.jsx';
@@ -18,6 +20,7 @@ import SensorStatus from './components/SensorStatus.jsx';
 export default function App() {
   const {
     bpm,
+    spo2,
     history,
     isConnected,
     espConnected,
@@ -28,7 +31,6 @@ export default function App() {
 
   const [currentTime, setCurrentTime] = useState(new Date());
 
-  // Update clock every second (forces re-render for "time since" displays)
   useEffect(() => {
     const interval = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(interval);
@@ -36,7 +38,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen p-4 md:p-6 lg:p-8">
-      {/* ── Header ─────────────────────────────────────────── */}
+      {/* ── Header ────────────────────────────────────────── */}
       <header className="max-w-7xl mx-auto mb-8 animate-fade-in" id="dashboard-header">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
@@ -45,10 +47,10 @@ export default function App() {
             </div>
             <div>
               <h1 className="text-2xl md:text-3xl font-bold text-white tracking-tight">
-                BPM Dashboard
+                Elder-Care Vitals
               </h1>
               <p className="text-sm text-slate-400 mt-0.5">
-                Real-time heart rate monitoring • ESP32 + MAX30102
+                Real-time BPM &amp; SpO₂ monitoring · ESP32 + MAX30102
               </p>
             </div>
           </div>
@@ -63,23 +65,33 @@ export default function App() {
         </div>
       </header>
 
-      {/* ── Main Grid ──────────────────────────────────────── */}
+      {/* ── Main Grid ─────────────────────────────────────── */}
       <main className="max-w-7xl mx-auto">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
 
-          {/* Left column — BPM Card + Status cards */}
+          {/* Left column — cards */}
           <div className="lg:col-span-4 space-y-6">
+
             {/* BPM Card */}
             <div className="animate-fade-in animate-fade-in-delay-1">
               <BpmCard
                 bpm={bpm}
                 fingerDetected={sensorStatus.fingerDetected}
-                stats={stats}
+                stats={stats.bpm}
+              />
+            </div>
+
+            {/* SpO₂ Card */}
+            <div className="animate-fade-in animate-fade-in-delay-2">
+              <SpO2Card
+                spo2={spo2}
+                fingerDetected={sensorStatus.fingerDetected}
+                stats={stats.spo2}
               />
             </div>
 
             {/* Connection Status */}
-            <div className="animate-fade-in animate-fade-in-delay-2">
+            <div className="animate-fade-in animate-fade-in-delay-3">
               <ConnectionStatus
                 isConnected={isConnected}
                 espConnected={espConnected}
@@ -88,23 +100,23 @@ export default function App() {
             </div>
 
             {/* Sensor Status */}
-            <div className="animate-fade-in animate-fade-in-delay-3">
+            <div className="animate-fade-in animate-fade-in-delay-4">
               <SensorStatus sensorStatus={sensorStatus} />
             </div>
           </div>
 
-          {/* Right column — Chart */}
+          {/* Right column — Dual-metric chart */}
           <div className="lg:col-span-8 animate-fade-in animate-fade-in-delay-2">
             <BpmChart history={history} />
           </div>
         </div>
       </main>
 
-      {/* ── Footer ─────────────────────────────────────────── */}
+      {/* ── Footer ────────────────────────────────────────── */}
       <footer className="max-w-7xl mx-auto mt-12 pb-6 animate-fade-in animate-fade-in-delay-4">
         <div className="flex items-center justify-center gap-2 text-slate-600 text-xs">
           <Heart className="w-3 h-3" />
-          <span>BPM Smart Bracelet • ESP32 + MAX30102 • Built with ❤️</span>
+          <span>Elder-Care Smart Bracelet · ESP32 + MAX30102 · BPM + SpO₂</span>
         </div>
       </footer>
     </div>

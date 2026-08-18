@@ -1,1 +1,10 @@
-[]
+[
+  {
+    "time": "08:00",
+    "medicine": "Aspirin",
+    "dosage": "81mg",
+    "boxNumber": 1,
+    "taken": false,
+    "missed": false
+  }
+]

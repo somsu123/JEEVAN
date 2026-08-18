@@ -303,29 +303,77 @@ app.get("/api/events-stream", (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 app.get("/api/vitals", async (_req, res) => {
   try {
-    const state = await flaskGet("/api/state");
+    // Check bpm-server (port 3001) first for real-time ESP32 MAX30102 vitals
+    let bpmData: any = null;
+    try {
+      const bpmRes = await fetch("http://localhost:3001/api/bpm/history?n=1");
+      if (bpmRes.ok) {
+        const json = await bpmRes.json();
+        if (json.history && json.history.length > 0) {
+          bpmData = json.history[json.history.length - 1];
+        }
+      }
+    } catch {}
+
+    const state = await flaskGet("/api/state").catch(() => ({}));
+    const isLive = bpmData && (Date.now() - (bpmData.timestamp || 0) < 10000);
+
     return res.json({
-      heartRate: state.bpm || 72,
-      oxygenSpO2: state.spo2 || 98,
+      heartRate: (bpmData && bpmData.fingerDetected && bpmData.bpm > 0) ? bpmData.bpm : (state.bpm || '--'),
+      oxygenSpO2: (bpmData && bpmData.fingerDetected && bpmData.spo2 > 0) ? bpmData.spo2 : (state.spo2 || 98),
       systolicBP: state.systolic || 120,
       diastolicBP: state.diastolic || 76,
       movementState: state.movement_state || "Resting",
       roomPresence: state.room_presence ?? true,
+      fingerPresent: bpmData ? bpmData.fingerDetected : (state.fingerPresent ?? false),
+      signalQuality: bpmData ? bpmData.signal : "unknown",
       isFall: state.is_fall || false,
       fallCount: state.fall_count || 0,
       fallsToday: state.falls_today || 0,
+      _liveESP32: !!isLive,
     });
   } catch {
-    // Flask might not be running — return sensible defaults
+    // Return defaults if offline
     return res.json({
-      heartRate: 72, oxygenSpO2: 98,
+      heartRate: '--', oxygenSpO2: 98,
       systolicBP: 120, diastolicBP: 76,
       movementState: "Resting", roomPresence: true,
+      fingerPresent: false,
+      signalQuality: "unknown",
       isFall: false, fallCount: 0, fallsToday: 0,
       _offline: true,
     });
   }
 });
+
+// GET /api/bpm/history — proxy to bpm-server (port 3001)
+app.get("/api/bpm/history", async (req, res) => {
+  try {
+    const n = req.query.n || "60";
+    const resp = await fetch(`http://localhost:3001/api/bpm/history?n=${n}`);
+    if (resp.ok) {
+      const data = await resp.json();
+      return res.json(data);
+    }
+  } catch {}
+  return res.json({ history: [], stats: { bpm: {}, spo2: {} } });
+});
+
+// GET /api/esp32/status — lightweight ESP32 connection + finger detection status
+app.get("/api/esp32/status", async (_req, res) => {
+  try {
+    const r = await fetch("http://localhost:3001/api/bpm/status");
+    if (r.ok) return res.json(await r.json());
+  } catch {}
+  return res.json({
+    espConnected:   false,
+    fingerDetected: false,
+    signal:         "unknown",
+    latestBpm:      null,
+    latestSpo2:     null,
+  });
+});
+
 
 // GET /api/heartrate/history — proxy to Flask to get historical BPM data from MongoDB
 app.get("/api/heartrate/history", async (req, res) => {
@@ -754,6 +802,19 @@ app.patch("/api/fall-event/:id/resolve", async (req, res) => {
   if (!ok) return res.status(404).json({ error: "Event not found" });
   broadcastSSE("fall_resolved", { id });
   return res.json({ success: true });
+});
+
+// POST /api/camera/heartbeat — USB / Pi camera reports online every 5s
+app.post("/api/camera/heartbeat", (req, res) => {
+  cameraStatus.online = true;
+  cameraStatus.lastSeen = new Date().toISOString();
+  broadcastSSE("camera_heartbeat", cameraStatus);
+  return res.json({ status: "ok", online: true });
+});
+
+// GET /api/camera/status — get current camera online state
+app.get("/api/camera/status", (_req, res) => {
+  return res.json(cameraStatus);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2059,6 +2120,534 @@ if (process.env.VITE_HARDWARE_MODE === "simulated") {
   // First sim event after 30 seconds
   setTimeout(fireRandomEvent, 30_000);
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// RX PIPELINE — Prescription OCR + Extraction + Human-Gated ESP32 Confirm
+// ═════════════════════════════════════════════════════════════════════════════
+
+// ── ESP32 config ──────────────────────────────────────────────────────────────
+const ESP32_BASE_URL = (process.env.ESP32_BASE_URL || "").replace(/\/$/, "");
+
+// ─── Firestore helpers: new collections ──────────────────────────────────────
+
+// prescriptions — raw OCR + parsed result per upload
+async function savePrescription(doc: object): Promise<string> {
+  if (!fireReady()) return `local-${Date.now()}`;
+  const ref = await fireDb.collection("prescriptions").add({ ...doc, uploadedAt: new Date().toISOString() });
+  return ref.id;
+}
+
+async function getPrescriptions(limit = 20): Promise<any[]> {
+  if (!fireReady()) return [];
+  try {
+    const snap = await fireDb.collection("prescriptions").orderBy("uploadedAt", "desc").limit(limit).get();
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch { return []; }
+}
+
+async function updatePrescriptionStatus(id: string, status: string): Promise<void> {
+  if (!fireReady()) return;
+  try { await fireDb.collection("prescriptions").doc(id).update({ status }); } catch {}
+}
+
+// pending_changes — one row per proposed compartment change
+async function savePendingChange(doc: object): Promise<string> {
+  if (!fireReady()) return `local-${Date.now()}`;
+  const ref = await fireDb.collection("pending_changes").add({ ...doc, createdAt: new Date().toISOString(), status: "pending" });
+  return ref.id;
+}
+
+async function getPendingChanges(statusFilter?: string): Promise<any[]> {
+  if (!fireReady()) return [];
+  try {
+    let q: FirebaseFirestore.Query = fireDb.collection("pending_changes");
+    if (statusFilter) q = q.where("status", "==", statusFilter);
+    const snap = await (q as FirebaseFirestore.Query).orderBy("createdAt", "desc").get();
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch { return []; }
+}
+
+async function updatePendingChange(id: string, fields: object): Promise<void> {
+  if (!fireReady()) return;
+  try { await fireDb.collection("pending_changes").doc(id).update(fields); } catch {}
+}
+
+async function getPendingChangeById(id: string): Promise<any | null> {
+  if (!fireReady()) return null;
+  try {
+    const doc = await fireDb.collection("pending_changes").doc(id).get();
+    if (!doc.exists) return null;
+    return { id: doc.id, ...doc.data() };
+  } catch { return null; }
+}
+
+// dose_events — history/adherence log, built from polling givenToday
+async function appendDoseEvent(doc: object): Promise<void> {
+  if (!fireReady()) return;
+  try { await fireDb.collection("dose_events").add({ ...doc, loggedAt: new Date().toISOString() }); } catch {}
+}
+
+async function getDoseEvents(limit = 100): Promise<any[]> {
+  if (!fireReady()) return [];
+  try {
+    const snap = await fireDb.collection("dose_events").orderBy("loggedAt", "desc").limit(limit).get();
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch { return []; }
+}
+
+// schedule_cache — last known ESP32 schedule state (refreshed each poll)
+async function readScheduleCache(): Promise<any[]> {
+  if (!fireReady()) return [];
+  try {
+    const snap = await fireDb.collection("schedule_cache").orderBy("compartment").get();
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch { return []; }
+}
+
+async function writeScheduleCache(entries: any[]): Promise<void> {
+  if (!fireReady()) return;
+  try {
+    const col = fireDb.collection("schedule_cache");
+    const existing = await col.get();
+    const batch = fireDb.batch();
+    existing.docs.forEach(d => batch.delete(d.ref));
+    for (const e of entries) {
+      batch.set(col.doc(`comp-${e.compartment}`), { ...e, updatedAt: new Date().toISOString() });
+    }
+    await batch.commit();
+  } catch (err: any) {
+    console.error("[RX] writeScheduleCache failed:", err.message);
+  }
+}
+
+// ─── ESP32 schedule polling ───────────────────────────────────────────────────
+// Polls GET {ESP32_BASE_URL}/api/schedule every 15 seconds.
+// Diffs givenToday flags against schedule_cache.
+// Writes dose_events for "taken" (true→true for first time) or "missed" (time window passed, still false).
+
+interface Esp32DoseEntry {
+  hour: number;
+  minute: number;
+  compartment: number;
+  label: string;
+  givenToday: boolean;
+}
+
+// In-memory cache of last known ESP32 state (keyed by compartment)
+const esp32LastKnown = new Map<number, Esp32DoseEntry>();
+
+async function pollEsp32Schedule(): Promise<void> {
+  if (!ESP32_BASE_URL) return; // not configured
+
+  try {
+    const res = await fetch(`${ESP32_BASE_URL}/api/schedule`, { signal: AbortSignal.timeout(5000) });
+    if (!res.ok) return;
+    const data = await res.json() as { schedule: Esp32DoseEntry[] };
+    const schedule: Esp32DoseEntry[] = Array.isArray(data.schedule) ? data.schedule : [];
+    if (schedule.length === 0) return;
+
+    const now = new Date();
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+
+    for (const dose of schedule) {
+      const key = dose.compartment;
+      const prev = esp32LastKnown.get(key);
+
+      // givenToday flipped false → true: dose was taken
+      if (prev && !prev.givenToday && dose.givenToday) {
+        console.log(`[RX POLL] Dose TAKEN — compartment ${key} (${dose.label})`);
+        await appendDoseEvent({
+          compartment: key,
+          label: dose.label,
+          scheduledTime: `${String(dose.hour).padStart(2,"0")}:${String(dose.minute).padStart(2,"0")}`,
+          takenAt: now.toISOString(),
+          status: "taken",
+        });
+        broadcastSSE("dose_event", { compartment: key, label: dose.label, status: "taken", takenAt: now.toISOString() });
+      }
+
+      // Time window 30 min past + still not given: mark missed (only once)
+      if (!dose.givenToday && prev && !prev.givenToday) {
+        const doseMin = dose.hour * 60 + dose.minute;
+        const minutesLate = nowMin - doseMin;
+        if (minutesLate > 30 && minutesLate < 31) {
+          // Only fire in the 30th-31st minute window so we don't repeat
+          console.log(`[RX POLL] Dose MISSED — compartment ${key} (${dose.label})`);
+          await appendDoseEvent({
+            compartment: key,
+            label: dose.label,
+            scheduledTime: `${String(dose.hour).padStart(2,"0")}:${String(dose.minute).padStart(2,"0")}`,
+            takenAt: null,
+            status: "missed",
+          });
+          broadcastSSE("dose_event", { compartment: key, label: dose.label, status: "missed", takenAt: null });
+          // Also send missed-dose Gmail alert
+          sendMissedDoseAlert(dose.label, `${dose.hour}:${String(dose.minute).padStart(2,"0")}`, "").catch(() => {});
+        }
+      }
+
+      // Update in-memory + Firestore cache
+      esp32LastKnown.set(key, { ...dose });
+    }
+
+    // Persist cache to Firestore
+    await writeScheduleCache(schedule.map(d => ({
+      compartment: d.compartment,
+      label: d.label,
+      hour: d.hour,
+      minute: d.minute,
+      givenToday: d.givenToday,
+    })));
+
+  } catch (err: any) {
+    // ESP32 offline / unreachable — silent fail
+    if (process.env.NODE_ENV !== "production") {
+      console.debug("[RX POLL] ESP32 unreachable:", err.message);
+    }
+  }
+}
+
+// Start polling after 5s (give Firebase time to connect)
+if (ESP32_BASE_URL) {
+  setTimeout(() => {
+    pollEsp32Schedule();
+    setInterval(pollEsp32Schedule, 15_000);
+    console.log(`[RX] ESP32 polling started → ${ESP32_BASE_URL}/api/schedule every 15s`);
+  }, 5_000);
+} else {
+  console.warn("[RX] ESP32_BASE_URL not set — dose polling disabled. Set it in .env to enable.");
+}
+
+// ─── GET /api/esp32/schedule — proxy the live ESP32 schedule ─────────────────
+app.get("/api/esp32/schedule", async (_req, res) => {
+  if (!ESP32_BASE_URL) {
+    // Return cached state from Firestore if available
+    const cached = await readScheduleCache();
+    return res.json({ schedule: cached, source: "cache" });
+  }
+  try {
+    const r = await fetch(`${ESP32_BASE_URL}/api/schedule`, { signal: AbortSignal.timeout(4000) });
+    if (!r.ok) throw new Error(`ESP32 returned ${r.status}`);
+    const data = await r.json();
+    return res.json({ ...data, source: "live" });
+  } catch {
+    const cached = await readScheduleCache();
+    return res.json({ schedule: cached, source: "cache" });
+  }
+});
+
+// ─── GET /api/dose-events — adherence history ─────────────────────────────────
+app.get("/api/dose-events", async (req, res) => {
+  const limit = Math.min(Number(req.query.limit) || 100, 500);
+  const events = await getDoseEvents(limit);
+  return res.json({ events });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// RX UPLOAD — Prescription OCR + Gemini Extraction
+// ═════════════════════════════════════════════════════════════════════════════
+
+// POST /api/rx/upload — upload prescription image, extract medicines, generate pending_changes
+app.post("/api/rx/upload", async (req, res) => {
+  try {
+    const { fileData, mimeType, fileName } = req.body as {
+      fileData: string;
+      mimeType?: string;
+      fileName?: string;
+    };
+
+    if (!fileData) return res.status(400).json({ error: "fileData (base64) is required" });
+
+    dotenv.config({ override: true });
+    const currentApiKey = getCleanApiKey();
+    const activeAi = currentApiKey
+      ? new GoogleGenAI({ apiKey: currentApiKey, httpOptions: { headers: { "User-Agent": "eldercare-dashboard-v2" } } })
+      : null;
+
+    if (!activeAi) {
+      return res.status(500).json({ error: "Gemini AI not initialized — set GEMINI_API_KEY in .env" });
+    }
+
+    console.log(`[RX] Processing prescription upload: ${fileName || "unnamed"}`);
+
+    // ── Step 1: Gemini Vision — OCR + strict JSON extraction in one pass ─────
+    const extractionPrompt = `You are a prescription digitizer for a medical device system.
+Examine this prescription image carefully. Extract ONLY the medicines/drugs listed.
+
+Return ONLY a valid JSON array — no markdown, no extra text, no explanation.
+Each item must follow this exact schema:
+{"name": string, "dosage": string|null, "frequency": string|null, "suggestedTime": "HH:MM", "confidence": "high"|"low"}
+
+Rules:
+- name: exact medicine name as written (required)
+- dosage: strength and unit if readable (e.g. "10mg", "500mg twice"), null if unclear
+- frequency: dosing instructions if readable (e.g. "once daily", "twice a day"), null if unclear
+- suggestedTime: best-guess 24h time based on frequency (morning=08:00, noon=13:00, evening=18:00, night=21:00). If frequency implies multiple times, use the first.
+- confidence: "high" if you can read the text clearly, "low" if the handwriting/print is ambiguous
+- If a field is unclear, mark confidence "low" and set that field to null — do NOT guess
+- Return [] if no medicines can be read`;
+
+    let extractedMeds: any[] = [];
+    let ocrText = "";
+
+    try {
+      const response = await activeAi.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: {
+          parts: [
+            { inlineData: { mimeType: mimeType || "image/jpeg", data: fileData } },
+            { text: extractionPrompt },
+          ],
+        },
+        config: { temperature: 0.1 },
+      });
+
+      const rawText = (response.text || "").trim();
+      ocrText = rawText;
+
+      // Strip markdown code fences if model wrapped the JSON
+      const jsonStr = rawText.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+
+      // Validate: must be an array
+      const parsed = JSON.parse(jsonStr);
+      if (!Array.isArray(parsed)) throw new Error("Gemini returned a non-array response");
+
+      // Schema-validate each item
+      extractedMeds = parsed.map((m: any) => ({
+        name: String(m.name || "").trim(),
+        dosage: m.dosage ? String(m.dosage).trim() : null,
+        frequency: m.frequency ? String(m.frequency).trim() : null,
+        suggestedTime: /^\d{2}:\d{2}$/.test(m.suggestedTime) ? m.suggestedTime : "08:00",
+        confidence: m.confidence === "low" ? "low" : "high",
+      })).filter((m: any) => m.name.length > 0);
+
+    } catch (parseErr: any) {
+      console.error("[RX] Gemini extraction parse error:", parseErr.message);
+      return res.status(422).json({
+        error: "Extraction failed — Gemini did not return valid JSON. Raw output saved. Please try a clearer image.",
+        ocrText,
+      });
+    }
+
+    console.log(`[RX] Extracted ${extractedMeds.length} medicines from prescription`);
+
+    // ── Step 2: Store prescription to Firestore ───────────────────────────────
+    const prescriptionId = await savePrescription({
+      fileName: fileName || "unnamed",
+      ocrText,
+      extractedMeds,
+      llmModel: "gemini-2.5-flash",
+      status: "pending_review",
+    });
+
+    // ── Step 3: Diff extracted vs. current ESP32 schedule cache ──────────────
+    const cacheEntries = await readScheduleCache();
+
+    // Build a pending_change for each extracted medicine that differs from current box state
+    const pendingChanges: any[] = [];
+    for (let i = 0; i < Math.min(extractedMeds.length, 4); i++) {
+      const med = extractedMeds[i];
+      const cacheEntry = cacheEntries.find(c => c.compartment === i) || null;
+      const currentLabel = cacheEntry ? cacheEntry.label : "(empty)";
+      const [propH, propM] = med.suggestedTime.split(":").map(Number);
+
+      const proposedLabel = med.dosage ? `${med.name} - ${med.dosage}` : med.name;
+      const isDifferent = !cacheEntry || cacheEntry.label !== proposedLabel;
+
+      if (isDifferent) {
+        const changeId = await savePendingChange({
+          prescriptionId,
+          compartment: i,
+          currentLabel,
+          proposedLabel,
+          proposedHour: propH,
+          proposedMinute: propM,
+          extractedMed: med,
+          reloadConfirmed: false,
+        });
+        pendingChanges.push({ id: changeId, compartment: i, currentLabel, proposedLabel, confidence: med.confidence });
+      }
+    }
+
+    broadcastSSE("rx_upload_done", { prescriptionId, extractedMeds, pendingChanges });
+    logEventLocally("rx", `Prescription '${fileName}' uploaded — ${extractedMeds.length} medicines extracted, ${pendingChanges.length} changes pending`, "info");
+
+    return res.json({
+      success: true,
+      prescriptionId,
+      extractedMeds,
+      pendingChanges,
+    });
+
+  } catch (err: any) {
+    console.error("[RX] Upload error:", err.message);
+    return res.status(500).json({ error: err.message || "Internal error during prescription processing" });
+  }
+});
+
+// ─── GET /api/rx/prescriptions ────────────────────────────────────────────────
+app.get("/api/rx/prescriptions", async (req, res) => {
+  const limit = Math.min(Number(req.query.limit) || 20, 50);
+  const prescriptions = await getPrescriptions(limit);
+  return res.json({ prescriptions });
+});
+
+// ─── GET /api/rx/pending ─────────────────────────────────────────────────────
+app.get("/api/rx/pending", async (_req, res) => {
+  const pending = await getPendingChanges("pending");
+  return res.json({ pending, count: pending.length });
+});
+
+// ─── POST /api/rx/confirm/:changeId ──────────────────────────────────────────
+// THIS IS THE ONLY ENDPOINT IN THE ENTIRE CODEBASE THAT WRITES TO THE ESP32 SCHEDULE.
+// Requires reloadConfirmed=true in body (server-side validated — not just UI gating).
+app.post("/api/rx/confirm/:changeId", async (req, res) => {
+  const { changeId } = req.params;
+  const { reloadConfirmed, confirmedBy } = req.body as {
+    reloadConfirmed: boolean;
+    confirmedBy?: string;
+  };
+
+  // ── Hard guard: server-side reload confirmation check ─────────────────────
+  if (!reloadConfirmed) {
+    return res.status(400).json({
+      error: "reloadConfirmed must be true. Confirm you have physically reloaded the compartment before proceeding.",
+    });
+  }
+
+  const change = await getPendingChangeById(changeId);
+  if (!change) return res.status(404).json({ error: "Pending change not found" });
+  if (change.status !== "pending") {
+    return res.status(409).json({ error: `Change is already ${change.status}` });
+  }
+
+  // ── Step 1: Fetch the current live ESP32 schedule ─────────────────────────
+  let esp32Schedule: Esp32DoseEntry[] = [];
+
+  if (ESP32_BASE_URL) {
+    try {
+      const r = await fetch(`${ESP32_BASE_URL}/api/schedule`, { signal: AbortSignal.timeout(5000) });
+      if (r.ok) {
+        const data = await r.json();
+        esp32Schedule = Array.isArray(data.schedule) ? data.schedule : [];
+      }
+    } catch (err: any) {
+      console.error("[RX CONFIRM] Could not fetch current ESP32 schedule:", err.message);
+      return res.status(503).json({ error: "Could not reach ESP32 to read current schedule. Check ESP32_BASE_URL." });
+    }
+  } else {
+    // No ESP32 configured — build from cache
+    const cached = await readScheduleCache();
+    esp32Schedule = cached.map(c => ({
+      hour: c.hour ?? 8,
+      minute: c.minute ?? 0,
+      compartment: c.compartment,
+      label: c.label || "",
+      givenToday: c.givenToday ?? false,
+    }));
+  }
+
+  // ── Step 2: Merge the confirmed change into the schedule ──────────────────
+  // Only the target compartment changes; all others are preserved exactly.
+  const comp = Number(change.compartment);
+  const merged: Esp32DoseEntry[] = esp32Schedule.map(d => {
+    if (d.compartment === comp) {
+      return {
+        ...d,
+        label: change.proposedLabel,
+        hour: Number(change.proposedHour),
+        minute: Number(change.proposedMinute),
+        givenToday: false, // reset since compartment is being reloaded
+      };
+    }
+    return d;
+  });
+
+  // If this compartment wasn't in the existing schedule, add it
+  if (!merged.some(d => d.compartment === comp)) {
+    merged.push({
+      compartment: comp,
+      label: change.proposedLabel,
+      hour: Number(change.proposedHour),
+      minute: Number(change.proposedMinute),
+      givenToday: false,
+    });
+  }
+
+  // ── Step 3: POST to ESP32 (the single write point) ────────────────────────
+  if (ESP32_BASE_URL) {
+    try {
+      const postRes = await fetch(`${ESP32_BASE_URL}/api/schedule`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ schedule: merged }),
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!postRes.ok) {
+        const errText = await postRes.text().catch(() => "");
+        return res.status(502).json({ error: `ESP32 rejected schedule update (${postRes.status}): ${errText}` });
+      }
+      console.log(`[RX CONFIRM] ✅ Schedule pushed to ESP32 — compartment ${comp}: "${change.proposedLabel}"`);
+    } catch (err: any) {
+      return res.status(503).json({ error: `Could not reach ESP32 to push schedule: ${err.message}` });
+    }
+  } else {
+    console.warn("[RX CONFIRM] ESP32_BASE_URL not set — skipping physical push, updating cache only");
+  }
+
+  // ── Step 4: Update Firestore records ─────────────────────────────────────
+  const confirmedAt = new Date().toISOString();
+  await updatePendingChange(changeId, {
+    status: "confirmed",
+    confirmedAt,
+    confirmedBy: confirmedBy || "caregiver",
+    reloadConfirmed: true,
+  });
+
+  // Mark parent prescription "applied" if all its changes are confirmed/rejected
+  const sibling = await getPendingChanges();
+  const sameRx = sibling.filter(c => c.prescriptionId === change.prescriptionId);
+  const allDone = sameRx.every(c => c.id === changeId || c.status === "confirmed" || c.status === "rejected");
+  if (allDone) await updatePrescriptionStatus(change.prescriptionId, "applied");
+
+  // Update cache with the new confirmed state
+  await writeScheduleCache(merged.map(d => ({
+    compartment: d.compartment,
+    label: d.label,
+    hour: d.hour,
+    minute: d.minute,
+    givenToday: d.givenToday,
+  })));
+
+  broadcastSSE("rx_confirmed", { changeId, compartment: comp, label: change.proposedLabel });
+  logEventLocally("rx", `Schedule confirmed — compartment ${comp}: "${change.proposedLabel}"`, "info");
+
+  return res.json({ success: true, confirmedAt, mergedSchedule: merged });
+});
+
+// ─── POST /api/rx/reject/:changeId ───────────────────────────────────────────
+app.post("/api/rx/reject/:changeId", async (req, res) => {
+  const { changeId } = req.params;
+
+  const change = await getPendingChangeById(changeId);
+  if (!change) return res.status(404).json({ error: "Pending change not found" });
+  if (change.status !== "pending") return res.status(409).json({ error: `Change is already ${change.status}` });
+
+  await updatePendingChange(changeId, { status: "rejected", rejectedAt: new Date().toISOString() });
+
+  // Mark parent prescription "rejected" if all sibling changes are done
+  const sibling = await getPendingChanges();
+  const sameRx = sibling.filter(c => c.prescriptionId === change.prescriptionId);
+  const allDone = sameRx.every(c => c.id === changeId || c.status === "confirmed" || c.status === "rejected");
+  if (allDone && !sameRx.some(c => c.status === "confirmed")) {
+    await updatePrescriptionStatus(change.prescriptionId, "rejected");
+  } else if (allDone) {
+    await updatePrescriptionStatus(change.prescriptionId, "applied");
+  }
+
+  broadcastSSE("rx_rejected", { changeId, compartment: change.compartment });
+  return res.json({ success: true });
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Startup — Firebase first, then Vite/Express

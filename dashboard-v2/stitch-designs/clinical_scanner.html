@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>ElderCare Dashboard - AI Clinical Scanner</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Plus+Jakarta+Sans:wght@500;600;700;800&amp;family=Space+Grotesk:wght@500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#10b981',
+                        secondary: '#6366f1',
+                        tertiary: '#f59e0b',
+                        error: '#ef4444',
+                        neutral: '#1e293b',
+                        slate: {
+                            900: '#0f172a',
+                            800: '#1e293b',
+                            700: '#334155',
+                            600: '#475569',
+                            500: '#64748b',
+                            400: '#94a3b8',
+                            300: '#cbd5e1',
+                            200: '#e2e8f0',
+                            100: '#f1f5f9',
+                            50: '#f8fafc',
+                        }
+                    },
+                    borderRadius: {
+                        DEFAULT: "0.5rem",
+                        lg: "1rem",
+                        xl: "1.5rem",
+                        full: "9999px"
+                    },
+                    fontFamily: {
+                        headline: ["Plus Jakarta Sans", "sans-serif"],
+                        display: ["Plus Jakarta Sans", "sans-serif"],
+                        body: ["Inter", "sans-serif"],
+                        label: ["Space Grotesk", "sans-serif"]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        .glass-panel {
+            background: rgba(30, 41, 59, 0.6);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .ai-glow {
+            box-shadow: 0 0 20px rgba(99, 102, 241, 0.15);
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-200 font-body antialiased overflow-x-hidden min-h-screen flex">
+<!-- SideNavBar Component -->
+<nav class="fixed left-0 top-0 h-screen w-[280px] bg-slate-900/80 backdrop-blur-md border-r border-slate-800/50 shadow-xl flex flex-col p-6 gap-8 z-50">
+<!-- Brand Logo -->
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-emerald-500 text-3xl">ecg_heart</span>
+<span class="text-2xl font-headline font-bold text-emerald-500 tracking-tight">ElderCare</span>
+</div>
+<!-- Header Avatar -->
+<div class="flex items-center gap-4">
+<img class="w-12 h-12 rounded-full object-cover border-2 border-emerald-500/20" data-alt="A professional headshot of an older male doctor with grey hair, wearing a white coat and stethoscope, set against a dark clinical background. High-quality lighting, trustworthy and warm expression, highlighting his role as Chief Medical Officer. The image fits perfectly within a premium, modern healthcare application's dark mode aesthetic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCgMv1lQiXV8r3ABpLBNqNUiCWgZpNuJYpcL7ovK5uxkatcAXaF8NOTelv_K_hAG8WdTP_ZWAHosmhX4JzxsUaAk_gIAKHTDgrZPoLvTqMDJDtSLLLFWYPsvDTZ9uBO0gN0uE2Z4Tr8UMarq43C7UPgvWvFUym7ffW4qO-Y7hpgKAKdSyD5bllNJGness8CmAiYUpTkV1DDJgW_b9tVrir2VmhiSpPQityrO7fHzJVYO4SC3KjhVjtXlgJNcxH9VG3JOcevIBgI-x8"/>
+<div>
+<h3 class="font-headline font-semibold text-slate-100">Dr. Richardson</h3>
+<p class="text-xs font-label text-slate-400">Chief Medical Officer</p>
+</div>
+</div>
+<!-- Navigation Links -->
+<div class="flex-1 flex flex-col gap-2 font-body text-slate-300 font-medium">
+<a class="flex items-center gap-3 text-slate-400 hover:text-slate-200 px-4 py-3 transition-colors hover:bg-slate-800/50 duration-200 rounded-lg" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+                Dashboard
+            </a>
+<a class="flex items-center gap-3 text-slate-400 hover:text-slate-200 px-4 py-3 transition-colors hover:bg-slate-800/50 duration-200 rounded-lg" href="#">
+<span class="material-symbols-outlined">groups</span>
+                Patients
+            </a>
+<a class="flex items-center gap-3 bg-emerald-500/10 text-emerald-500 rounded-lg px-4 py-3 font-bold active:scale-95 transform transition-transform" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">monitoring</span>
+                Analytics
+            </a>
+<a class="flex items-center gap-3 text-slate-400 hover:text-slate-200 px-4 py-3 transition-colors hover:bg-slate-800/50 duration-200 rounded-lg" href="#">
+<span class="material-symbols-outlined">pill</span>
+                Medications
+            </a>
+<a class="flex items-center gap-3 text-slate-400 hover:text-slate-200 px-4 py-3 transition-colors hover:bg-slate-800/50 duration-200 rounded-lg" href="#">
+<span class="material-symbols-outlined">settings</span>
+                Settings
+            </a>
+</div>
+<!-- CTA & Footer -->
+<div class="flex flex-col gap-4 mt-auto">
+<button class="w-full bg-error/10 text-error hover:bg-error/20 font-bold py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors duration-200">
+<span class="material-symbols-outlined">emergency</span>
+                Emergency SOS
+            </button>
+<div class="border-t border-slate-800/50 pt-4 flex flex-col gap-2 font-body text-slate-300 font-medium">
+<a class="flex items-center gap-3 text-slate-400 hover:text-slate-200 px-4 py-2 transition-colors hover:bg-slate-800/50 duration-200 rounded-lg" href="#">
+<span class="material-symbols-outlined">help</span>
+                    Support
+                </a>
+<a class="flex items-center gap-3 text-slate-400 hover:text-slate-200 px-4 py-2 transition-colors hover:bg-slate-800/50 duration-200 rounded-lg" href="#">
+<span class="material-symbols-outlined">logout</span>
+                    Logout
+                </a>
+</div>
+</div>
+</nav>
+<!-- Main Content Canvas -->
+<main class="ml-[280px] flex-1 min-h-screen relative overflow-hidden flex flex-col">
+<!-- TopNavBar Component -->
+<header class="fixed top-0 right-0 left-[280px] h-20 bg-slate-900/40 backdrop-blur-xl border-b border-slate-800/50 flex justify-between items-center px-10 z-40">
+<div class="font-headline text-slate-100 text-xl font-bold tracking-tight">ElderCare Dashboard</div>
+<div class="flex items-center gap-6">
+<!-- Search on right logic implied by 'search_bar': 'on_right' -->
+<div class="relative hidden lg:block">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">search</span>
+<input class="bg-slate-800/50 border border-slate-700 text-slate-200 text-sm rounded-full pl-10 pr-4 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all w-64 placeholder-slate-500 font-body" placeholder="Search patients..." type="text"/>
+</div>
+<div class="flex items-center gap-2 text-emerald-500">
+<button class="hover:bg-slate-800/30 rounded-full p-2 transition-all focus:ring-2 focus:ring-emerald-500/50 outline-none">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+<button class="hover:bg-slate-800/30 rounded-full p-2 transition-all focus:ring-2 focus:ring-emerald-500/50 outline-none">
+<span class="material-symbols-outlined">emergency_share</span>
+</button>
+<button class="hover:bg-slate-800/30 rounded-full p-2 transition-all focus:ring-2 focus:ring-emerald-500/50 outline-none">
+<span class="material-symbols-outlined">account_circle</span>
+</button>
+</div>
+</div>
+</header>
+<!-- Page Content -->
+<div class="flex-1 mt-20 p-10 max-w-7xl mx-auto w-full flex flex-col gap-8 relative z-10">
+<!-- Page Header -->
+<div class="flex items-center justify-between">
+<div>
+<h1 class="text-3xl font-headline font-bold text-slate-100 flex items-center gap-3">
+<span class="material-symbols-outlined text-secondary text-4xl" style="font-variation-settings: 'FILL' 1;">document_scanner</span>
+                        AI Clinical Scanner
+                    </h1>
+<p class="text-slate-400 mt-2 font-body max-w-2xl">Upload medical reports, EKGs, or lab results for instant, AI-driven summaries and actionable clinical insights.</p>
+</div>
+<div class="flex items-center gap-2 bg-secondary/10 border border-secondary/20 px-4 py-2 rounded-full ai-glow">
+<span class="material-symbols-outlined text-secondary text-sm">auto_awesome</span>
+<span class="text-secondary font-label font-semibold text-sm tracking-wide">Powered by Gemini</span>
+</div>
+</div>
+<!-- Upload Section -->
+<section class="glass-panel rounded-xl p-8 border border-slate-700/50 shadow-lg relative overflow-hidden group">
+<!-- Subtle background glow -->
+<div class="absolute -inset-1 bg-gradient-to-r from-emerald-500/10 to-secondary/10 opacity-0 group-hover:opacity-100 transition-opacity duration-500 blur-xl pointer-events-none"></div>
+<div class="relative z-10 flex flex-col items-center justify-center p-12 border-2 border-dashed border-emerald-500/40 rounded-xl bg-slate-800/30 hover:bg-slate-800/50 hover:border-emerald-500/70 transition-all duration-300 cursor-pointer">
+<div class="w-20 h-20 bg-emerald-500/10 rounded-full flex items-center justify-center mb-6 shadow-inner">
+<span class="material-symbols-outlined text-emerald-500 text-4xl">cloud_upload</span>
+</div>
+<h2 class="text-xl font-headline font-semibold text-slate-200 mb-2">Drag &amp; drop medical files</h2>
+<p class="text-slate-400 font-body mb-8 text-center max-w-md">Drop medical reports here (PDF, PNG, JPG) or click to browse your local files for analysis.</p>
+<button class="bg-emerald-500 hover:bg-emerald-400 text-slate-900 font-headline font-bold py-3 px-8 rounded-lg flex items-center gap-2 transition-all shadow-lg shadow-emerald-500/20 active:scale-95">
+<span class="material-symbols-outlined">document_scanner</span>
+                        Scan Report
+                    </button>
+</div>
+</section>
+<!-- Scan History Section -->
+<section class="flex flex-col gap-6 mt-4">
+<div class="flex items-center justify-between">
+<h2 class="text-xl font-headline font-semibold text-slate-100 flex items-center gap-2">
+<span class="material-symbols-outlined text-slate-400">history</span>
+                        Recent Scans
+                    </h2>
+<button class="text-sm font-label text-emerald-500 hover:text-emerald-400 transition-colors">View All History</button>
+</div>
+<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+<!-- History Card 1: EKG -->
+<article class="glass-panel rounded-xl p-6 hover:border-slate-600 transition-all duration-300 relative group overflow-hidden">
+<div class="absolute top-0 left-0 w-1 h-full bg-secondary opacity-50 group-hover:opacity-100 transition-opacity"></div>
+<header class="flex justify-between items-start mb-4 border-b border-slate-700/50 pb-4">
+<div class="flex items-center gap-4">
+<div class="w-12 h-12 bg-secondary/10 rounded-lg flex items-center justify-center text-secondary border border-secondary/20">
+<span class="material-symbols-outlined">monitor_heart</span>
+</div>
+<div>
+<h3 class="font-headline font-semibold text-slate-200 text-lg">Cardiology EKG Note</h3>
+<div class="flex items-center gap-2 mt-1">
+<span class="text-xs font-label text-slate-400 bg-slate-800 px-2 py-0.5 rounded border border-slate-700">EKG_Report_0814.pdf</span>
+<span class="text-xs text-slate-500 font-body">Today, 09:15 AM</span>
+</div>
+</div>
+</div>
+<button class="text-slate-400 hover:text-slate-200 transition-colors">
+<span class="material-symbols-outlined">more_vert</span>
+</button>
+</header>
+<div class="space-y-4">
+<div>
+<h4 class="text-xs font-label text-secondary uppercase tracking-wider mb-2 flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">auto_awesome</span> AI Summary
+                                </h4>
+<p class="text-slate-300 font-body text-sm leading-relaxed">
+                                    Sinus rhythm with mild resting tachycardia (HR ~90). Stable LVEF at 55%. No acute ischemic changes noted compared to previous baseline.
+                                </p>
+</div>
+<div class="bg-tertiary/10 border border-tertiary/20 rounded-lg p-3">
+<h4 class="text-xs font-label text-tertiary uppercase tracking-wider mb-1 flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">lightbulb</span> Recommendations
+                                </h4>
+<p class="text-slate-200 font-body text-sm">Review evening medication schedule. Consider slight adjustment to beta-blocker dosage if resting HR remains elevated.</p>
+</div>
+</div>
+<div class="mt-4 pt-4 border-t border-slate-700/50 flex justify-end gap-3">
+<button class="text-sm font-label text-slate-400 hover:text-slate-200 px-3 py-1.5 rounded-md hover:bg-slate-800 transition-colors">View Source File</button>
+<button class="text-sm font-label text-secondary hover:bg-secondary/10 px-3 py-1.5 rounded-md transition-colors border border-secondary/30">Add to Patient Record</button>
+</div>
+</article>
+<!-- History Card 2: Lab Results -->
+<article class="glass-panel rounded-xl p-6 hover:border-slate-600 transition-all duration-300 relative group overflow-hidden">
+<div class="absolute top-0 left-0 w-1 h-full bg-emerald-500 opacity-50 group-hover:opacity-100 transition-opacity"></div>
+<header class="flex justify-between items-start mb-4 border-b border-slate-700/50 pb-4">
+<div class="flex items-center gap-4">
+<div class="w-12 h-12 bg-emerald-500/10 rounded-lg flex items-center justify-center text-emerald-500 border border-emerald-500/20">
+<span class="material-symbols-outlined">science</span>
+</div>
+<div>
+<h3 class="font-headline font-semibold text-slate-200 text-lg">Blood Lab Result</h3>
+<div class="flex items-center gap-2 mt-1">
+<span class="text-xs font-label text-slate-400 bg-slate-800 px-2 py-0.5 rounded border border-slate-700">CBC_Panel_0812.png</span>
+<span class="text-xs text-slate-500 font-body">Aug 12, 02:30 PM</span>
+</div>
+</div>
+</div>
+<button class="text-slate-400 hover:text-slate-200 transition-colors">
+<span class="material-symbols-outlined">more_vert</span>
+</button>
+</header>
+<div class="space-y-4">
+<div>
+<h4 class="text-xs font-label text-secondary uppercase tracking-wider mb-2 flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">auto_awesome</span> AI Summary
+                                </h4>
+<p class="text-slate-300 font-body text-sm leading-relaxed">
+                                    Overall panel within expected limits for age group. HbA1c: 6.2% (Pre-diabetic range). eGFR: 58 mL/min (Slightly decreased, stage 3a CKD).
+                                </p>
+</div>
+<div class="flex gap-4">
+<div class="flex-1 bg-slate-800/50 border border-slate-700 rounded-lg p-3">
+<div class="text-xs font-label text-slate-400 mb-1">Fasting Glucose</div>
+<div class="text-tertiary font-headline font-bold">110 <span class="text-xs font-normal text-slate-500">mg/dL</span></div>
+</div>
+<div class="flex-1 bg-slate-800/50 border border-slate-700 rounded-lg p-3">
+<div class="text-xs font-label text-slate-400 mb-1">Cholesterol (LDL)</div>
+<div class="text-emerald-500 font-headline font-bold">95 <span class="text-xs font-normal text-slate-500">mg/dL</span></div>
+</div>
+</div>
+</div>
+<div class="mt-4 pt-4 border-t border-slate-700/50 flex justify-end gap-3">
+<button class="text-sm font-label text-slate-400 hover:text-slate-200 px-3 py-1.5 rounded-md hover:bg-slate-800 transition-colors">View Source File</button>
+<button class="text-sm font-label text-secondary hover:bg-secondary/10 px-3 py-1.5 rounded-md transition-colors border border-secondary/30">Add to Patient Record</button>
+</div>
+</article>
+</div>
+</section>
+</div>
+</main>
+</body></html>

@@ -1,6 +1,12 @@
 [
   {
     "type": "scan",
+    "message": "Prescription report 'ce2ca0f38002e2f6e4392e8173cd2551.jpg' scanned successfully",
+    "severity": "info",
+    "timestamp": 1786736111
+  },
+  {
+    "type": "scan",
     "message": "Prescription report 'WhatsApp Image 2026-05-30 at 16.13.28.jpeg' scanned successfully",
     "severity": "info",
     "timestamp": 1780220666

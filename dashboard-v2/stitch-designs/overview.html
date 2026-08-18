@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>ElderCare Dashboard</title>
+<!-- Fonts -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Plus+Jakarta+Sans:wght@500;600;700;800&amp;family=Space+Grotesk:wght@500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Tailwind Config -->
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        emerald: {
+                            400: '#34d399',
+                            500: '#10b981',
+                            600: '#059669',
+                        },
+                        slate: {
+                            800: '#1e293b',
+                            900: '#0f172a',
+                        },
+                        red: {
+                            500: '#ef4444',
+                            600: '#dc2626',
+                        }
+                    },
+                    fontFamily: {
+                        headline: ["Plus Jakarta Sans", "sans-serif"],
+                        body: ["Inter", "sans-serif"],
+                        label: ["Space Grotesk", "sans-serif"],
+                        mono: ["JetBrains Mono", "monospace"],
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .icon-fill {
+            font-variation-settings: 'FILL' 1;
+        }
+        
+        /* Glassmorphism utility */
+        .glass-card {
+            background: rgba(30, 41, 59, 0.6);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(51, 65, 85, 0.5);
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-200 font-body antialiased min-h-screen overflow-hidden flex">
+<!-- SideNavBar (Shared Component) -->
+<nav class="fixed left-0 top-0 h-screen w-[280px] bg-slate-900/80 backdrop-blur-md border-r border-slate-800/50 shadow-xl flex flex-col h-full p-6 gap-8 z-50">
+<!-- Brand -->
+<div class="flex flex-col gap-2">
+<div class="flex items-center gap-3">
+<img alt="ElderCare Logo" class="w-10 h-10 object-contain" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBrDU94FlwSBLefHL8rK_4lCJmd3CdJAcsSLpvV3wT_FZAac_399f8VNum9P_Nkh2MyB182ntWhugVjDhglgLIxj_IrHmott3gGe4392HlyAdCR44wzRRhesht3wAmFHD9Ha5FUGuoX2Oy-p49wBlhmICX0EfR9xlmainFkDGLIo1asgMp7P-6w7QYJ6k6PRI3n1XRLAmvL_X8y3f1G_aJcZW3j9phDbt4JGls_uzLN5qRWFzMNEnY3ARYDK6pMGGv8YrtfKxsejzo"/>
+<span class="text-2xl font-headline font-bold text-emerald-500 tracking-tight">ElderCare</span>
+</div>
+<p class="text-xs text-slate-400 font-medium pl-1">360° AI Monitoring System</p>
+</div>
+<!-- Patient Card (Custom Injection per prompt) -->
+<div class="glass-card rounded-xl p-4 flex flex-col gap-3 relative overflow-hidden">
+<div class="absolute top-0 right-0 w-16 h-16 bg-emerald-500/10 rounded-bl-full blur-xl"></div>
+<div class="flex justify-between items-start">
+<div>
+<h3 class="font-headline font-bold text-slate-100">Arthur Pendelton</h3>
+<p class="text-xs text-slate-400">Age 82 • Cardiology</p>
+</div>
+<div class="bg-emerald-500/20 text-emerald-500 px-2 py-0.5 rounded text-[10px] font-bold tracking-wider">SECURE</div>
+</div>
+<div class="flex items-center justify-between text-xs mt-2 border-t border-slate-700/50 pt-2">
+<div class="flex items-center gap-1 text-slate-300">
+<span class="material-symbols-outlined text-[14px]">battery_5_bar</span>
+                    92%
+                </div>
+<div class="flex items-center gap-1 text-emerald-400">
+<span class="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
+                    Telemetry: Active
+                </div>
+</div>
+</div>
+<!-- Navigation Links (JSON Data) -->
+<div class="flex-1 flex flex-col gap-2">
+<!-- Active Tab -->
+<a class="flex items-center justify-between bg-emerald-500/10 text-emerald-500 rounded-lg px-4 py-3 font-bold active:scale-95 transform transition-transform" href="#">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined icon-fill">dashboard</span>
+<span>Dashboard</span>
+</div>
+</a>
+<!-- Inactive Tabs mapped to Prompt ideas -->
+<a class="flex items-center justify-between text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 px-4 py-3 transition-all duration-200 rounded-lg" href="#">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined">monitoring</span>
+<span>Analytics</span>
+</div>
+<span class="bg-red-500/20 text-red-400 text-[9px] px-1.5 py-0.5 rounded font-bold">LIVE</span>
+</a>
+<a class="flex items-center justify-between text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 px-4 py-3 transition-all duration-200 rounded-lg" href="#">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined">groups</span>
+<span>Patients</span>
+</div>
+<span class="bg-amber-500/20 text-amber-400 text-[9px] px-1.5 py-0.5 rounded font-bold">ALERT</span>
+</a>
+<a class="flex items-center justify-between text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 px-4 py-3 transition-all duration-200 rounded-lg" href="#">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined">pill</span>
+<span>Medications</span>
+</div>
+<span class="bg-indigo-500/20 text-indigo-400 text-[9px] px-1.5 py-0.5 rounded font-bold">IoT</span>
+</a>
+<a class="flex items-center justify-between text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 px-4 py-3 transition-all duration-200 rounded-lg" href="#">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined">settings</span>
+<span>Settings</span>
+</div>
+</a>
+</div>
+<!-- Footer / SOS -->
+<div class="mt-auto">
+<button class="w-full bg-gradient-to-b from-red-500 to-red-600 hover:from-red-400 hover:to-red-500 text-white font-bold py-4 rounded-xl shadow-lg shadow-red-500/20 transition-all flex items-center justify-center gap-2">
+<span class="material-symbols-outlined">emergency</span>
+                Emergency SOS
+            </button>
+</div>
+</nav>
+<!-- Main Content Area -->
+<main class="ml-[280px] w-[calc(100%-280px)] h-screen flex flex-col relative">
+<!-- Background decorative elements -->
+<div class="absolute top-0 right-0 w-[600px] h-[600px] bg-emerald-500/5 rounded-full blur-[120px] pointer-events-none"></div>
+<!-- TopNavBar (Shared Component) -->
+<header class="fixed top-0 right-0 left-[280px] h-20 bg-slate-900/40 backdrop-blur-xl border-b border-slate-800/50 flex justify-between items-center px-10 z-40">
+<div class="flex items-center gap-6">
+<h1 class="font-headline text-xl font-bold text-slate-100">Good Afternoon, Dr. Miller</h1>
+<div class="h-4 w-px bg-slate-700"></div>
+<div class="text-sm font-mono text-slate-400" id="clock">14:32:05 PM</div>
+<div class="flex items-center gap-2 bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/20">
+<span class="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_#10b981]"></span>
+<span class="text-xs font-medium text-emerald-400">System Online</span>
+</div>
+</div>
+<div class="flex items-center gap-2">
+<button class="text-slate-400 hover:text-slate-100 hover:bg-slate-800/30 rounded-full p-2 transition-all focus:ring-2 focus:ring-emerald-500/50">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+<button class="text-slate-400 hover:text-slate-100 hover:bg-slate-800/30 rounded-full p-2 transition-all focus:ring-2 focus:ring-emerald-500/50">
+<span class="material-symbols-outlined">emergency_share</span>
+</button>
+<button class="text-slate-400 hover:text-slate-100 hover:bg-slate-800/30 rounded-full p-2 transition-all focus:ring-2 focus:ring-emerald-500/50 ml-2">
+<span class="material-symbols-outlined text-3xl">account_circle</span>
+</button>
+</div>
+</header>
+<!-- Scrollable Dashboard Content -->
+<div class="flex-1 overflow-y-auto pt-28 px-10 pb-10 flex flex-col gap-6">
+<!-- Metrics Row -->
+<div class="grid grid-cols-4 gap-6">
+<!-- HR -->
+<div class="glass-card rounded-2xl p-6 relative overflow-hidden group hover:border-emerald-500/30 transition-colors">
+<div class="flex justify-between items-start mb-4">
+<div class="flex items-center gap-2 text-slate-400">
+<span class="material-symbols-outlined text-red-400">favorite</span>
+<span class="font-medium text-sm">Heart Rate</span>
+</div>
+</div>
+<div class="flex items-end gap-3">
+<span class="text-4xl font-mono font-bold text-slate-100">72</span>
+<span class="text-slate-500 font-mono mb-1">BPM</span>
+</div>
+<!-- Sparkline fake -->
+<div class="absolute bottom-0 left-0 w-full h-12 opacity-50 group-hover:opacity-100 transition-opacity">
+<svg class="w-full h-full stroke-emerald-500 fill-none" stroke-width="2" viewbox="0 0 100 30">
+<path d="M0,20 L20,20 L25,5 L30,28 L35,15 L40,20 L100,20" vector-effect="non-scaling-stroke"></path>
+</svg>
+</div>
+</div>
+<!-- BP -->
+<div class="glass-card rounded-2xl p-6 hover:border-emerald-500/30 transition-colors">
+<div class="flex justify-between items-start mb-4">
+<div class="flex items-center gap-2 text-slate-400">
+<span class="material-symbols-outlined text-indigo-400">blood_pressure</span>
+<span class="font-medium text-sm">Blood Pressure</span>
+</div>
+</div>
+<div class="flex items-end gap-2">
+<span class="text-3xl font-mono font-bold text-slate-100">138<span class="text-slate-500 text-xl">/84</span></span>
+<span class="text-slate-500 font-mono mb-1 text-sm">mmHg</span>
+</div>
+<div class="mt-2 text-xs text-amber-400 flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">trending_up</span>
+                        Slightly elevated
+                    </div>
+</div>
+<!-- SpO2 -->
+<div class="glass-card rounded-2xl p-6 hover:border-emerald-500/30 transition-colors">
+<div class="flex justify-between items-start mb-4">
+<div class="flex items-center gap-2 text-slate-400">
+<span class="material-symbols-outlined text-cyan-400">air</span>
+<span class="font-medium text-sm">SpO2</span>
+</div>
+</div>
+<div class="flex items-end gap-2">
+<span class="text-4xl font-mono font-bold text-emerald-400">98%</span>
+</div>
+<div class="mt-2 text-xs text-slate-400">Normal range</div>
+</div>
+<!-- GFR -->
+<div class="glass-card rounded-2xl p-6 hover:border-emerald-500/30 transition-colors">
+<div class="flex justify-between items-start mb-4">
+<div class="flex items-center gap-2 text-slate-400">
+<span class="material-symbols-outlined text-purple-400">water_drop</span>
+<span class="font-medium text-sm">eGFR</span>
+</div>
+</div>
+<div class="flex items-end gap-2">
+<span class="text-3xl font-mono font-bold text-slate-100">58</span>
+<span class="text-slate-500 font-mono mb-1 text-sm">mL/min</span>
+</div>
+<div class="mt-2 w-full bg-slate-800 rounded-full h-1.5">
+<div class="bg-amber-400 h-1.5 rounded-full" style="width: 58%"></div>
+</div>
+</div>
+</div>
+<!-- Mid Row -->
+<div class="grid grid-cols-2 gap-6 h-80">
+<!-- Clinical Scan -->
+<div class="glass-card rounded-2xl p-6 flex flex-col h-full relative overflow-hidden">
+<div class="absolute inset-0 bg-gradient-to-br from-indigo-500/5 to-transparent pointer-events-none"></div>
+<div class="flex justify-between items-center mb-6">
+<h2 class="font-headline font-bold text-lg text-slate-100 flex items-center gap-2">
+<span class="material-symbols-outlined text-indigo-400">document_scanner</span>
+                            Latest Clinical Scan
+                        </h2>
+<span class="text-xs bg-slate-800 text-slate-300 px-2 py-1 rounded">Today, 09:15 AM</span>
+</div>
+<div class="flex-1 bg-slate-900/50 rounded-xl p-4 border border-slate-800 font-mono text-sm text-slate-300 overflow-y-auto leading-relaxed">
+<p class="text-indigo-400 mb-2">&gt;&gt; REPORT_ID: C-8291-A</p>
+<p>Cardiology Consultation Summary:</p>
+<ul class="list-disc pl-5 mt-2 space-y-2 opacity-80">
+<li>Patient exhibits mild resting tachycardia (HR ~90).</li>
+<li>Echocardiogram indicates stable LVEF at 55%.</li>
+<li>No acute ischemic changes on recent ECG.</li>
+<li><span class="text-amber-400">Recommendation:</span> Adjust beta-blocker dosage; monitor BP daily.</li>
+</ul>
+</div>
+</div>
+<!-- AI Assistant -->
+<div class="glass-card rounded-2xl p-6 flex flex-col h-full">
+<div class="flex justify-between items-center mb-6">
+<h2 class="font-headline font-bold text-lg text-slate-100 flex items-center gap-2">
+<span class="material-symbols-outlined text-emerald-400">smart_toy</span>
+                            AI Health Assistant
+                        </h2>
+<span class="bg-emerald-500/20 text-emerald-400 text-xs px-2 py-1 rounded font-medium border border-emerald-500/30">Active</span>
+</div>
+<div class="flex-1 flex flex-col gap-4">
+<div class="flex gap-3">
+<div class="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center border border-slate-700 shrink-0">
+<span class="material-symbols-outlined text-[18px] text-emerald-400">auto_awesome</span>
+</div>
+<div class="bg-slate-800/80 rounded-2xl rounded-tl-sm p-4 text-sm text-slate-200 border border-slate-700/50">
+<p>I've analyzed Arthur's trends over the past 72 hours. While vitals are generally stable, his sleep patterns show increased fragmentation. Combined with the slightly elevated blood pressure, I suggest reviewing his evening medication schedule.</p>
+</div>
+</div>
+</div>
+<div class="mt-4 relative">
+<input class="w-full bg-slate-900 border border-slate-700 rounded-xl py-3 pl-4 pr-10 text-sm text-slate-200 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all" placeholder="Ask Gemini AI about patient..." type="text"/>
+<button class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-emerald-400">
+<span class="material-symbols-outlined text-[20px]">send</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+</main>
+<script>
+        // Simple clock
+        function updateClock() {
+            const now = new Date();
+            const timeString = now.toLocaleTimeString('en-US', { hour12: false });
+            document.getElementById('clock').textContent = timeString;
+        }
+        setInterval(updateClock, 1000);
+        updateClock();
+    </script>
+</body></html>

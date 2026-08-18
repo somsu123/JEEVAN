@@ -6,9 +6,10 @@ import {
   FileText,
   AlertCircle,
   Pill,
-  MessageCircleHeart,
-  Battery,
   ShieldAlert,
+  Battery,
+  Upload,
+  BarChart3,
 } from 'lucide-react';
 import { ViewType } from '../types';
 
@@ -18,15 +19,27 @@ interface SidebarProps {
   activeAlert: boolean;
   onTriggerSOS: () => void;
   fallCount: number;
+  pendingRxCount?: number;
 }
 
-const menuItems: { id: ViewType; name: string; icon: React.ElementType; badge?: string; badgeType?: 'ai' | 'alert' | 'count' }[] = [
-  { id: 'overview',         name: 'Overview',          icon: LayoutDashboard },
-  { id: 'live-vitals',      name: 'Live Vitals',        icon: Heart,          badge: 'LIVE', badgeType: 'ai' },
-  { id: 'fall-alerts',      name: 'Fall Detection',     icon: ShieldAlert,    badge: 'alert', badgeType: 'alert' },
-  { id: 'medicine',         name: 'Medicine Box',        icon: Pill,           badge: 'IoT', badgeType: 'ai' },
-  { id: 'report-scanner',   name: 'Clinical Scanner',   icon: FileText,        badge: 'AI', badgeType: 'ai' },
+const menuItems: { id: ViewType; name: string; icon: React.ElementType; badge?: string; badgeType?: 'live' | 'alert' | 'iot' | 'ai' | 'rx' | 'hist' }[] = [
+  { id: 'overview',         name: 'Dashboard',          icon: LayoutDashboard },
+  { id: 'live-vitals',      name: 'Live Vitals',        icon: Heart,          badge: 'LIVE', badgeType: 'live' },
+  { id: 'fall-alerts',      name: 'Fall Detection',     icon: ShieldAlert,    badge: 'ALERT', badgeType: 'alert' },
+  { id: 'medicine',         name: 'Medicine Box',       icon: Pill,           badge: 'IoT', badgeType: 'iot' },
+  { id: 'report-scanner',   name: 'Clinical Scanner',   icon: FileText,       badge: 'AI', badgeType: 'ai' },
+  { id: 'rx-review',        name: 'Rx Scan & Review',   icon: Upload,         badge: 'RX',   badgeType: 'rx' },
+  { id: 'dose-history',     name: 'Dose History',       icon: BarChart3,      badge: 'HIST', badgeType: 'hist' },
 ];
+
+const badgeStyles: Record<string, string> = {
+  live: 'bg-red-500/20 text-red-400 border-red-500/20',
+  alert: 'bg-amber-500/20 text-amber-400 border-amber-500/20',
+  iot: 'bg-indigo-500/20 text-indigo-400 border-indigo-500/20',
+  ai: 'bg-violet-500/20 text-violet-400 border-violet-500/20',
+  rx: 'bg-amber-500/20 text-amber-400 border-amber-500/20',
+  hist: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/20',
+};
 
 export default function Sidebar({
   currentView,
@@ -34,86 +47,91 @@ export default function Sidebar({
   activeAlert,
   onTriggerSOS,
   fallCount,
+  pendingRxCount = 0,
 }: SidebarProps) {
   return (
-    <aside className="w-72 border-r border-slate-800 bg-slate-900/90 backdrop-blur-md flex flex-col h-screen overflow-y-auto shrink-0">
+    <aside className="w-[280px] shrink-0 h-screen bg-slate-900/80 backdrop-blur-md border-r border-slate-800/50 shadow-xl flex flex-col p-6 gap-6 z-30">
 
-      {/* Brand */}
-      <div className="p-6 border-b border-slate-800">
+      {/* ── Brand ── */}
+      <div className="flex flex-col gap-1.5">
         <div className="flex items-center gap-3">
           <div className="relative">
-            <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
-              <Activity className="h-6 w-6 animate-pulse" />
+            <div className="p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
+              <Activity className="h-6 w-6 text-emerald-400 animate-pulse" />
             </div>
-            <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full bg-emerald-500 ring-2 ring-slate-900" />
+            <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-emerald-500 ring-2 ring-slate-900 glow-emerald" />
           </div>
-          <div>
-            <h1 className="text-xl font-bold tracking-tight text-white flex items-center gap-1.5">
-              Elder<span className="text-emerald-400">Care</span>
-            </h1>
-            <p className="text-xs text-slate-400 font-mono">360° AI Monitoring System</p>
-          </div>
+          <span className="text-2xl font-headline font-bold text-emerald-500 tracking-tight">
+            Elder<span className="text-white">Care</span>
+          </span>
         </div>
+        <p className="text-xs text-slate-400 font-medium pl-1">360° AI Monitoring System</p>
       </div>
 
-      {/* Patient widget */}
-      <div className="p-4 mx-4 my-4 bg-slate-950/60 rounded-xl border border-slate-800/80">
-        <div className="flex justify-between items-start mb-2">
+      {/* ── Patient Card (Glassmorphism) ── */}
+      <div className="glass-card rounded-xl p-4 flex flex-col gap-3 relative overflow-hidden">
+        {/* Decorative glow */}
+        <div className="absolute top-0 right-0 w-16 h-16 bg-emerald-500/10 rounded-bl-full blur-xl" />
+
+        <div className="flex justify-between items-start relative z-10">
           <div>
-            <span className="text-[10px] text-slate-500 font-mono">PATIENT UNIT</span>
-            <h2 className="text-sm font-semibold text-slate-200">Arthur Pendelton</h2>
-            <span className="text-[10px] text-slate-400 font-mono">Age 82 · Cardiology</span>
+            <span className="text-[9px] text-slate-500 font-label tracking-widest uppercase">Patient Unit</span>
+            <h3 className="font-headline font-bold text-slate-100 text-sm mt-0.5">Arthur Pendelton</h3>
+            <span className="text-[10px] text-slate-400">Age 82 · Cardiology</span>
           </div>
-          <span className="px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+          <span className="bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded text-[9px] font-bold font-label tracking-wider border border-emerald-500/20">
             SECURE
           </span>
         </div>
-        <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-900/60 text-xs text-slate-400">
-          <div className="flex items-center gap-1.5">
+
+        <div className="flex items-center justify-between text-xs border-t border-slate-700/50 pt-2.5">
+          <div className="flex items-center gap-1.5 text-slate-300">
             <Battery className="h-3.5 w-3.5 text-emerald-400" />
-            <span>Bracelet 92%</span>
+            <span className="font-mono text-[11px]">92%</span>
           </div>
-          <div className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-full bg-emerald-400 animate-ping" />
-            <span>Telemetry Ok</span>
+          <div className="flex items-center gap-1.5 text-emerald-400">
+            <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full pulse-emerald" />
+            <span className="text-[11px] font-medium">Telemetry Active</span>
           </div>
         </div>
       </div>
 
-      {/* Navigation */}
-      <nav className="flex-1 px-4 space-y-1">
-        <span className="block px-3 pb-2 text-[10px] font-bold font-mono tracking-wider text-slate-500">
-          MONITORING MODULES
+      {/* ── Navigation ── */}
+      <nav className="flex-1 flex flex-col gap-1.5">
+        <span className="text-[9px] font-label font-bold tracking-[0.2em] text-slate-500 uppercase px-2 mb-1">
+          Monitoring Modules
         </span>
-
         {menuItems.map((item) => {
           const isActive = currentView === item.id;
           const Icon = item.icon;
           const isFallAlert = item.id === 'fall-alerts' && (activeAlert || fallCount > 0);
+          const isRxPending = item.id === 'rx-review' && pendingRxCount > 0;
 
           return (
             <button
               key={item.id}
               onClick={() => onViewChange(item.id)}
-              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm transition-all duration-200 group ${
+              className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm transition-all duration-200 group ${
                 isActive
-                  ? 'bg-emerald-500/10 text-emerald-300 border-l-4 border-emerald-500 font-medium'
-                  : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200 border-l-4 border-transparent'
+                  ? 'bg-emerald-500/10 text-emerald-400 font-bold'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
               }`}
             >
               <div className="flex items-center gap-3">
-                <Icon className={`h-4 w-4 transition-transform duration-200 group-hover:scale-110 ${
-                  isActive ? 'text-emerald-400' : isFallAlert ? 'text-red-400' : 'text-slate-500 group-hover:text-slate-300'
+                <Icon className={`h-[18px] w-[18px] transition-transform duration-200 group-hover:scale-110 ${
+                  isActive ? 'text-emerald-400' : isFallAlert ? 'text-red-400' : isRxPending ? 'text-amber-400' : 'text-slate-500 group-hover:text-slate-300'
                 }`} />
                 <span>{item.name}</span>
               </div>
               {item.badge && (
-                <span className={`px-2 py-0.5 rounded-full text-[9px] font-mono font-bold leading-none ${
+                <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold font-label border ${
                   isFallAlert
-                    ? 'bg-red-500/20 border border-red-500/30 text-red-400 animate-pulse'
-                    : 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'
+                    ? 'bg-red-500/20 border-red-500/30 text-red-400 animate-pulse'
+                    : isRxPending
+                      ? 'bg-amber-500/20 border-amber-500/30 text-amber-400 animate-pulse'
+                      : badgeStyles[item.badgeType || 'ai']
                 }`}>
-                  {isFallAlert ? fallCount.toString() : item.badge}
+                  {isFallAlert ? fallCount.toString() : isRxPending ? pendingRxCount.toString() : item.badge}
                 </span>
               )}
             </button>
@@ -121,25 +139,25 @@ export default function Sidebar({
         })}
       </nav>
 
-      {/* SOS */}
-      <div className="p-5 mt-auto border-t border-slate-800/80 bg-slate-950/40">
+      {/* ── Emergency SOS ── */}
+      <div className="mt-auto flex flex-col gap-3">
         {activeAlert && (
-          <div className="mb-3 flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 animate-pulse">
-            <span className="h-2 w-2 bg-red-500 rounded-full animate-ping" />
-            <span className="text-[10px] font-bold text-red-400 font-mono uppercase tracking-wide">
-              ACTIVE EMERGENCY
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 animate-pulse">
+            <span className="h-2 w-2 bg-red-500 rounded-full pulse-red-dot" />
+            <span className="text-[10px] font-bold text-red-400 font-label uppercase tracking-wider">
+              Active Emergency
             </span>
           </div>
         )}
         <button
           onClick={onTriggerSOS}
           id="sos-button"
-          className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-semibold text-sm transition-all shadow-lg shadow-red-950/30 border border-red-500/30 flex items-center justify-center gap-2 group"
+          className="w-full bg-gradient-to-b from-red-500 to-red-600 hover:from-red-400 hover:to-red-500 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-red-500/20 transition-all flex items-center justify-center gap-2 group active:scale-95"
         >
-          <AlertCircle className="h-4 w-4 animate-bounce group-hover:scale-110 transition-transform" />
-          TRIGGER MANUAL SOS
+          <AlertCircle className="h-4.5 w-4.5 animate-bounce group-hover:scale-110 transition-transform" />
+          <span className="text-sm">Emergency SOS</span>
         </button>
-        <p className="text-[10px] text-slate-500 text-center mt-2 font-mono">
+        <p className="text-[10px] text-slate-500 text-center font-mono">
           Notifies caregiver + logs emergency event
         </p>
       </div>

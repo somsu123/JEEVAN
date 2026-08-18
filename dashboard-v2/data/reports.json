@@ -1,5 +1,43 @@
 [
   {
+    "fileName": "ce2ca0f38002e2f6e4392e8173cd2551.jpg",
+    "summary": "## Document Overview\nThis report summarizes your recent visit where you experienced giddiness and restlessness. The doctor diagnosed you with low blood sugar (hypoglycemia) and provided immediate treatment to help you feel better, along with advice for recovery.\n\n## Key Metrics & Readings\n* **Random Blood Sugar (RBS)**: 10 mg/dL (CONCERNING) — *Your blood sugar was very low, which explains why you felt dizzy and restless. Immediate treatment was given to raise your sugar levels, which is crucial for your energy and overall well-being.*\n* **Blood Pressure (BP)**: 110/70 mmHg (NORMAL) — *Your blood pressure is within a healthy range, which is good for your heart and overall circulation.*\n* **Pulse Rate (PR)**: 60 bpm (NORMAL) — *Your heart rate is steady and normal, showing your heart is working efficiently.*\n\n## Prescribed Medications\n* No medications extracted from prescription.\n\n## Action Items & Lifestyle Recommendations\n* Ensure you drink enough fluids throughout the day to stay well-hydrated.\n* Take Oral Rehydration Solution (ORS) as advised to help replenish your body's fluids and electrolytes.\n\n## Questions to Ask your Doctor\n* What specific factors might have caused my blood sugar to drop so low?\n* What steps can I take in my diet and daily routine to prevent my blood sugar from getting too low again?\n* Should I consider monitoring my blood sugar at home, and if so, how often?\n* Are there any particular foods or drinks I should avoid to maintain stable blood sugar levels?\n\n## Medical Disclaimer\nPlease remember that this overview is based on the provided report. It's always best to discuss any health concerns and treatment plans directly with your physician for personalized advice and care.",
+    "scanDate": "01:05:11 — Aug 15, 2026",
+    "overview": "This report summarizes your recent visit where you experienced giddiness and restlessness. The doctor diagnosed you with low blood sugar (hypoglycemia) and provided immediate treatment to help you feel better, along with advice for recovery.",
+    "metrics": [
+      {
+        "name": "Random Blood Sugar (RBS)",
+        "value": "10 mg/dL",
+        "status": "CONCERNING",
+        "interpretation": "Your blood sugar was very low, which explains why you felt dizzy and restless. Immediate treatment was given to raise your sugar levels, which is crucial for your energy and overall well-being."
+      },
+      {
+        "name": "Blood Pressure (BP)",
+        "value": "110/70 mmHg",
+        "status": "NORMAL",
+        "interpretation": "Your blood pressure is within a healthy range, which is good for your heart and overall circulation."
+      },
+      {
+        "name": "Pulse Rate (PR)",
+        "value": "60 bpm",
+        "status": "NORMAL",
+        "interpretation": "Your heart rate is steady and normal, showing your heart is working efficiently."
+      }
+    ],
+    "actions": [
+      "Ensure you drink enough fluids throughout the day to stay well-hydrated.",
+      "Take Oral Rehydration Solution (ORS) as advised to help replenish your body's fluids and electrolytes."
+    ],
+    "doctorQuestions": [
+      "What specific factors might have caused my blood sugar to drop so low?",
+      "What steps can I take in my diet and daily routine to prevent my blood sugar from getting too low again?",
+      "Should I consider monitoring my blood sugar at home, and if so, how often?",
+      "Are there any particular foods or drinks I should avoid to maintain stable blood sugar levels?"
+    ],
+    "disclaimer": "Please remember that this overview is based on the provided report. It's always best to discuss any health concerns and treatment plans directly with your physician for personalized advice and care.",
+    "createdAt": 1786736111
+  },
+  {
     "fileName": "WhatsApp Image 2026-05-30 at 16.13.28.jpeg",
     "summary": "## Document Overview\nThis report summarizes the findings from the X-ray image of your left knee. The X-ray helps us look closely at the bones and the space within your knee joint to understand its current condition and any changes that might be present.\n\n## Key Metrics & Readings\n* **Knee Joint Space**: Shows some reduction, particularly on the inner side of your left knee. (ELEVATED) — *The cushion-like space between your thigh bone and shin bone in your knee appears a bit less than ideal, especially on the inner part. This is a common finding as we age and suggests some natural wear in the joint.*\n* **Bone Changes (around joint)**: Small bony growths and some increased bone density observed around the knee joint. (ELEVATED) — *Your X-ray shows some small bony bumps, known as osteophytes, and slightly denser bone in areas around the joint. These are very common and often a normal part of aging, indicating the body's way of adapting to changes in the joint over time.*\n\n## Prescribed Medications\n* No medications extracted from prescription.\n\n## Action Items & Lifestyle Recommendations\n* Maintain gentle, regular activity like walking or swimming to keep your knee strong and flexible.\n* Consider wearing supportive and comfortable shoes to help with knee comfort.\n* If you experience any knee discomfort, try applying a warm or cold compress to the affected area as needed.\n* Ensure you have a balanced diet, including foods rich in calcium and Vitamin D, which are important for bone health.\n\n## Questions to Ask your Doctor\n* What do these X-ray findings mean for my daily activities and future knee health?\n* Are there any specific exercises or physical therapy I should consider for my knee?\n* What are my options for managing any knee discomfort I might experience?\n* Should I consider any dietary changes or supplements to support my knee health?\n\n## Medical Disclaimer\nThis analysis is for informational purposes only and is not a substitute for professional medical advice. Please discuss these findings and any concerns with your doctor for a personalized assessment and treatment plan.",
     "scanDate": "15:14:26 — May 31, 2026",

@@ -100,10 +100,10 @@ function DeviceStatusBar({ status }: { status: MedboxStatus }) {
     : 'Never';
 
   return (
-    <div className={`rounded-2xl border p-4 transition-all ${
+    <div className={`glass-card rounded-2xl p-5 transition-all ${
       status.online
-        ? 'bg-emerald-500/5 border-emerald-500/20'
-        : 'bg-slate-900/60 border-slate-800'
+        ? 'hover:border-emerald-500/20'
+        : ''
     }`}>
       <div className="flex flex-wrap items-center gap-3">
 
@@ -250,13 +250,13 @@ function BoxCard({
               {slot.slotNumber}
             </div>
             <div>
-              <h3 className={`text-sm font-bold ${slot.taken ? 'line-through text-slate-500' : missed ? 'text-red-300' : 'text-white'}`}>
+              <h3 className={`text-sm font-bold font-headline ${slot.taken ? 'line-through text-slate-500' : missed ? 'text-red-300' : 'text-white'}`}>
                 {slot.medicineName}
               </h3>
               <span className="text-[11px] text-slate-400 font-mono">{slot.dosage}</span>
             </div>
           </div>
-          <span className={`px-2.5 py-1 rounded-full text-[10px] font-mono font-bold border shrink-0 ${statusStyles[status]}`}>
+          <span className={`px-2.5 py-1 rounded-full text-[10px] font-label font-bold border shrink-0 ${statusStyles[status]}`}>
             {status}
           </span>
         </div>
@@ -492,39 +492,42 @@ export default function MedicineBox({
   };
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-6 relative">
       {showAddForm && (
         <AddSlotForm onAdd={handleAddSlot} onClose={() => setShowAddForm(false)} />
       )}
 
+      {/* Decorative orb */}
+      <div className="orb-emerald -top-40 -left-40" />
+
       {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800/60 pb-5">
+      <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
+          <h1 className="text-2xl font-headline font-bold text-slate-100 tracking-tight flex items-center gap-3">
             <Pill className="h-6 w-6 text-amber-400" />
-            Smart Medicine Reminder Box
+            Smart Medicine Box
           </h1>
           <p className="text-sm text-slate-400 mt-1">
-            ESP32 IoT box — ultrasonic presence + touch-sensor intake verification + servo dispensing.
+            ESP32 IoT box — ultrasonic presence + touch-sensor verification + servo dispensing.
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-mono font-bold ${
+          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-label font-bold ${
             lidOpen
               ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
-              : 'bg-slate-800 border-slate-700 text-slate-400'
+              : 'glass-card text-slate-400'
           }`}>
             <Package className="h-3.5 w-3.5" />
             {lidOpen ? 'LID OPEN' : 'LID CLOSED'}
           </div>
           <button
             onClick={() => setShowAddForm(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-mono text-slate-300 hover:text-white transition"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl glass-card hover:border-emerald-500/30 text-xs font-label text-slate-300 hover:text-emerald-400 transition-all"
           >
             <Plus className="h-3.5 w-3.5" /> Add Slot
           </button>
         </div>
-      </div>
+      </header>
 
       {/* ── Device Status Bar ───────────────────────────────────────────────── */}
       <DeviceStatusBar status={medboxStatus} />

@@ -9,7 +9,9 @@ export type ViewType =
   | 'fall-alerts'
   | 'medicine'
   | 'report-scanner'
-  | 'ai-dictator';
+  | 'ai-dictator'
+  | 'rx-review'
+  | 'dose-history';
 
 // ─── AI Dictator Q&A ─────────────────────────────────────────────────────────
 export interface AiDictatorMessage {
@@ -27,11 +29,11 @@ export interface VitalReading {
 export interface VitalState {
   heartRate: number | string;
   heartRateHistory: VitalReading[];
+  spo2History?: VitalReading[];
+  signalQuality?: string;
   movementState: 'Resting' | 'Gentle Walk' | 'Seated Activity' | 'Sleeping';
   bloodLevelSeconds: number;
   oxygenSpO2: number;
-  systolicBP: number;
-  diastolicBP: number;
   roomPresence: boolean;
   fingerPresent: boolean;
   lastUpdated: string;
@@ -115,3 +117,50 @@ export interface MedboxEvent {
   timestamp: string;
   deviceId: string;
 }
+
+// ─── Rx Pipeline ──────────────────────────────────────────────────────────────
+
+export interface ExtractedMed {
+  name: string;
+  dosage: string | null;
+  frequency: string | null;
+  suggestedTime: string;     // "HH:MM"
+  confidence: 'high' | 'low';
+}
+
+export interface PendingChange {
+  id: string;
+  prescriptionId: string;
+  compartment: number;       // 0–3, matches ESP32 LED_PIN index
+  currentLabel: string;      // what's currently in the box (from schedule_cache)
+  proposedLabel: string;     // label as it should appear on the LCD
+  proposedHour: number;
+  proposedMinute: number;
+  extractedMed?: ExtractedMed;
+  status: 'pending' | 'confirmed' | 'rejected';
+  createdAt: string;
+  confirmedAt?: string;
+  confirmedBy?: string;
+  reloadConfirmed: boolean;
+}
+
+export interface DoseEvent {
+  id: string;
+  compartment: number;
+  label: string;
+  scheduledTime: string;     // "HH:MM"
+  takenAt: string | null;    // ISO timestamp or null if missed
+  status: 'taken' | 'missed';
+  loggedAt: string;          // ISO timestamp when event was written
+}
+
+export interface Prescription {
+  id: string;
+  uploadedAt: string;
+  fileName: string;
+  ocrText: string;
+  extractedMeds: ExtractedMed[];
+  llmModel: string;
+  status: 'pending_review' | 'applied' | 'rejected';
+}
+

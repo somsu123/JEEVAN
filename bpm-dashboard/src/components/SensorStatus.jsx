@@ -2,8 +2,8 @@
  * ============================================================
  *  SensorStatus.jsx — Sensor Health & Signal Quality
  * ============================================================
- *  Displays finger detection state, IR signal quality bars,
- *  and device uptime.
+ *  Displays finger detection state, IR + Red signal strength,
+ *  signal quality bars, and device uptime.
  * ============================================================
  */
 
@@ -23,10 +23,10 @@ function formatUptime(seconds) {
 function getSignalLevel(signal) {
   switch (signal) {
     case 'excellent': return { bars: 4, color: 'bg-emerald-400', label: 'Excellent' };
-    case 'good':      return { bars: 3, color: 'bg-emerald-400', label: 'Good' };
-    case 'fair':      return { bars: 2, color: 'bg-amber-400',   label: 'Fair' };
-    case 'weak':      return { bars: 1, color: 'bg-red-400',     label: 'Weak' };
-    default:          return { bars: 0, color: 'bg-slate-600',   label: 'Unknown' };
+    case 'good':      return { bars: 3, color: 'bg-emerald-400', label: 'Good'      };
+    case 'fair':      return { bars: 2, color: 'bg-amber-400',   label: 'Fair'      };
+    case 'weak':      return { bars: 1, color: 'bg-red-400',     label: 'Weak'      };
+    default:          return { bars: 0, color: 'bg-slate-600',   label: 'Unknown'   };
   }
 }
 
@@ -50,7 +50,7 @@ function SignalBars({ signal }) {
 }
 
 export default function SensorStatus({ sensorStatus }) {
-  const { fingerDetected, signal, irValue, uptime } = sensorStatus;
+  const { fingerDetected, signal, irValue, redValue, uptime } = sensorStatus;
   const signalInfo = getSignalLevel(signal);
 
   return (
@@ -81,8 +81,8 @@ export default function SensorStatus({ sensorStatus }) {
           <div className="flex items-center gap-3">
             <Signal className={`w-5 h-5 ${
               signalInfo.bars >= 3 ? 'text-emerald-400' :
-              signalInfo.bars >= 2 ? 'text-amber-400' :
-              signalInfo.bars >= 1 ? 'text-red-400' : 'text-slate-500'
+              signalInfo.bars >= 2 ? 'text-amber-400'   :
+              signalInfo.bars >= 1 ? 'text-red-400'     : 'text-slate-500'
             }`} />
             <span className="text-sm text-slate-300">Signal</span>
           </div>
@@ -98,10 +98,23 @@ export default function SensorStatus({ sensorStatus }) {
             <div className="w-5 h-5 flex items-center justify-center">
               <div className={`w-2.5 h-2.5 rounded-full ${fingerDetected ? 'bg-red-500 animate-pulse' : 'bg-slate-600'}`} />
             </div>
-            <span className="text-sm text-slate-300">IR Value</span>
+            <span className="text-sm text-slate-300">IR</span>
           </div>
           <span className="text-xs text-slate-400 tabular-nums" style={{ fontFamily: 'var(--font-mono)' }}>
             {irValue > 0 ? irValue.toLocaleString() : '—'}
+          </span>
+        </div>
+
+        {/* Red LED Value (new) */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-5 h-5 flex items-center justify-center">
+              <div className={`w-2.5 h-2.5 rounded-full ${fingerDetected ? 'bg-rose-400 animate-pulse' : 'bg-slate-600'}`} />
+            </div>
+            <span className="text-sm text-slate-300">Red</span>
+          </div>
+          <span className="text-xs text-slate-400 tabular-nums" style={{ fontFamily: 'var(--font-mono)' }}>
+            {redValue > 0 ? redValue.toLocaleString() : '—'}
           </span>
         </div>
 

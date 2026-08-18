@@ -1,22 +1,20 @@
 /**
  * ============================================================
- *  useSocket.js — Socket.IO Custom Hook
+ *  useSocket.js — Socket.IO Custom Hook (BPM + SpO₂)
  * ============================================================
- *  Manages the WebSocket connection to the BPM backend.
- *  Returns live BPM data, history, connection states, etc.
- *
- *  Socket.IO handles reconnection automatically with
- *  exponential backoff.
+ *  Manages the WebSocket connection to the vitals backend.
+ *  Returns live BPM, SpO₂, history, connection states, etc.
  * ============================================================
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
 
 const MAX_HISTORY = 120; // keep 2 min of chart data
 
 export default function useSocket() {
   const [bpm, setBpm]                   = useState(null);
+  const [spo2, setSpo2]                 = useState(null);
   const [history, setHistory]           = useState([]);
   const [isConnected, setIsConnected]   = useState(false);
   const [espConnected, setEspConnected] = useState(false);
@@ -24,15 +22,19 @@ export default function useSocket() {
     fingerDetected: false,
     signal: 'unknown',
     irValue: 0,
+    redValue: 0,
     uptime: 0,
   });
   const [lastUpdate, setLastUpdate]     = useState(null);
-  const [stats, setStats]               = useState({ min: 0, max: 0, avg: 0, count: 0 });
+  const [stats, setStats]               = useState({
+    bpm:  { min: 0, max: 0, avg: 0, count: 0 },
+    spo2: { min: 0, max: 0, avg: 0, count: 0 },
+  });
 
   const socketRef = useRef(null);
 
   useEffect(() => {
-    // Connect directly to backend server
+    // Connect to backend server
     const socket = io('http://localhost:3001', {
       transports: ['websocket', 'polling'],
       reconnection: true,
@@ -82,7 +84,7 @@ export default function useSocket() {
       }
     });
 
-    // ── Live BPM data ───────────────────────────────────────
+    // ── Live vitals data ────────────────────────────────────
     socket.on('bpm:data', (data) => {
       if (!data) return;
 
@@ -92,14 +94,16 @@ export default function useSocket() {
       };
 
       setBpm(data.bpm);
+      setSpo2(data.spo2 > 0 ? data.spo2 : null);
       setLastUpdate(new Date(data.timestamp));
       setEspConnected(true);
 
       setSensorStatus({
         fingerDetected: data.fingerDetected,
-        signal: data.signal || 'unknown',
-        irValue: data.irValue || 0,
-        uptime: data.uptime || 0,
+        signal:         data.signal   || 'unknown',
+        irValue:        data.irValue  || 0,
+        redValue:       data.redValue || 0,
+        uptime:         data.uptime   || 0,
       });
 
       setHistory((prev) => {
@@ -108,17 +112,14 @@ export default function useSocket() {
       });
     });
 
-    // Cleanup
-    return () => {
-      socket.disconnect();
-    };
+    return () => { socket.disconnect(); };
   }, []);
 
-  // Fetch stats periodically (every 5s)
+  // Fetch stats periodically (every 5 s)
   useEffect(() => {
     const fetchStats = async () => {
       try {
-        const res = await fetch('/api/bpm/history?n=300');
+        const res  = await fetch('http://localhost:3001/api/bpm/history?n=300');
         const data = await res.json();
         if (data.stats) setStats(data.stats);
       } catch { /* ignore */ }
@@ -131,6 +132,7 @@ export default function useSocket() {
 
   return {
     bpm,
+    spo2,
     history,
     isConnected,
     espConnected,
