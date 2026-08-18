@@ -40,7 +40,7 @@ try:
     print("=" * 52)
     print("  ALL TESTS PASSED")
     print("  MongoDB Atlas is CONNECTED and HEALTHY!")
-    print("  Database: eldercare_db")
+    print("  Database: JEEVAN")
     print("=" * 52)
 
 except Exception as e:

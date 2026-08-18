@@ -1,86 +1,48 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
+import os from "os";
 import dotenv from "dotenv";
 import { GoogleGenAI } from "@google/genai";
 import nodemailer from "nodemailer";
 import twilio from "twilio";
 import { createServer as createViteServer } from "vite";
-import { initializeApp, cert } from "firebase-admin/app";
-import { getFirestore, Firestore } from "firebase-admin/firestore";
+import { MongoClient, Db, ObjectId } from "mongodb";
 
 dotenv.config();
 
-// ─── Firebase Admin SDK Connection ───────────────────────────────────────────
-const FIREBASE_PROJECT = "rfidcamera-8681b";
-
-let fireDb: Firestore;
-
-function findServiceAccount(): string | null {
-  // Look in backend folder (sibling of dashboard-v2)
-  const searchDirs = [
-    path.join(process.cwd(), "..", "backend"),
-    path.join(process.cwd()),
-  ];
-  const priorityNames = [
-    "firebase-service-account.json",
-    "serviceAccountKey.json",
-    "service-account.json",
-  ];
-  for (const dir of searchDirs) {
-    for (const name of priorityNames) {
-      const p = path.join(dir, name);
-      if (fs.existsSync(p)) return p;
-    }
-    // Scan any JSON with type=service_account
-    try {
-      const files = fs.readdirSync(dir).filter((f) => f.endsWith(".json"));
-      for (const f of files) {
-        const p = path.join(dir, f);
-        try {
-          const content = JSON.parse(fs.readFileSync(p, "utf-8"));
-          if (content?.type === "service_account") return p;
-        } catch { /* skip unreadable files */ }
-      }
-    } catch { /* skip unreadable dirs */ }
-  }
-  return null;
-}
+// ─── MongoDB Atlas Connection ───────────────────────────────────────────────
+let mongoClient: MongoClient | null = null;
+let mongoDb: Db | null = null;
 
 async function connectFirebase() {
   try {
-    const saPath = findServiceAccount();
-    if (saPath) {
-      const serviceAccount = JSON.parse(fs.readFileSync(saPath, "utf-8"));
-      initializeApp({
-        credential: cert(serviceAccount),
-        projectId: FIREBASE_PROJECT,
-      });
-      console.log(`[Firebase] ✅ Connected with service account: ${path.basename(saPath)}`);
-    } else {
-      console.error("[Firebase] ❌ Service account key not found!");
-      console.error("[Firebase] Place your downloaded JSON key in: d:\\Elder--Care\\backend\\");
-      console.error("[Firebase] Get it from: Firebase Console -> Project Settings -> Service Accounts");
-      return;
+    const mongoUri = process.env.MONGO_URI;
+    if (!mongoUri) {
+      throw new Error("MONGO_URI is not set in environment.");
     }
-    fireDb = getFirestore();
-    console.log(`[Firebase] Firestore ready -> ${FIREBASE_PROJECT}`);
+    mongoClient = new MongoClient(mongoUri);
+    await mongoClient.connect();
+    mongoDb = mongoClient.db("JEEVAN");
+    console.log(`[MongoDB] ✅ Connected to Atlas -> JEEVAN`);
   } catch (err: any) {
-    console.error("[Firebase] ❌ Failed to initialize:", err.message);
+    console.error("[MongoDB] ❌ Failed to initialize:", err.message);
   }
 }
 
-// ── Firebase ready guard ──────────────────────────────────────────────────────
 function fireReady(): boolean {
-  return !!fireDb;
+  return !!mongoDb;
 }
 
-// ── Medbox schedule helpers (Firestore-backed) ────────────────────────────────
+// ── Medbox schedule helpers (MongoDB-backed) ──────────────────────────────────
 async function readSchedule(): Promise<DoseEntry[]> {
   if (!fireReady()) return [];
   try {
-    const snap = await fireDb.collection("medbox_schedule").get();
-    return snap.docs.map((d) => d.data() as DoseEntry);
+    const docs = await mongoDb!.collection("medbox_schedule").find({}).toArray();
+    return docs.map((d: any) => {
+      const { _id, ...rest } = d;
+      return rest as DoseEntry;
+    });
   } catch {
     return [];
   }
@@ -89,29 +51,25 @@ async function readSchedule(): Promise<DoseEntry[]> {
 async function writeSchedule(doses: DoseEntry[]): Promise<void> {
   if (!fireReady()) return;
   try {
-    const col = fireDb.collection("medbox_schedule");
-    // Delete all existing, then batch-write new ones
-    const existing = await col.get();
-    const batch = fireDb.batch();
-    existing.docs.forEach((d) => batch.delete(d.ref));
-    for (const dose of doses) {
-      batch.set(col.doc(), dose);
+    const col = mongoDb!.collection("medbox_schedule");
+    await col.deleteMany({});
+    if (doses.length > 0) {
+      await col.insertMany(doses);
     }
-    await batch.commit();
   } catch (err: any) {
-    console.error("[Firebase] writeSchedule failed:", err.message);
+    console.error("[MongoDB] writeSchedule failed:", err.message);
   }
 }
 
 async function appendMedboxEvent(entry: object): Promise<void> {
   if (!fireReady()) return;
   try {
-    await fireDb.collection("medbox_events").add({
+    await mongoDb!.collection("medbox_events").insertOne({
       ...entry,
       loggedAt: new Date().toISOString(),
     });
   } catch (err: any) {
-    console.error("[Firebase] appendMedboxEvent failed:", err.message);
+    console.error("[MongoDB] appendMedboxEvent failed:", err.message);
   }
 }
 
@@ -193,26 +151,34 @@ interface FallEventRecord {
   resolvedAt?: string;
 }
 
-// ── Firebase-backed fall event helpers ─────────────────────────────────────────
+// ── MongoDB-backed fall event helpers ─────────────────────────────────────────
 async function saveFallEvent(event: FallEventRecord): Promise<void> {
   if (!fireReady()) return;
   try {
-    await fireDb.collection("fall_events").doc(event.id).set({ ...event });
+    await mongoDb!.collection("fall_events").replaceOne(
+      { id: event.id },
+      { ...event },
+      { upsert: true }
+    );
   } catch (err: any) {
-    console.error("[Firebase] saveFallEvent failed:", err.message);
+    console.error("[MongoDB] saveFallEvent failed:", err.message);
   }
 }
 
 async function getFallEvents(limit = 50): Promise<FallEventRecord[]> {
   if (!fireReady()) return [];
   try {
-    const snap = await fireDb.collection("fall_events")
-      .orderBy("isoTimestamp", "desc")
+    const docs = await mongoDb!.collection("fall_events")
+      .find({})
+      .sort({ isoTimestamp: -1 })
       .limit(limit)
-      .get();
-    return snap.docs.map((d) => d.data() as FallEventRecord);
+      .toArray();
+    return docs.map((d: any) => {
+      const { _id, ...rest } = d;
+      return rest as FallEventRecord;
+    });
   } catch (err: any) {
-    console.error("[Firebase] getFallEvents failed:", err.message);
+    console.error("[MongoDB] getFallEvents failed:", err.message);
     return [];
   }
 }
@@ -221,11 +187,11 @@ async function resolveFallEvent(id: string): Promise<boolean> {
   if (!fireReady()) return false;
   try {
     const resolvedAt = new Date().toLocaleTimeString("en-US", { hour12: false });
-    await fireDb.collection("fall_events").doc(id).update({
-      status: "resolved",
-      resolvedAt
-    });
-    return true;
+    const res = await mongoDb!.collection("fall_events").updateOne(
+      { id },
+      { $set: { status: "resolved", resolvedAt } }
+    );
+    return res.modifiedCount > 0;
   } catch {
     return false;
   }
@@ -235,17 +201,11 @@ async function resolveAllFallEventsBySource(source: string): Promise<number> {
   if (!fireReady()) return 0;
   try {
     const resolvedAt = new Date().toLocaleTimeString("en-US", { hour12: false });
-    const snap = await fireDb.collection("fall_events")
-      .where("source", "==", source)
-      .where("status", "==", "active")
-      .get();
-    if (snap.empty) return 0;
-    const batch = fireDb.batch();
-    snap.docs.forEach((doc) => {
-      batch.update(doc.ref, { status: "resolved", resolvedAt });
-    });
-    await batch.commit();
-    return snap.size;
+    const res = await mongoDb!.collection("fall_events").updateMany(
+      { source, status: "active" },
+      { $set: { status: "resolved", resolvedAt } }
+    );
+    return res.modifiedCount;
   } catch {
     return 0;
   }
@@ -254,10 +214,7 @@ async function resolveAllFallEventsBySource(source: string): Promise<number> {
 async function getActiveFallCount(): Promise<number> {
   if (!fireReady()) return 0;
   try {
-    const snap = await fireDb.collection("fall_events")
-      .where("status", "==", "active")
-      .get();
-    return snap.size;
+    return await mongoDb!.collection("fall_events").countDocuments({ status: "active" });
   } catch {
     return 0;
   }
@@ -506,12 +463,16 @@ app.post("/api/bracelet/heartbeat", (req, res) => {
   braceletStatus.uptime        = uptime ?? 0;
   braceletStatus.deviceId      = deviceId ?? "bracelet-01";
 
-  // Persist bracelet status to Firebase
+  // Persist bracelet status to MongoDB
   if (fireReady()) {
-    fireDb.collection("device_status").doc("bracelet").set({
-      ...braceletStatus,
-      updatedAt: new Date().toISOString()
-    }, { merge: true }).catch(() => {});
+    mongoDb!.collection("device_status").replaceOne(
+      { _id: "bracelet" as any },
+      {
+        ...braceletStatus,
+        updatedAt: new Date().toISOString()
+      },
+      { upsert: true }
+    ).catch(() => {});
   }
 
   broadcastSSE("bracelet_heartbeat", braceletStatus);
@@ -934,6 +895,9 @@ app.get("/api/medicine-state", async (_req, res) => {
 // REPORT SCANNER — Gemini vision analysis + medicine extraction + MongoDB save
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Voice Assistant buffer for checkPendingSpeak
+let pendingSpeakText: string | null = null;
+
 // Track which medicines have already triggered a reminder this minute
 const reminderFiredAt = new Map<string, string>(); // key: "MedName@HH:MM" → fired ISO time
 
@@ -975,7 +939,8 @@ setInterval(async () => {
         message:  speakText,
       });
 
-
+      // 2. Set pending speech for voice assistant polling
+      pendingSpeakText = speakText;
 
       console.log(`[REMINDER] ${speakText}`);
     }
@@ -983,6 +948,9 @@ setInterval(async () => {
     console.error("[REMINDER] Cron error:", err?.message);
   }
 }, 60_000);
+
+
+
 
 app.post("/api/scan-report", async (req, res) => {
   try {
@@ -1462,12 +1430,16 @@ app.post("/api/hardware/heartbeat", (req, res) => {
     medboxLidOpen = lidOpen;
   }
 
-  // Persist medbox status to Firebase
+  // Persist medbox status to MongoDB
   if (fireReady()) {
-    fireDb.collection("device_status").doc("medbox-01").set({
-      ...medboxStatus,
-      updatedAt: new Date().toISOString()
-    }, { merge: true }).catch(() => {});
+    mongoDb!.collection("device_status").replaceOne(
+      { _id: "medbox-01" as any },
+      {
+        ...medboxStatus,
+        updatedAt: new Date().toISOString()
+      },
+      { upsert: true }
+    ).catch(() => {});
   }
 
   // Broadcast telemetry updates to the React UI via SSE
@@ -2042,12 +2014,16 @@ app.post("/api/hardware/heartbeat", async (req, res) => {
   medboxStatus.deviceId        = deviceId || "medbox-01";
   medboxStatus.online          = true;
 
-  // Persist to Firebase device_status
+  // Persist to MongoDB device_status
   if (fireReady()) {
-    fireDb.collection("device_status").doc("medbox-01").set({
-      ...medboxStatus,
-      updatedAt: new Date().toISOString()
-    }, { merge: true }).catch(() => {});
+    mongoDb!.collection("device_status").replaceOne(
+      { _id: "medbox-01" as any },
+      {
+        ...medboxStatus,
+        updatedAt: new Date().toISOString()
+      },
+      { upsert: true }
+    ).catch(() => {});
   }
 
   broadcastSSE("medbox_heartbeat", medboxStatus);
@@ -2076,9 +2052,10 @@ if (process.env.VITE_HARDWARE_MODE === "simulated") {
     medboxStatus.uptime           = (medboxStatus.uptime || 0) + 10;
     simStateIdx++;
     if (fireReady()) {
-      fireDb.collection("device_status").doc("medbox-01-sim").set(
+      mongoDb!.collection("device_status").replaceOne(
+        { _id: "medbox-01-sim" as any },
         { ...medboxStatus, updatedAt: new Date().toISOString() },
-        { merge: true }
+        { upsert: true }
       ).catch(() => {});
     }
     broadcastSSE("medbox_heartbeat", medboxStatus);
@@ -2133,65 +2110,97 @@ const ESP32_BASE_URL = (process.env.ESP32_BASE_URL || "").replace(/\/$/, "");
 // prescriptions — raw OCR + parsed result per upload
 async function savePrescription(doc: object): Promise<string> {
   if (!fireReady()) return `local-${Date.now()}`;
-  const ref = await fireDb.collection("prescriptions").add({ ...doc, uploadedAt: new Date().toISOString() });
-  return ref.id;
+  const res = await mongoDb!.collection("prescriptions").insertOne({
+    ...doc,
+    uploadedAt: new Date().toISOString()
+  });
+  return res.insertedId.toString();
 }
 
 async function getPrescriptions(limit = 20): Promise<any[]> {
   if (!fireReady()) return [];
   try {
-    const snap = await fireDb.collection("prescriptions").orderBy("uploadedAt", "desc").limit(limit).get();
-    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const docs = await mongoDb!.collection("prescriptions").find({}).sort({ uploadedAt: -1 }).limit(limit).toArray();
+    return docs.map((d: any) => {
+      const { _id, ...rest } = d;
+      return { id: _id.toString(), ...rest };
+    });
   } catch { return []; }
 }
 
 async function updatePrescriptionStatus(id: string, status: string): Promise<void> {
   if (!fireReady()) return;
-  try { await fireDb.collection("prescriptions").doc(id).update({ status }); } catch {}
+  try {
+    await mongoDb!.collection("prescriptions").updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { status } }
+    );
+  } catch {}
 }
 
 // pending_changes — one row per proposed compartment change
 async function savePendingChange(doc: object): Promise<string> {
   if (!fireReady()) return `local-${Date.now()}`;
-  const ref = await fireDb.collection("pending_changes").add({ ...doc, createdAt: new Date().toISOString(), status: "pending" });
-  return ref.id;
+  const res = await mongoDb!.collection("pending_changes").insertOne({
+    ...doc,
+    createdAt: new Date().toISOString(),
+    status: "pending"
+  });
+  return res.insertedId.toString();
 }
 
 async function getPendingChanges(statusFilter?: string): Promise<any[]> {
   if (!fireReady()) return [];
   try {
-    let q: FirebaseFirestore.Query = fireDb.collection("pending_changes");
-    if (statusFilter) q = q.where("status", "==", statusFilter);
-    const snap = await (q as FirebaseFirestore.Query).orderBy("createdAt", "desc").get();
-    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const query: any = {};
+    if (statusFilter) query.status = statusFilter;
+    const docs = await mongoDb!.collection("pending_changes").find(query).sort({ createdAt: -1 }).toArray();
+    return docs.map((d: any) => {
+      const { _id, ...rest } = d;
+      return { id: _id.toString(), ...rest };
+    });
   } catch { return []; }
 }
 
 async function updatePendingChange(id: string, fields: object): Promise<void> {
   if (!fireReady()) return;
-  try { await fireDb.collection("pending_changes").doc(id).update(fields); } catch {}
+  try {
+    await mongoDb!.collection("pending_changes").updateOne(
+      { _id: new ObjectId(id) },
+      { $set: fields }
+    );
+  } catch {}
 }
 
 async function getPendingChangeById(id: string): Promise<any | null> {
   if (!fireReady()) return null;
   try {
-    const doc = await fireDb.collection("pending_changes").doc(id).get();
-    if (!doc.exists) return null;
-    return { id: doc.id, ...doc.data() };
+    const doc = await mongoDb!.collection("pending_changes").findOne({ _id: new ObjectId(id) });
+    if (!doc) return null;
+    const { _id, ...rest } = doc;
+    return { id: _id.toString(), ...rest };
   } catch { return null; }
 }
 
 // dose_events — history/adherence log, built from polling givenToday
 async function appendDoseEvent(doc: object): Promise<void> {
   if (!fireReady()) return;
-  try { await fireDb.collection("dose_events").add({ ...doc, loggedAt: new Date().toISOString() }); } catch {}
+  try {
+    await mongoDb!.collection("dose_events").insertOne({
+      ...doc,
+      loggedAt: new Date().toISOString()
+    });
+  } catch {}
 }
 
 async function getDoseEvents(limit = 100): Promise<any[]> {
   if (!fireReady()) return [];
   try {
-    const snap = await fireDb.collection("dose_events").orderBy("loggedAt", "desc").limit(limit).get();
-    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const docs = await mongoDb!.collection("dose_events").find({}).sort({ loggedAt: -1 }).limit(limit).toArray();
+    return docs.map((d: any) => {
+      const { _id, ...rest } = d;
+      return { id: _id.toString(), ...rest };
+    });
   } catch { return []; }
 }
 
@@ -2199,22 +2208,23 @@ async function getDoseEvents(limit = 100): Promise<any[]> {
 async function readScheduleCache(): Promise<any[]> {
   if (!fireReady()) return [];
   try {
-    const snap = await fireDb.collection("schedule_cache").orderBy("compartment").get();
-    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const docs = await mongoDb!.collection("schedule_cache").find({}).sort({ compartment: 1 }).toArray();
+    return docs.map((d: any) => {
+      const { _id, ...rest } = d;
+      return { id: _id.toString(), ...rest };
+    });
   } catch { return []; }
 }
 
 async function writeScheduleCache(entries: any[]): Promise<void> {
   if (!fireReady()) return;
   try {
-    const col = fireDb.collection("schedule_cache");
-    const existing = await col.get();
-    const batch = fireDb.batch();
-    existing.docs.forEach(d => batch.delete(d.ref));
-    for (const e of entries) {
-      batch.set(col.doc(`comp-${e.compartment}`), { ...e, updatedAt: new Date().toISOString() });
+    const col = mongoDb!.collection("schedule_cache");
+    await col.deleteMany({});
+    if (entries.length > 0) {
+      const docs = entries.map(e => ({ ...e, updatedAt: new Date().toISOString() }));
+      await col.insertMany(docs);
     }
-    await batch.commit();
   } catch (err: any) {
     console.error("[RX] writeScheduleCache failed:", err.message);
   }
@@ -2236,8 +2246,13 @@ interface Esp32DoseEntry {
 // In-memory cache of last known ESP32 state (keyed by compartment)
 const esp32LastKnown = new Map<number, Esp32DoseEntry>();
 
+// Track ESP32 connectivity to avoid log spam
+let esp32OfflineSince: number | null = null;
+const ESP32_LOG_COOLDOWN_MS = 60_000; // only log once per minute when offline
+
 async function pollEsp32Schedule(): Promise<void> {
   if (!ESP32_BASE_URL) return; // not configured
+
 
   try {
     const res = await fetch(`${ESP32_BASE_URL}/api/schedule`, { signal: AbortSignal.timeout(5000) });
@@ -2300,22 +2315,30 @@ async function pollEsp32Schedule(): Promise<void> {
     })));
 
   } catch (err: any) {
-    // ESP32 offline / unreachable — silent fail
-    if (process.env.NODE_ENV !== "production") {
-      console.debug("[RX POLL] ESP32 unreachable:", err.message);
+    // ESP32 offline / unreachable
+    const now = Date.now();
+    if (esp32OfflineSince === null) {
+      // First failure — log it once
+      esp32OfflineSince = now;
+      console.warn("[RX POLL] ESP32 went offline:", err.message);
+    } else if (now - esp32OfflineSince >= ESP32_LOG_COOLDOWN_MS) {
+      // Still offline — log once per minute only
+      console.warn("[RX POLL] ESP32 still unreachable (retrying silently)");
+      esp32OfflineSince = now; // reset cooldown
     }
+    // else: silent — suppress repeated messages
   }
 }
 
-// Start polling after 5s (give Firebase time to connect)
+// Start polling after 5s (give MongoDB time to connect)
 if (ESP32_BASE_URL) {
   setTimeout(() => {
     pollEsp32Schedule();
-    setInterval(pollEsp32Schedule, 15_000);
-    console.log(`[RX] ESP32 polling started → ${ESP32_BASE_URL}/api/schedule every 15s`);
+    setInterval(pollEsp32Schedule, 30_000); // 30s — less noise on unstable WiFi
+    console.log(`[RX] ESP32 polling started -> ${ESP32_BASE_URL}/api/schedule every 30s`);
   }, 5_000);
 } else {
-  console.warn("[RX] ESP32_BASE_URL not set — dose polling disabled. Set it in .env to enable.");
+  console.warn("[RX] ESP32_BASE_URL not set - dose polling disabled. Set it in .env to enable.");
 }
 
 // ─── GET /api/esp32/schedule — proxy the live ESP32 schedule ─────────────────
@@ -2393,23 +2416,34 @@ Rules:
     try {
       const response = await activeAi.models.generateContent({
         model: "gemini-2.5-flash",
-        contents: {
-          parts: [
-            { inlineData: { mimeType: mimeType || "image/jpeg", data: fileData } },
-            { text: extractionPrompt },
-          ],
+        contents: [
+          { inlineData: { mimeType: mimeType || "image/jpeg", data: fileData } },
+          { text: extractionPrompt },
+        ],
+        config: {
+          temperature: 0.1,
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: "ARRAY",
+            items: {
+              type: "OBJECT",
+              properties: {
+                name: { type: "STRING" },
+                dosage: { type: "STRING" },
+                frequency: { type: "STRING" },
+                suggestedTime: { type: "STRING" },
+                confidence: { type: "STRING", enum: ["high", "low"] }
+              },
+              required: ["name", "suggestedTime", "confidence"]
+            }
+          }
         },
-        config: { temperature: 0.1 },
       });
 
       const rawText = (response.text || "").trim();
       ocrText = rawText;
 
-      // Strip markdown code fences if model wrapped the JSON
-      const jsonStr = rawText.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
-
-      // Validate: must be an array
-      const parsed = JSON.parse(jsonStr);
+      const parsed = JSON.parse(rawText);
       if (!Array.isArray(parsed)) throw new Error("Gemini returned a non-array response");
 
       // Schema-validate each item
@@ -2503,9 +2537,13 @@ app.get("/api/rx/pending", async (_req, res) => {
 // Requires reloadConfirmed=true in body (server-side validated — not just UI gating).
 app.post("/api/rx/confirm/:changeId", async (req, res) => {
   const { changeId } = req.params;
-  const { reloadConfirmed, confirmedBy } = req.body as {
+  const { reloadConfirmed, confirmedBy, compartment, customHour, customMinute, customTime } = req.body as {
     reloadConfirmed: boolean;
     confirmedBy?: string;
+    compartment?: number;
+    customHour?: number;
+    customMinute?: number;
+    customTime?: string; // e.g. "01:35"
   };
 
   // ── Hard guard: server-side reload confirmation check ─────────────────────
@@ -2521,7 +2559,22 @@ app.post("/api/rx/confirm/:changeId", async (req, res) => {
     return res.status(409).json({ error: `Change is already ${change.status}` });
   }
 
-  // ── Step 1: Fetch the current live ESP32 schedule ─────────────────────────
+  // Parse custom time if provided
+  let targetHour = Number(change.proposedHour);
+  let targetMinute = Number(change.proposedMinute);
+
+  if (customTime && typeof customTime === "string" && customTime.includes(":")) {
+    const [h, m] = customTime.split(":").map(Number);
+    if (!isNaN(h) && !isNaN(m)) {
+      targetHour = h;
+      targetMinute = m;
+    }
+  } else {
+    if (customHour !== undefined && !isNaN(Number(customHour))) targetHour = Number(customHour);
+    if (customMinute !== undefined && !isNaN(Number(customMinute))) targetMinute = Number(customMinute);
+  }
+
+  // ── Step 1: Fetch the current live ESP32 schedule (with cache fallback if offline) ──
   let esp32Schedule: Esp32DoseEntry[] = [];
 
   if (ESP32_BASE_URL) {
@@ -2530,66 +2583,96 @@ app.post("/api/rx/confirm/:changeId", async (req, res) => {
       if (r.ok) {
         const data = await r.json();
         esp32Schedule = Array.isArray(data.schedule) ? data.schedule : [];
+      } else {
+        throw new Error(`ESP32 returned status ${r.status}`);
       }
     } catch (err: any) {
-      console.error("[RX CONFIRM] Could not fetch current ESP32 schedule:", err.message);
-      return res.status(503).json({ error: "Could not reach ESP32 to read current schedule. Check ESP32_BASE_URL." });
+      console.warn("[RX CONFIRM] ESP32 unreachable for read, falling back to database cache:", err.message);
+      const cached = await readScheduleCache();
+      esp32Schedule = cached.map(c => {
+        let comp = c.compartment !== undefined ? Number(c.compartment) : (c.boxNumber ? Number(c.boxNumber) - 1 : 0);
+        let h = c.hour !== undefined ? Number(c.hour) : 8;
+        let m = c.minute !== undefined ? Number(c.minute) : 0;
+        if (c.time && typeof c.time === "string" && c.time.includes(":")) {
+          const [th, tm] = c.time.split(":").map(Number);
+          if (!isNaN(th)) h = th;
+          if (!isNaN(tm)) m = tm;
+        }
+        return {
+          compartment: comp,
+          hour: h,
+          minute: m,
+          label: c.label || c.medicine || `Medicine ${comp + 1}`,
+          givenToday: Boolean(c.givenToday || c.taken),
+        };
+      });
     }
   } else {
     // No ESP32 configured — build from cache
     const cached = await readScheduleCache();
-    esp32Schedule = cached.map(c => ({
-      hour: c.hour ?? 8,
-      minute: c.minute ?? 0,
-      compartment: c.compartment,
-      label: c.label || "",
-      givenToday: c.givenToday ?? false,
-    }));
+    esp32Schedule = cached.map(c => {
+      let comp = c.compartment !== undefined ? Number(c.compartment) : (c.boxNumber ? Number(c.boxNumber) - 1 : 0);
+      let h = c.hour !== undefined ? Number(c.hour) : 8;
+      let m = c.minute !== undefined ? Number(c.minute) : 0;
+      if (c.time && typeof c.time === "string" && c.time.includes(":")) {
+        const [th, tm] = c.time.split(":").map(Number);
+        if (!isNaN(th)) h = th;
+        if (!isNaN(tm)) m = tm;
+      }
+      return {
+        compartment: comp,
+        hour: h,
+        minute: m,
+        label: c.label || c.medicine || `Medicine ${comp + 1}`,
+        givenToday: Boolean(c.givenToday || c.taken),
+      };
+    });
   }
 
   // ── Step 2: Merge the confirmed change into the schedule ──────────────────
   // Only the target compartment changes; all others are preserved exactly.
-  const comp = Number(change.compartment);
+  const comp = compartment !== undefined ? Number(compartment) : Number(change.compartment);
   const merged: Esp32DoseEntry[] = esp32Schedule.map(d => {
-    if (d.compartment === comp) {
+    if (Number(d.compartment) === Number(comp)) {
       return {
         ...d,
+        compartment: Number(comp),
         label: change.proposedLabel,
-        hour: Number(change.proposedHour),
-        minute: Number(change.proposedMinute),
+        hour: targetHour,
+        minute: targetMinute,
         givenToday: false, // reset since compartment is being reloaded
       };
     }
-    return d;
+    return { ...d, compartment: Number(d.compartment) };
   });
 
   // If this compartment wasn't in the existing schedule, add it
-  if (!merged.some(d => d.compartment === comp)) {
+  if (!merged.some(d => Number(d.compartment) === Number(comp))) {
     merged.push({
-      compartment: comp,
+      compartment: Number(comp),
       label: change.proposedLabel,
-      hour: Number(change.proposedHour),
-      minute: Number(change.proposedMinute),
+      hour: targetHour,
+      minute: targetMinute,
       givenToday: false,
     });
   }
 
-  // ── Step 3: POST to ESP32 (the single write point) ────────────────────────
+  // ── Step 3: POST to ESP32 (single write point, warning on offline) ────────
   if (ESP32_BASE_URL) {
     try {
       const postRes = await fetch(`${ESP32_BASE_URL}/api/schedule`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ schedule: merged }),
-        signal: AbortSignal.timeout(8000),
+        signal: AbortSignal.timeout(6000),
       });
-      if (!postRes.ok) {
-        const errText = await postRes.text().catch(() => "");
-        return res.status(502).json({ error: `ESP32 rejected schedule update (${postRes.status}): ${errText}` });
+      if (postRes.ok) {
+        console.log(`[RX CONFIRM] ✅ Schedule pushed to ESP32 — compartment ${comp}: "${change.proposedLabel}" at ${String(targetHour).padStart(2, "0")}:${String(targetMinute).padStart(2, "0")}`);
+      } else {
+        console.warn(`[RX CONFIRM] ESP32 rejected schedule update (${postRes.status}), saved to database cache only.`);
       }
-      console.log(`[RX CONFIRM] ✅ Schedule pushed to ESP32 — compartment ${comp}: "${change.proposedLabel}"`);
     } catch (err: any) {
-      return res.status(503).json({ error: `Could not reach ESP32 to push schedule: ${err.message}` });
+      console.warn("[RX CONFIRM] Could not reach ESP32 to push schedule, saved to database cache only:", err.message);
     }
   } else {
     console.warn("[RX CONFIRM] ESP32_BASE_URL not set — skipping physical push, updating cache only");
@@ -2618,6 +2701,47 @@ app.post("/api/rx/confirm/:changeId", async (req, res) => {
     minute: d.minute,
     givenToday: d.givenToday,
   })));
+
+  // ── Step 5: Save/Upsert confirmed schedule to medbox_schedule & medicines MongoDB collections ──
+  try {
+    // 1. Update medbox_schedule
+    const currentSchedule = await readSchedule();
+    const formattedTime = `${String(targetHour).padStart(2, "0")}:${String(targetMinute).padStart(2, "0")}`;
+    const newDose: DoseEntry = {
+      boxNumber: comp + 1, // 1-based index (0 -> 1, 1 -> 2, etc.)
+      medicine: change.extractedMed?.name || change.proposedLabel.split(" - ")[0],
+      dosage: change.extractedMed?.dosage || "",
+      time: formattedTime,
+      taken: false
+    };
+    const updatedSchedule = currentSchedule.filter(d => d.boxNumber !== newDose.boxNumber);
+    updatedSchedule.push(newDose);
+    await writeSchedule(updatedSchedule);
+
+    // 2. Update medicines collection for scheduler reminders
+    if (change.extractedMed) {
+      const medCol = mongoDb!.collection("medicines");
+      const docId = change.extractedMed.name.toLowerCase().trim().replace(/\s+/g, "_");
+
+      await medCol.updateOne(
+        { _id: docId },
+        {
+          $set: {
+            name: change.extractedMed.name,
+            dosage: change.extractedMed.dosage || "",
+            purpose: change.extractedMed.purpose || "",
+            times: [formattedTime],
+            source: "scan",
+            addedAt: Date.now() / 1000
+          }
+        },
+        { upsert: true }
+      );
+      console.log(`[RX CONFIRM] Upserted medicine into database: ${change.extractedMed.name} at ${formattedTime}`);
+    }
+  } catch (dbErr: any) {
+    console.error("[RX CONFIRM] Failed to write confirmed schedule to MongoDB collections:", dbErr.message);
+  }
 
   broadcastSSE("rx_confirmed", { changeId, compartment: comp, label: change.proposedLabel });
   logEventLocally("rx", `Schedule confirmed — compartment ${comp}: "${change.proposedLabel}"`, "info");
@@ -2650,8 +2774,123 @@ app.post("/api/rx/reject/:changeId", async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// VOICE ASSISTANT ENDPOINTS
+// ─────────────────────────────────────────────────────────────────────────────
+
+app.post("/api/voice-assistant/heartbeat", (req, res) => {
+  broadcastSSE("voice_assistant_heartbeat", req.body);
+  res.sendStatus(200);
+});
+
+app.post("/api/voice-assistant/event", (req, res) => {
+  broadcastSSE("voice_assistant_event", req.body);
+  res.sendStatus(200);
+});
+
+app.get("/api/voice-assistant/pending-speak", (_req, res) => {
+  if (pendingSpeakText) {
+    res.json({ hasPending: true, text: pendingSpeakText });
+    pendingSpeakText = null;
+  } else {
+    res.json({ hasPending: false });
+  }
+});
+
+app.get("/api/voice-assistant/tts-pcm", async (req, res) => {
+  try {
+    const text = String(req.query.text || "").trim();
+    if (!text) return res.status(400).send("Text is required");
+    
+    const flaskTtsUrl = `${FLASK_URL}/api/voice-assistant/tts-pcm?text=${encodeURIComponent(text)}`;
+    const response = await fetch(flaskTtsUrl);
+    if (!response.ok) {
+      throw new Error(`Flask TTS returned status ${response.status}`);
+    }
+    
+    res.setHeader("Content-Type", "audio/pcm");
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    return res.send(buffer);
+  } catch (err: any) {
+    console.error("[VOICE] TTS proxy error:", err.message);
+    return res.status(500).send("TTS generation failed");
+  }
+});
+
+app.post("/api/voice-assistant/audio", async (req, res) => {
+  const chunks: any[] = [];
+  req.on("data", (chunk) => chunks.push(chunk));
+  req.on("end", async () => {
+    try {
+      const audioBuffer = Buffer.concat(chunks);
+      if (audioBuffer.length === 0) {
+        return res.status(400).json({ error: "Empty audio payload" });
+      }
+      
+      const base64Audio = audioBuffer.toString("base64");
+      
+      let patientContext = "";
+      try {
+        const snapshot = await buildPatientSnapshot();
+        patientContext = `Current Patient Context:\n${JSON.stringify(snapshot, null, 2)}\n`;
+      } catch (err: any) {
+        console.warn("[VOICE] Failed to load patient snapshot for grounding context:", err.message);
+      }
+
+      dotenv.config({ override: true });
+      const currentApiKey = getCleanApiKey();
+      const activeAi = currentApiKey
+        ? new GoogleGenAI({ apiKey: currentApiKey, httpOptions: { headers: { "User-Agent": "eldercare-dashboard-v2" } } })
+        : null;
+
+      if (!activeAi) {
+        return res.status(500).json({ error: "Gemini AI not initialized" });
+      }
+
+      const audioPart = {
+        inlineData: {
+          mimeType: "audio/wav",
+          data: base64Audio,
+        },
+      };
+
+      console.log("[VOICE] Sending audio request to Gemini...");
+      const response = await activeAi.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [
+          audioPart,
+          {
+            text: `You are Mitra, a kind, reassuring geriatric care voice assistant speaking to Arthur Pendelton (82).
+            Answer Arthur's question politely and concisely (maximum 1-2 sentences). Speak in a simple, friendly manner suitable for speech synthesis.
+            
+            ${patientContext}
+            
+            Question: [Analyze the attached audio and respond to it directly]`,
+          },
+        ],
+      });
+
+      const reply = (response.text || "").trim();
+      console.log(`[VOICE] Gemini reply: "${reply}"`);
+
+      broadcastSSE("voice_assistant_query", {
+        query: "[User spoke audio]",
+        reply,
+        timestamp: new Date().toISOString()
+      });
+
+      return res.json({ reply });
+    } catch (err: any) {
+      console.error("[VOICE] Audio handler error:", err.message);
+      return res.status(500).json({ error: err.message });
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Startup — Firebase first, then Vite/Express
 // ─────────────────────────────────────────────────────────────────────────────
+
 async function setupViteIntegration() {
   if (process.env.NODE_ENV !== "production") {
     console.log("[INFO] Dev mode — Vite middleware active");

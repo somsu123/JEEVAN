@@ -1,5 +1,7 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
+import os
+import tempfile
 import time
 
 # Import our Firebase Database Layer
@@ -209,6 +211,49 @@ def delete_medicine(name):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/voice-assistant/tts-pcm', methods=['GET'])
+def voice_assistant_tts_pcm():
+    text = request.args.get('text', '').strip()
+    if not text:
+        return 'Text parameter is required', 400
+    
+    # Create a temporary file to save the WAV output
+    temp_wav = tempfile.mktemp(suffix='.wav')
+    try:
+        # Run pyttsx3 in a subprocess to avoid SAPI5 threading issues
+        script = f"""
+import pyttsx3
+engine = pyttsx3.init()
+engine.setProperty('rate', 150)
+engine.save_to_file({repr(text)}, {repr(temp_wav)})
+engine.runAndWait()
+"""
+        import subprocess
+        import sys
+        subprocess.run([sys.executable, "-c", script], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+        if os.path.exists(temp_wav):
+            with open(temp_wav, 'rb') as f:
+                wav_data = f.read()
+            
+            # WAV header is 44 bytes. Strip it to get raw 16-bit PCM.
+            raw_pcm = wav_data[44:] if len(wav_data) > 44 else b''
+            
+            return Response(raw_pcm, mimetype='audio/pcm')
+        else:
+            return 'Failed to generate TTS file', 500
+    except Exception as e:
+        print(f"[ERROR] Flask voice assistant TTS failed: {e}")
+        return str(e), 500
+    finally:
+        # Clean up temp file
+        if os.path.exists(temp_wav):
+            try:
+                os.remove(temp_wav)
+            except:
+                pass
+
 if __name__ == '__main__':
     # Listen on all interfaces so ESP32 can connect
     app.run(host='0.0.0.0', port=5000)
+

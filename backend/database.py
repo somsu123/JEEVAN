@@ -1,84 +1,25 @@
 """
-Elder Care — Firebase Firestore Database Layer (Python / Flask)
-Uses firebase-admin SDK — bypasses security rules entirely (server-side).
-
-Collections managed here:
-  bpm_logs       — raw heart-rate readings
-  fall_logs      — raw fall-detection frames
-  system_state   — live device state (single document: 'current')
-  events         — system event log
-  medicines      — prescriptions / medicines catalogue
-  reports        — scanned prescription documents
+Elder Care — MongoDB Atlas Database Layer (Python / Flask)
+Replaced Firebase Admin SDK connection with PyMongo Atlas connection.
 """
 
 import os
 import time
 import datetime
-import pathlib
+from pymongo import MongoClient
+from dotenv import load_dotenv
 
-import firebase_admin
-from firebase_admin import credentials, firestore
+# Load env variables from .env file
+load_dotenv()
 
+MONGO_URI = os.getenv("MONGO_URI")
+if not MONGO_URI:
+    raise ValueError("Environment variable MONGO_URI is not set. Please define it in your .env file.")
 
-# ── Firebase Configuration ─────────────────────────────────────────────────────
-FIREBASE_PROJECT = "rfidcamera-8681b"
-
-
-def _find_service_account() -> str | None:
-    """
-    Auto-detect the service account key JSON in the backend directory.
-    Accepts any .json file that contains 'type': 'service_account'.
-    """
-    import json
-    backend_dir = pathlib.Path(__file__).resolve().parent
-    # Check priority names first
-    priority_names = [
-        "firebase-service-account.json",
-        "serviceAccountKey.json",
-        "service-account.json",
-    ]
-    for name in priority_names:
-        p = backend_dir / name
-        if p.exists():
-            return str(p)
-    # Scan ALL .json files in the folder for the service_account marker
-    for p in backend_dir.glob("*.json"):
-        try:
-            content = json.loads(p.read_text(encoding="utf-8"))
-            if content.get("type") == "service_account":
-                return str(p)
-        except Exception:
-            continue
-    return None
-
-
-def _init_firebase():
-    """Initialize Firebase Admin SDK with the service account key."""
-    if firebase_admin._apps:
-        return firestore.client()
-
-    sa_path = _find_service_account()
-    if sa_path:
-        cred = credentials.Certificate(sa_path)
-        firebase_admin.initialize_app(cred)
-        print(f"[Firebase] Initialized with service account: {pathlib.Path(sa_path).name}")
-        return firestore.client()
-
-    backend_dir = pathlib.Path(__file__).resolve().parent
-    print()
-    print("=" * 60)
-    print("  [Firebase] SERVICE ACCOUNT KEY NOT FOUND")
-    print("=" * 60)
-    print(f"  Place the downloaded JSON key in: {backend_dir}")
-    print("  Get it from: Firebase Console -> Project Settings -> Service Accounts")
-    print()
-    raise FileNotFoundError(
-        f"Firebase service account key not found in {backend_dir}"
-    )
-
-
-db = _init_firebase()
-print(f"[Firebase] Firestore client ready -> {FIREBASE_PROJECT}")
+# Connect to MongoDB Atlas
+client = MongoClient(MONGO_URI)
+db = client["JEEVAN"]
+print(f"[MongoDB] Connected successfully to Atlas -> JEEVAN")
 
 
 # ── DatabaseLayer ──────────────────────────────────────────────────────────────
@@ -87,42 +28,45 @@ class DatabaseLayer:
     @staticmethod
     def initialize_db():
         """Seed the system_state document if it does not exist yet."""
-        doc_ref = db.collection("system_state").document("current")
-        doc = doc_ref.get()
-        if not doc.exists:
-            doc_ref.set({
+        # Setup TTL index so raw fall logs auto-delete after 7 days
+        try:
+            db.fall_logs.create_index("timestamp", expireAfterSeconds=604800)
+        except Exception:
+            pass
+
+        # Ensure system_state has the default current state doc
+        db.system_state.update_one(
+            {"_id": "current"},
+            {"$setOnInsert": {
                 "is_fall": False,
                 "lid_open": False,
                 "next_reminder": None,
                 "last_torso_angle": 0.0,
                 "last_fps": 0.0,
                 "bpm": 72,
-            })
-            print("[Firebase] system_state/current document created.")
-        else:
-            print("[Firebase] system_state/current already exists.")
+                "schedule": []
+            }},
+            upsert=True
+        )
+        print("[MongoDB] system_state initialized.")
 
     # ── Heart Rate ─────────────────────────────────────────────────────────────
 
     @staticmethod
     def save_bpm(bpm: int):
         now = time.time()
-        db.collection("bpm_logs").add({"timestamp": now, "bpm": bpm})
-        db.collection("system_state").document("current").set(
-            {"bpm": bpm, "last_bpm_time": now}, merge=True
+        db.bpm_logs.insert_one({"timestamp": now, "bpm": bpm})
+        db.system_state.update_one(
+            {"_id": "current"},
+            {"$set": {"bpm": bpm, "last_bpm_time": now}},
+            upsert=True
         )
 
     @staticmethod
     def get_bpm_history(limit: int = 60) -> list:
-        docs = (
-            db.collection("bpm_logs")
-            .order_by("timestamp", direction=firestore.Query.DESCENDING)
-            .limit(limit)
-            .stream()
-        )
-        result = [d.to_dict() for d in docs]
-        result.reverse()
-        return result
+        docs = list(db.bpm_logs.find({}, {"_id": 0}).sort("timestamp", -1).limit(limit))
+        docs.reverse()
+        return docs
 
     # ── Medicine Box ───────────────────────────────────────────────────────────
 
@@ -133,7 +77,11 @@ class DatabaseLayer:
             fields["lid_open"] = lid_open
         if reminder_triggered is not None:
             fields["reminder_triggered"] = reminder_triggered
-        db.collection("system_state").document("current").set(fields, merge=True)
+        db.system_state.update_one(
+            {"_id": "current"},
+            {"$set": fields},
+            upsert=True
+        )
 
     # ── Fall Detection ─────────────────────────────────────────────────────────
 
@@ -141,54 +89,56 @@ class DatabaseLayer:
     def log_fall_frame(is_fall: bool, confidence: float, debug_info: dict):
         entry = {"timestamp": time.time(), "is_fall": is_fall, "confidence": confidence}
         entry.update(debug_info)
-        db.collection("fall_logs").add(entry)
+        db.fall_logs.insert_one(entry)
 
         state_update = {"is_fall": is_fall, "last_fall_signal": time.time()}
         if is_fall:
             state_update["last_torso_angle"] = debug_info.get("torso_angle", 0.0)
             state_update["last_fps"] = debug_info.get("fps", 0.0)
-        db.collection("system_state").document("current").set(state_update, merge=True)
+        db.system_state.update_one(
+            {"_id": "current"},
+            {"$set": state_update},
+            upsert=True
+        )
 
     @staticmethod
     def get_fall_stats() -> dict:
-        # Fetch recent fall_logs ordered by timestamp only (no composite index needed)
-        # Filter is_fall in Python to avoid Firestore composite index requirement
-        all_docs = (
-            db.collection("fall_logs")
-            .order_by("timestamp")
-            .limit(2000)
-            .stream()
-        )
-        frames = [d.to_dict() for d in all_docs if d.to_dict().get("is_fall")]
+        # Group consecutive fall frames into "incidents"
+        # (frames within 10 seconds of each other = 1 incident)
+        fall_frames = list(db.fall_logs.find(
+            {"is_fall": True},
+            {"timestamp": 1, "_id": 0}
+        ).sort("timestamp", 1))
 
-        incidents, last_time = [], 0
-        for f in frames:
+        incidents = []
+        last_incident_time = 0
+        for f in fall_frames:
             ts = f.get("timestamp", 0)
-            if ts - last_time > 10:
+            if ts - last_incident_time > 10:
                 incidents.append(ts)
-            last_time = ts
+            last_incident_time = ts
 
         total_falls = len(incidents)
         start_of_today = time.time() - (time.time() % 86400)
         falls_today = len([t for t in incidents if t >= start_of_today])
         last_fall_time = incidents[-1] if incidents else None
 
-        # Latest fall frame (already in ascending order — take the last)
-        latest = frames[-1] if frames else {}
+        # Latest fall frame
+        latest_fall_log = db.fall_logs.find_one({"is_fall": True}, sort=[("timestamp", -1)])
 
         return {
             "fall_count": total_falls,
             "falls_today": falls_today,
             "last_fall_time": last_fall_time,
-            "torso_angle": latest.get("torso_angle", 0),
-            "fps": latest.get("fps", 0.0),
+            "torso_angle": latest_fall_log.get("torso_angle", 0) if latest_fall_log else 0,
+            "fps": latest_fall_log.get("fps", 0) if latest_fall_log else 0.0,
         }
 
     # ── Events ─────────────────────────────────────────────────────────────────
 
     @staticmethod
     def log_event(event_type: str, message: str, severity: str):
-        db.collection("events").add({
+        db.events.insert_one({
             "type": event_type,
             "message": message,
             "severity": severity,
@@ -197,26 +147,22 @@ class DatabaseLayer:
 
     @staticmethod
     def get_events(limit: int = 60) -> list:
-        docs = (
-            db.collection("events")
-            .order_by("timestamp", direction=firestore.Query.DESCENDING)
-            .limit(limit)
-            .stream()
-        )
-        return [d.to_dict() for d in docs]
+        return list(db.events.find({}, {"_id": 0}).sort("timestamp", -1).limit(limit))
 
     # ── Medicine Schedule ──────────────────────────────────────────────────────
 
     @staticmethod
     def save_schedule(schedule_list: list):
-        db.collection("system_state").document("current").set(
-            {"schedule": schedule_list}, merge=True
+        db.system_state.update_one(
+            {"_id": "current"},
+            {"$set": {"schedule": schedule_list}},
+            upsert=True
         )
 
     @staticmethod
     def get_schedule() -> list:
-        doc = db.collection("system_state").document("current").get()
-        return doc.to_dict().get("schedule", []) if doc.exists else []
+        doc = db.system_state.find_one({"_id": "current"})
+        return doc.get("schedule", []) if doc else []
 
     # ── Reports ────────────────────────────────────────────────────────────────
 
@@ -232,23 +178,16 @@ class DatabaseLayer:
         }
         if structured_data:
             doc.update(structured_data)
-        _, ref = db.collection("reports").add(doc)
-        return ref.id
+        res = db.reports.insert_one(doc)
+        return str(res.inserted_id)
 
     @staticmethod
     def get_reports(limit: int = 20) -> list:
-        docs = (
-            db.collection("reports")
-            .order_by("createdAt", direction=firestore.Query.DESCENDING)
-            .limit(limit)
-            .stream()
-        )
-        result = []
-        for d in docs:
-            data = d.to_dict()
-            data["id"] = d.id
-            result.append(data)
-        return result
+        docs = list(db.reports.find().sort("createdAt", -1).limit(limit))
+        for doc in docs:
+            doc["id"] = str(doc["_id"])
+            del doc["_id"]
+        return docs
 
     # ── Medicines ──────────────────────────────────────────────────────────────
 
@@ -260,21 +199,28 @@ class DatabaseLayer:
             if not name:
                 continue
             doc_id = name.lower().replace(" ", "_")
-            db.collection("medicines").document(doc_id).set({
-                "name": name,
-                "dosage": med.get("dosage", ""),
-                "purpose": med.get("purpose", ""),
-                "times": med.get("times", []),
-                "source": source,
-                "addedAt": time.time(),
-            })
+            db.medicines.update_one(
+                {"_id": doc_id},
+                {"$set": {
+                    "name": name,
+                    "dosage": med.get("dosage", ""),
+                    "purpose": med.get("purpose", ""),
+                    "times": med.get("times", []),
+                    "source": source,
+                    "addedAt": time.time(),
+                }},
+                upsert=True
+            )
             saved.append(name)
         return saved
 
     @staticmethod
     def get_all_medicines() -> list:
-        docs = db.collection("medicines").stream()
-        return [d.to_dict() for d in docs]
+        docs = list(db.medicines.find())
+        for doc in docs:
+            if "_id" in doc:
+                del doc["_id"]
+        return docs
 
     @staticmethod
     def get_medicines_due_now(window_minutes: int = 2) -> list:
@@ -295,23 +241,21 @@ class DatabaseLayer:
     @staticmethod
     def delete_medicine(name: str) -> bool:
         doc_id = name.lower().replace(" ", "_")
-        ref = db.collection("medicines").document(doc_id)
-        if ref.get().exists:
-            ref.delete()
-            return True
-        return False
+        res = db.medicines.delete_one({"_id": doc_id})
+        return res.deleted_count > 0
 
     # ── Combined Dashboard State ───────────────────────────────────────────────
 
     @staticmethod
     def get_full_state() -> dict:
-        doc = db.collection("system_state").document("current").get()
-        state = doc.to_dict() if doc.exists else {}
+        doc = db.system_state.find_one({"_id": "current"}) or {}
+        if "_id" in doc:
+            del doc["_id"]
         stats = DatabaseLayer.get_fall_stats()
-        state.update(stats)
-        state["torso_angle"] = state.get("last_torso_angle", 0.0)
-        state["fps"]         = state.get("last_fps", 0.0)
-        return state
+        doc.update(stats)
+        doc["torso_angle"] = doc.get("last_torso_angle", 0.0)
+        doc["fps"]         = doc.get("last_fps", 0.0)
+        return doc
 
 
 # Initialise on import

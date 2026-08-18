@@ -42,7 +42,7 @@ function UploadDropZone({ onFile, uploading }: { onFile: (f: File) => void; uplo
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault(); setDragging(false);
     const file = e.dataTransfer.files[0];
-    if (file && file.type.startsWith('image/')) onFile(file);
+    if (file && (file.type.startsWith('image/') || file.type === 'application/pdf')) onFile(file);
   };
 
   return (
@@ -55,14 +55,14 @@ function UploadDropZone({ onFile, uploading }: { onFile: (f: File) => void; uplo
         dragging ? 'border-amber-400/70 bg-amber-500/5 scale-[1.01]' : 'border-slate-700 hover:border-amber-500/50 bg-slate-900/40'
       } ${uploading ? 'pointer-events-none opacity-60' : ''}`}
     >
-      <input ref={inputRef} type="file" accept="image/*" className="hidden"
+      <input ref={inputRef} type="file" accept="image/*,application/pdf" className="hidden"
         onChange={e => { const f = e.target.files?.[0]; if (f) onFile(f); }} />
       {uploading ? (
         <>
           <Loader2 className="h-10 w-10 text-amber-400 animate-spin" />
           <div className="text-center">
             <p className="text-sm font-bold text-white">Processing prescription…</p>
-            <p className="text-xs text-slate-400 mt-1">Gemini Vision is extracting medicines</p>
+            <p className="text-xs text-slate-400 mt-1">Gemini is extracting medicines</p>
           </div>
         </>
       ) : (
@@ -71,8 +71,8 @@ function UploadDropZone({ onFile, uploading }: { onFile: (f: File) => void; uplo
             <Upload className="h-8 w-8 text-amber-400" />
           </div>
           <div className="text-center">
-            <p className="text-sm font-bold text-slate-100">Drop prescription photo here</p>
-            <p className="text-xs text-slate-400 mt-1">or click to browse · JPG, PNG, HEIC, WebP</p>
+            <p className="text-sm font-bold text-slate-100">Drop prescription here</p>
+            <p className="text-xs text-slate-400 mt-1">or click to browse · PDF, JPG, PNG, HEIC, WebP</p>
           </div>
           <p className="text-[10px] text-slate-600 font-mono">
             AI extracts medicines · you review + confirm before anything reaches the box
@@ -129,23 +129,30 @@ const COMP_TEXT = ['text-emerald-400', 'text-blue-400', 'text-violet-400', 'text
 const COMP_BG   = ['bg-emerald-500/10', 'bg-blue-500/10', 'bg-violet-500/10', 'bg-amber-500/10'];
 
 function PendingChangeRow({
-  change, onConfirm, onReject, confirming,
+  change, onConfirm, onReject, confirming, activeSchedule,
 }: {
   change: PendingChange;
-  onConfirm: (id: string, reloaded: boolean) => void;
+  onConfirm: (id: string, reloaded: boolean, compartment: number, customTime?: string) => void;
   onReject: (id: string) => void;
   confirming: boolean;
+  activeSchedule: any[];
 }) {
+  const [selectedSlot, setSelectedSlot] = useState<number>(change.compartment);
+  const initialTime = `${String(change.proposedHour).padStart(2, '0')}:${String(change.proposedMinute).padStart(2, '0')}`;
+  const [customTime, setCustomTime] = useState<string>(initialTime);
   const [reloadChecked, setReloadChecked] = useState(false);
   const [rejecting, setRejecting] = useState(false);
   const hasLow = change.extractedMed?.confidence === 'low';
-  const c = change.compartment % 4;
+  const c = selectedSlot % 4;
+
+  const matchedSlot = activeSchedule.find(s => s.compartment === selectedSlot);
+  const currentLabelForSelectedSlot = matchedSlot ? matchedSlot.label : "(empty)";
 
   if (change.status === 'confirmed') {
     return (
       <div className="flex items-center gap-3 p-4 rounded-xl bg-emerald-950/20 border border-emerald-500/20">
         <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
-        <span className="text-xs text-emerald-300 font-mono flex-1">Compartment {change.compartment} confirmed — <strong>{change.proposedLabel}</strong></span>
+        <span className="text-xs text-emerald-300 font-mono flex-1">Slot {selectedSlot + 1} confirmed — <strong>{change.proposedLabel}</strong></span>
         {change.confirmedAt && <span className="text-[10px] text-slate-500 font-mono">{relTime(change.confirmedAt)}</span>}
       </div>
     );
@@ -154,7 +161,7 @@ function PendingChangeRow({
     return (
       <div className="flex items-center gap-3 p-4 rounded-xl bg-red-950/20 border border-red-500/20">
         <XCircle className="h-4 w-4 text-red-400 shrink-0" />
-        <span className="text-xs text-red-300 font-mono">Compartment {change.compartment} rejected — no change applied</span>
+        <span className="text-xs text-red-300 font-mono">Slot {selectedSlot + 1} rejected — no change applied</span>
       </div>
     );
   }
@@ -167,7 +174,7 @@ function PendingChangeRow({
           <Package className={`h-4 w-4 ${COMP_TEXT[c]}`} />
         </div>
         <div className="flex-1">
-          <p className="text-[10px] font-mono text-slate-500 uppercase tracking-widest">Compartment {change.compartment}</p>
+          <p className="text-[10px] font-mono text-slate-500 uppercase tracking-widest">Proposed Box Slot {selectedSlot + 1}</p>
           {hasLow && <p className="text-[10px] text-amber-300 font-mono flex items-center gap-1 mt-0.5"><AlertTriangle className="h-2.5 w-2.5" /> Low-confidence — verify manually</p>}
         </div>
         {hasLow && <ConfidenceBadge conf="low" />}
@@ -175,15 +182,74 @@ function PendingChangeRow({
       {/* Diff */}
       <div className="grid grid-cols-2 divide-x divide-slate-800">
         <div className="p-4 space-y-1">
-          <p className="text-[9px] font-mono text-slate-600 uppercase tracking-widest">Currently in box</p>
-          <p className="text-sm text-slate-500 line-through decoration-slate-600">{change.currentLabel}</p>
+          <p className="text-[9px] font-mono text-slate-600 uppercase tracking-widest">Currently in Slot {selectedSlot + 1}</p>
+          <p className="text-sm text-slate-500 line-through decoration-slate-600">{currentLabelForSelectedSlot}</p>
         </div>
         <div className="p-4 space-y-1">
           <p className="text-[9px] font-mono text-amber-500/70 uppercase tracking-widest">Proposed change</p>
           <p className={`text-sm font-bold ${hasLow ? 'text-amber-200' : 'text-white'}`}>{change.proposedLabel}</p>
           <p className="text-[11px] font-mono text-slate-400 flex items-center gap-1">
-            <Clock className="h-2.5 w-2.5" /> {fmtHM(change.proposedHour, change.proposedMinute)}
+            <Clock className="h-2.5 w-2.5 text-amber-400" /> {fmt12(customTime)}
           </p>
+        </div>
+      </div>
+
+      {/* Custom Dose Time Input */}
+      <div className="p-4 border-t border-slate-800 space-y-2 bg-slate-950/40">
+        <div className="flex items-center justify-between">
+          <label className="text-[10px] font-mono text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+            <Clock className="h-3 w-3 text-amber-400" /> Dose Schedule Time (Custom Input):
+          </label>
+          <button
+            type="button"
+            onClick={() => {
+              const d = new Date(Date.now() + 1 * 60 * 1000);
+              const hh = String(d.getHours()).padStart(2, '0');
+              const mm = String(d.getMinutes()).padStart(2, '0');
+              setCustomTime(`${hh}:${mm}`);
+            }}
+            className="text-[10px] font-mono text-amber-400 hover:text-amber-300 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-lg transition"
+          >
+            +1 min from now (Test)
+          </button>
+        </div>
+        <div className="flex items-center gap-3">
+          <input
+            type="time"
+            value={customTime}
+            onChange={(e) => setCustomTime(e.target.value)}
+            className="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono text-sm focus:border-amber-400 focus:outline-none"
+          />
+          <span className="text-xs text-slate-300 font-mono font-bold">
+            Set for {fmt12(customTime)}
+          </span>
+        </div>
+      </div>
+
+      {/* Slot Selection Grid */}
+      <div className="p-4 border-t border-slate-800 space-y-1.5 bg-slate-950/20">
+        <p className="text-[10px] font-mono text-slate-400 uppercase tracking-widest">Choose Box Slot (1 - 4) to Allocate:</p>
+        <div className="grid grid-cols-4 gap-2">
+          {[0, 1, 2, 3].map((slotIndex) => {
+            const isActive = selectedSlot === slotIndex;
+            return (
+              <button
+                key={slotIndex}
+                type="button"
+                onClick={() => {
+                  setSelectedSlot(slotIndex);
+                  setReloadChecked(false); // reset reload check when slot changes
+                }}
+                className={`py-2 px-3 rounded-xl border text-xs font-mono font-bold transition-all ${
+                  isActive
+                    ? 'bg-amber-500/10 border-amber-500 text-amber-300 shadow shadow-amber-500/10 scale-[1.02]'
+                    : 'bg-slate-850 border-slate-800 hover:border-slate-700 text-slate-500 hover:text-slate-400'
+                }`}
+              >
+                Slot {slotIndex + 1}
+              </button>
+            );
+          })}
         </div>
       </div>
       {/* Reload confirmation + actions */}
@@ -192,8 +258,8 @@ function PendingChangeRow({
           <input type="checkbox" checked={reloadChecked} onChange={e => setReloadChecked(e.target.checked)}
             className="mt-0.5 h-4 w-4 accent-emerald-500 cursor-pointer shrink-0" />
           <span className="text-xs text-slate-200 leading-relaxed">
-            <strong className="text-white">I have physically reloaded compartment {change.compartment}</strong>{' '}
-            with <span className="text-amber-300 font-mono">{change.proposedLabel}</span>. The compartment is ready to dispense.
+            <strong className="text-white">I have physically reloaded Slot {selectedSlot + 1}</strong>{' '}
+            with <span className="text-amber-300 font-mono">{change.proposedLabel}</span>. The slot is ready to dispense.
           </span>
         </label>
         {!reloadChecked && (
@@ -203,14 +269,14 @@ function PendingChangeRow({
           </p>
         )}
         <div className="flex gap-2">
-          <button onClick={() => onConfirm(change.id, reloadChecked)} disabled={!reloadChecked || confirming}
+          <button onClick={() => onConfirm(change.id, reloadChecked, selectedSlot, customTime)} disabled={!reloadChecked || confirming}
             className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-bold font-mono transition-all ${
               reloadChecked && !confirming
                 ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-lg shadow-emerald-500/20 active:scale-95'
                 : 'bg-slate-800 text-slate-600 cursor-not-allowed border border-slate-700'
             }`}>
             {confirming ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
-            Confirm &amp; Push to ESP32
+            Set Reminder
           </button>
           <button onClick={() => { setRejecting(true); onReject(change.id); }} disabled={rejecting}
             className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-mono text-red-400 hover:text-red-300 bg-red-500/5 hover:bg-red-500/10 border border-red-500/20 transition-all active:scale-95">
@@ -280,6 +346,7 @@ export default function RxReview() {
 
   const [pendingChanges, setPendingChanges] = useState<PendingChange[]>([]);
   const [prescriptions, setPrescriptions]   = useState<Prescription[]>([]);
+  const [activeSchedule, setActiveSchedule] = useState<any[]>([]);
   const [loadingPending, setLoadingPending] = useState(true);
   const [confirmingId, setConfirmingId]     = useState<string | null>(null);
   const [actionMsg, setActionMsg]           = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -292,9 +359,14 @@ export default function RxReview() {
   const fetchPending = useCallback(async () => {
     setLoadingPending(true);
     try {
-      const [pr, rx] = await Promise.all([fetch('/api/rx/pending'), fetch('/api/rx/prescriptions')]);
+      const [pr, rx, sc] = await Promise.all([
+        fetch('/api/rx/pending'),
+        fetch('/api/rx/prescriptions'),
+        fetch('/api/esp32/schedule')
+      ]);
       if (pr.ok) { const d = await pr.json(); setPendingChanges(d.pending || []); }
       if (rx.ok) { const d = await rx.json(); setPrescriptions(d.prescriptions || []); }
+      if (sc.ok) { const d = await sc.json(); setActiveSchedule(d.schedule || []); }
     } catch { /* offline */ }
     finally { setLoadingPending(false); }
   }, []);
@@ -347,23 +419,24 @@ export default function RxReview() {
     } finally { setUploading(false); }
   }, [fetchPending]);
 
-  const handleConfirm = useCallback(async (changeId: string, reloadConfirmed: boolean) => {
+  const handleConfirm = useCallback(async (changeId: string, reloadConfirmed: boolean, compartment: number, customTime?: string) => {
     if (!reloadConfirmed) return;
     setConfirmingId(changeId);
     try {
       const res = await fetch(`/api/rx/confirm/${changeId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reloadConfirmed: true }),
+        body: JSON.stringify({ reloadConfirmed: true, compartment, customTime }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Confirm failed');
       setPendingChanges(prev => prev.map(c => c.id === changeId ? { ...c, status: 'confirmed' as const, confirmedAt: new Date().toISOString() } : c));
       showMsg('success', '✅ Schedule pushed to ESP32 successfully');
+      fetchPending();
     } catch (err: any) {
       showMsg('error', `❌ ${err.message}`);
     } finally { setConfirmingId(null); }
-  }, []);
+  }, [fetchPending]);
 
   const handleReject = useCallback(async (changeId: string) => {
     try {
@@ -505,7 +578,7 @@ export default function RxReview() {
                   </p>
                 </div>
                 {pendingChanges.map(change => (
-                  <PendingChangeRow key={change.id} change={change} onConfirm={handleConfirm} onReject={handleReject} confirming={confirmingId === change.id} />
+                  <PendingChangeRow key={change.id} change={change} onConfirm={handleConfirm} onReject={handleReject} confirming={confirmingId === change.id} activeSchedule={activeSchedule} />
                 ))}
               </div>
             )}

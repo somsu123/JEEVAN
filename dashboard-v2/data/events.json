@@ -1,5 +1,89 @@
 [
   {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 3: \"Cetirizine - 10 mg\"",
+    "severity": "info",
+    "timestamp": 1787084362
+  },
+  {
+    "type": "rx",
+    "message": "Prescription 'medicine_schedule.pdf' uploaded — 3 medicines extracted, 3 changes pending",
+    "severity": "info",
+    "timestamp": 1787084346
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 0: \"Paracetamol - 500 mg\"",
+    "severity": "info",
+    "timestamp": 1787084106
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 0: \"Paracetamol - 500 mg\"",
+    "severity": "info",
+    "timestamp": 1787084039
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 2: \"Cetirizine - 10 mg\"",
+    "severity": "info",
+    "timestamp": 1787084016
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 0: \"Paracetamol - 500 mg\"",
+    "severity": "info",
+    "timestamp": 1787083988
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 1: \"Amoxicillin - 500 mg\"",
+    "severity": "info",
+    "timestamp": 1787083769
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 2: \"Cetirizine - 10 mg\"",
+    "severity": "info",
+    "timestamp": 1787083416
+  },
+  {
+    "type": "rx",
+    "message": "Prescription 'medicine_schedule.pdf' uploaded — 3 medicines extracted, 3 changes pending",
+    "severity": "info",
+    "timestamp": 1787083407
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 0: \"Amoxicillin - 500 mg\"",
+    "severity": "info",
+    "timestamp": 1787083091
+  },
+  {
+    "type": "rx",
+    "message": "Prescription 'medicine_schedule.pdf' uploaded — 3 medicines extracted, 3 changes pending",
+    "severity": "info",
+    "timestamp": 1787083082
+  },
+  {
+    "type": "rx",
+    "message": "Prescription 'medicine_schedule.pdf' uploaded — 3 medicines extracted, 3 changes pending",
+    "severity": "info",
+    "timestamp": 1787074583
+  },
+  {
+    "type": "rx",
+    "message": "Prescription 'medicine_schedule.pdf' uploaded — 3 medicines extracted, 3 changes pending",
+    "severity": "info",
+    "timestamp": 1787074551
+  },
+  {
+    "type": "rx",
+    "message": "Prescription 'medicine_schedule.pdf' uploaded — 3 medicines extracted, 3 changes pending",
+    "severity": "info",
+    "timestamp": 1787071765
+  },
+  {
     "type": "scan",
     "message": "Prescription report 'ce2ca0f38002e2f6e4392e8173cd2551.jpg' scanned successfully",
     "severity": "info",
