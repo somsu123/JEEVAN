@@ -67,3 +67,5 @@ Thumbs.db
 *.tgz
 *.rar
 
+# Firebase service account
+backend/firebase-service-account.json
