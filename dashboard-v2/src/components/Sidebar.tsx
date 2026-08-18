@@ -62,7 +62,7 @@ export default function Sidebar({
             <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-emerald-500 ring-2 ring-slate-900 glow-emerald" />
           </div>
           <span className="text-2xl font-headline font-bold text-emerald-500 tracking-tight">
-            Elder<span className="text-white">Care</span>
+            JEEVAN
           </span>
         </div>
         <p className="text-xs text-slate-400 font-medium pl-1">360° AI Monitoring System</p>

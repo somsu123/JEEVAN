@@ -1,6 +1,18 @@
 [
   {
     "type": "rx",
+    "message": "Schedule confirmed — compartment 2: \"Amoxicillin - 500 mg\"",
+    "severity": "info",
+    "timestamp": 1787085188
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 2: \"Paracetamol - 500 mg\"",
+    "severity": "info",
+    "timestamp": 1787084727
+  },
+  {
+    "type": "rx",
     "message": "Schedule confirmed — compartment 3: \"Cetirizine - 10 mg\"",
     "severity": "info",
     "timestamp": 1787084362
