@@ -10,18 +10,18 @@ interface AiDictatorProps {
 type Phase = 'idle' | 'loading' | 'briefing' | 'qa';
 
 export default function AiDictator({ open, onClose }: AiDictatorProps) {
-  const [phase, setPhase]           = useState<Phase>('idle');
-  const [summary, setSummary]       = useState('');
-  const [analytics, setAnalytics]   = useState<Record<string, any> | null>(null);
-  const [error, setError]           = useState('');
+  const [phase, setPhase] = useState<Phase>('idle');
+  const [summary, setSummary] = useState('');
+  const [analytics, setAnalytics] = useState<Record<string, any> | null>(null);
+  const [error, setError] = useState('');
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [messages, setMessages]     = useState<AiDictatorMessage[]>([]);
-  const [question, setQuestion]     = useState('');
-  const [isAsking, setIsAsking]     = useState(false);
-  const [qaError, setQaError]       = useState('');
+  const [messages, setMessages] = useState<AiDictatorMessage[]>([]);
+  const [question, setQuestion] = useState('');
+  const [isAsking, setIsAsking] = useState(false);
+  const [qaError, setQaError] = useState('');
 
-  const chatEndRef   = useRef<HTMLDivElement>(null);
-  const inputRef     = useRef<HTMLInputElement>(null);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
 
   // ── Auto-scroll chat ──────────────────────────────────────────────────────
@@ -64,12 +64,12 @@ export default function AiDictator({ open, onClose }: AiDictatorProps) {
     );
     if (preferred) utt.voice = preferred;
 
-    utt.rate   = 0.88;   // deliberate, clinical pace
-    utt.pitch  = 0.95;
+    utt.rate = 0.88;   // deliberate, clinical pace
+    utt.pitch = 0.95;
     utt.volume = 1.0;
 
     utt.onstart = () => setIsSpeaking(true);
-    utt.onend   = () => {
+    utt.onend = () => {
       setIsSpeaking(false);
       onEnd?.();
     };
@@ -175,7 +175,7 @@ export default function AiDictator({ open, onClose }: AiDictatorProps) {
     >
       {/* Panel */}
       <div className="relative w-full max-w-2xl bg-gradient-to-br from-slate-900 via-slate-900 to-slate-950 border border-violet-500/20 rounded-3xl shadow-2xl shadow-violet-900/20 flex flex-col overflow-hidden"
-           style={{ maxHeight: '90vh' }}>
+        style={{ maxHeight: '90vh' }}>
 
         {/* ── Header ─────────────────────────────────────────────────────────── */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800/80 shrink-0">
@@ -186,7 +186,7 @@ export default function AiDictator({ open, onClose }: AiDictatorProps) {
             <div>
               <h2 className="text-sm font-black text-white tracking-wide">AI DICTATOR MODE</h2>
               <p className="text-[10px] text-slate-400 font-mono mt-0.5">
-                Powered by Gemini · Patient: Arthur Pendelton, 82
+                Powered by Gemini · Patient: Somsubhro, 82
               </p>
             </div>
           </div>
@@ -226,10 +226,9 @@ export default function AiDictator({ open, onClose }: AiDictatorProps) {
             ].map(({ label, value }) => (
               <div key={label} className="bg-slate-900/80 px-4 py-2.5 text-center">
                 <p className="text-[9px] text-slate-500 font-mono font-bold tracking-widest">{label}</p>
-                <p className={`text-base font-black mt-0.5 ${
-                  label === 'ACTIVE FALLS' && value > 0 ? 'text-red-400' :
-                  label === 'ABNORMAL HR' && value > 0 ? 'text-amber-400' : 'text-emerald-400'
-                }`}>{value}</p>
+                <p className={`text-base font-black mt-0.5 ${label === 'ACTIVE FALLS' && value > 0 ? 'text-red-400' :
+                    label === 'ABNORMAL HR' && value > 0 ? 'text-amber-400' : 'text-emerald-400'
+                  }`}>{value}</p>
               </div>
             ))}
           </div>
@@ -344,11 +343,10 @@ export default function AiDictator({ open, onClose }: AiDictatorProps) {
                         : <MessageSquare className="h-3.5 w-3.5 text-slate-400" />
                       }
                     </div>
-                    <div className={`max-w-[82%] rounded-2xl px-4 py-3 ${
-                      msg.role === 'assistant'
+                    <div className={`max-w-[82%] rounded-2xl px-4 py-3 ${msg.role === 'assistant'
                         ? 'bg-slate-950/70 border border-slate-800/60'
                         : 'bg-violet-600/15 border border-violet-500/20'
-                    }`}>
+                      }`}>
                       <p className={`text-xs leading-relaxed ${msg.role === 'assistant' ? 'text-slate-200' : 'text-violet-200'}`}>
                         {msg.text}
                       </p>

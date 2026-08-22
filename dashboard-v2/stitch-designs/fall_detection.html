@@ -1,14 +1,22 @@
 <!DOCTYPE html>
 
-<html class="dark" lang="en"><head>
-<meta charset="utf-8"/>
-<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
-<title>ElderCare - Fall Detection &amp; Safety</title>
-<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;family=Inter:wght@400;500;600&amp;family=Space+Grotesk:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
-<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
-<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
-<script id="tailwind-config">
+<html class="dark" lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+    <title>ElderCare - Fall Detection &amp; Safety</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;family=Inter:wght@400;500;600&amp;family=Space+Grotesk:wght@400;500;600&amp;display=swap"
+        rel="stylesheet" />
+    <link
+        href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap"
+        rel="stylesheet" />
+    <link
+        href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap"
+        rel="stylesheet" />
+    <script id="tailwind-config">
         tailwind.config = {
             darkMode: "class",
             theme: {
@@ -43,18 +51,27 @@
             }
         }
     </script>
-<style>
+    <style>
         body {
             background-color: #0f172a;
             color: #f8fafc;
         }
-        
+
         /* Pulse Animation for active alerts */
         @keyframes pulse-red {
-            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
-            70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+            0% {
+                box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+            }
+
+            70% {
+                box-shadow: 0 0 0 10px rgba(239, 68, 68, 0);
+            }
+
+            100% {
+                box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+            }
         }
+
         .pulse-active {
             animation: pulse-red 2s infinite;
         }
@@ -68,325 +85,401 @@
         }
     </style>
 </head>
+
 <body class="font-body antialiased flex h-screen overflow-hidden">
-<!-- SideNavBar (from JSON logic) -->
-<nav class="fixed left-0 top-0 h-screen w-[280px] bg-slate-900/80 backdrop-blur-md border-r border-slate-800/50 shadow-xl flex flex-col p-6 gap-8 z-50">
-<!-- Header -->
-<div class="flex items-center gap-4 mb-4">
-<img class="w-12 h-12 rounded-full object-cover border-2 border-emerald-500/50" data-alt="A professional studio headshot of a mature, distinguished doctor in his late 50s with greying hair, wearing a crisp white medical coat over a subtle blue shirt. The background is a clean, dark slate studio backdrop with dramatic yet soft lighting highlighting his facial features, conveying trust and medical authority." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAx6GqbM7xQ4F_HHS9dqlRCNWwcFiFbq--Xoa9AL-0FSWidcwQa79vYTmcaBWjYHNpIlA7A0PnfasrIvxQwoasE6mT4NlJOPSzQvrmLlw8yMro5-rbcR3_OFbVijSSAn0vlN2_G9Zw9qa7VA6a94BY7VtLIZsxg0G2WOUlTVMfQvA4mF1FBOeQ3btvRpQ83Y4tDpCEYRHh6Y00MIhFQHoHSZY1p7iJEEdvOYIfyvdieJ9dL0pqz9lKV2V5Td2VQ40hyRV1nvNxRqq4"/>
-<div>
-<h2 class="text-xl font-headline font-bold text-slate-100 tracking-tight">Dr. Richardson</h2>
-<p class="text-sm font-label text-slate-400">Chief Medical Officer</p>
-</div>
-</div>
-<!-- Navigation Tabs -->
-<div class="flex flex-col gap-2 flex-grow">
-<!-- Dashboard (Inactive) -->
-<a class="flex items-center gap-3 text-slate-400 hover:text-slate-200 px-4 py-3 transition-colors hover:bg-slate-800/50 rounded-lg duration-200 active:scale-95 transform" href="#">
-<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0;">dashboard</span>
-<span class="font-medium text-sm">Dashboard</span>
-</a>
-<!-- Patients (Active - per prompt, acting as Fall Detection context) -->
-<a class="flex items-center gap-3 bg-error-500/10 text-error-500 rounded-lg px-4 py-3 font-bold relative transition-all duration-200 active:scale-95 transform border border-error-500/20" href="#">
-<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">groups</span>
-<span class="font-medium text-sm flex-grow">Patients</span>
-<!-- Red Badge -->
-<span class="bg-error-500 text-white text-xs font-bold w-5 h-5 flex items-center justify-center rounded-full pulse-active">3</span>
-</a>
-<!-- Analytics (Inactive) -->
-<a class="flex items-center gap-3 text-slate-400 hover:text-slate-200 px-4 py-3 transition-colors hover:bg-slate-800/50 rounded-lg duration-200 active:scale-95 transform" href="#">
-<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0;">monitoring</span>
-<span class="font-medium text-sm">Analytics</span>
-</a>
-<!-- Medications (Inactive) -->
-<a class="flex items-center gap-3 text-slate-400 hover:text-slate-200 px-4 py-3 transition-colors hover:bg-slate-800/50 rounded-lg duration-200 active:scale-95 transform" href="#">
-<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0;">pill</span>
-<span class="font-medium text-sm">Medications</span>
-</a>
-<!-- Settings (Inactive) -->
-<a class="flex items-center gap-3 text-slate-400 hover:text-slate-200 px-4 py-3 transition-colors hover:bg-slate-800/50 rounded-lg duration-200 active:scale-95 transform" href="#">
-<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0;">settings</span>
-<span class="font-medium text-sm">Settings</span>
-</a>
-</div>
-<!-- CTA & Footer -->
-<div class="mt-auto flex flex-col gap-4">
-<!-- Patient Context Card -->
-<div class="glass-card rounded-lg p-4 flex items-center gap-3 mb-2 border border-slate-700/50">
-<img class="w-10 h-10 rounded-full object-cover" data-alt="A gentle portrait of an 82-year-old elderly man with white hair and glasses, wearing a comfortable grey cardigan. He has a kind, slightly concerned expression. The background is a soft, dark living room setting with warm amber lamplight reflecting off glass surfaces, creating a moody, premium cinematic feel." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAzXO0y3lDU2roWpUtHpEJPKlIxCRNKIf64eIVdeBUqj6741aXAtVBbjxxnzSzls4UVtB9DZrur93IoY5vtSeRpoRqYU5QiufvoSaTrJtnrMVHWvtdvf-v17KJ-ViADEugffJ5WFFQXEQBZA5ata5NXOVtk0u01K7eT2bxGJbBFZBcuQuAuwBavbaeGSxEYuSCI4blNeDHlNEZ_HK8dA74Cza1Ol-eyvXyLubjuhYLtJVijyZWjHvMdGRLG0d-1r4grlNVk_p3nQhE"/>
-<div>
-<p class="font-medium text-slate-200 text-sm">Arthur Pendelton</p>
-<p class="text-xs text-slate-400 font-label">Age: 82 | High Risk</p>
-</div>
-</div>
-<button class="w-full bg-error-500 hover:bg-error-600 text-white font-bold py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition-all shadow-[0_0_15px_rgba(239,68,68,0.3)] hover:shadow-[0_0_20px_rgba(239,68,68,0.5)] active:scale-95">
-<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">sos</span>
+    <!-- SideNavBar (from JSON logic) -->
+    <nav
+        class="fixed left-0 top-0 h-screen w-[280px] bg-slate-900/80 backdrop-blur-md border-r border-slate-800/50 shadow-xl flex flex-col p-6 gap-8 z-50">
+        <!-- Header -->
+        <div class="flex items-center gap-4 mb-4">
+            <img class="w-12 h-12 rounded-full object-cover border-2 border-emerald-500/50"
+                data-alt="A professional studio headshot of a mature, distinguished doctor in his late 50s with greying hair, wearing a crisp white medical coat over a subtle blue shirt. The background is a clean, dark slate studio backdrop with dramatic yet soft lighting highlighting his facial features, conveying trust and medical authority."
+                src="https://lh3.googleusercontent.com/aida-public/AB6AXuAx6GqbM7xQ4F_HHS9dqlRCNWwcFiFbq--Xoa9AL-0FSWidcwQa79vYTmcaBWjYHNpIlA7A0PnfasrIvxQwoasE6mT4NlJOPSzQvrmLlw8yMro5-rbcR3_OFbVijSSAn0vlN2_G9Zw9qa7VA6a94BY7VtLIZsxg0G2WOUlTVMfQvA4mF1FBOeQ3btvRpQ83Y4tDpCEYRHh6Y00MIhFQHoHSZY1p7iJEEdvOYIfyvdieJ9dL0pqz9lKV2V5Td2VQ40hyRV1nvNxRqq4" />
+            <div>
+                <h2 class="text-xl font-headline font-bold text-slate-100 tracking-tight">Dr. Richardson</h2>
+                <p class="text-sm font-label text-slate-400">Chief Medical Officer</p>
+            </div>
+        </div>
+        <!-- Navigation Tabs -->
+        <div class="flex flex-col gap-2 flex-grow">
+            <!-- Dashboard (Inactive) -->
+            <a class="flex items-center gap-3 text-slate-400 hover:text-slate-200 px-4 py-3 transition-colors hover:bg-slate-800/50 rounded-lg duration-200 active:scale-95 transform"
+                href="#">
+                <span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0;">dashboard</span>
+                <span class="font-medium text-sm">Dashboard</span>
+            </a>
+            <!-- Patients (Active - per prompt, acting as Fall Detection context) -->
+            <a class="flex items-center gap-3 bg-error-500/10 text-error-500 rounded-lg px-4 py-3 font-bold relative transition-all duration-200 active:scale-95 transform border border-error-500/20"
+                href="#">
+                <span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">groups</span>
+                <span class="font-medium text-sm flex-grow">Patients</span>
+                <!-- Red Badge -->
+                <span
+                    class="bg-error-500 text-white text-xs font-bold w-5 h-5 flex items-center justify-center rounded-full pulse-active">3</span>
+            </a>
+            <!-- Analytics (Inactive) -->
+            <a class="flex items-center gap-3 text-slate-400 hover:text-slate-200 px-4 py-3 transition-colors hover:bg-slate-800/50 rounded-lg duration-200 active:scale-95 transform"
+                href="#">
+                <span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0;">monitoring</span>
+                <span class="font-medium text-sm">Analytics</span>
+            </a>
+            <!-- Medications (Inactive) -->
+            <a class="flex items-center gap-3 text-slate-400 hover:text-slate-200 px-4 py-3 transition-colors hover:bg-slate-800/50 rounded-lg duration-200 active:scale-95 transform"
+                href="#">
+                <span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0;">pill</span>
+                <span class="font-medium text-sm">Medications</span>
+            </a>
+            <!-- Settings (Inactive) -->
+            <a class="flex items-center gap-3 text-slate-400 hover:text-slate-200 px-4 py-3 transition-colors hover:bg-slate-800/50 rounded-lg duration-200 active:scale-95 transform"
+                href="#">
+                <span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0;">settings</span>
+                <span class="font-medium text-sm">Settings</span>
+            </a>
+        </div>
+        <!-- CTA & Footer -->
+        <div class="mt-auto flex flex-col gap-4">
+            <!-- Patient Context Card -->
+            <div class="glass-card rounded-lg p-4 flex items-center gap-3 mb-2 border border-slate-700/50">
+                <img class="w-10 h-10 rounded-full object-cover"
+                    data-alt="A gentle portrait of an 82-year-old elderly man with white hair and glasses, wearing a comfortable grey cardigan. He has a kind, slightly concerned expression. The background is a soft, dark living room setting with warm amber lamplight reflecting off glass surfaces, creating a moody, premium cinematic feel."
+                    src="https://lh3.googleusercontent.com/aida-public/AB6AXuAzXO0y3lDU2roWpUtHpEJPKlIxCRNKIf64eIVdeBUqj6741aXAtVBbjxxnzSzls4UVtB9DZrur93IoY5vtSeRpoRqYU5QiufvoSaTrJtnrMVHWvtdvf-v17KJ-ViADEugffJ5WFFQXEQBZA5ata5NXOVtk0u01K7eT2bxGJbBFZBcuQuAuwBavbaeGSxEYuSCI4blNeDHlNEZ_HK8dA74Cza1Ol-eyvXyLubjuhYLtJVijyZWjHvMdGRLG0d-1r4grlNVk_p3nQhE" />
+                <div>
+                    <p class="font-medium text-slate-200 text-sm">Somsubhro</p>
+                    <p class="text-xs text-slate-400 font-label">Age: 82 | High Risk</p>
+                </div>
+            </div>
+            <button
+                class="w-full bg-error-500 hover:bg-error-600 text-white font-bold py-3 px-4 rounded-lg flex items-center justify-center gap-2 transition-all shadow-[0_0_15px_rgba(239,68,68,0.3)] hover:shadow-[0_0_20px_rgba(239,68,68,0.5)] active:scale-95">
+                <span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">sos</span>
                 Emergency SOS
             </button>
-<div class="flex justify-around border-t border-slate-800/50 pt-4">
-<a class="text-slate-400 hover:text-slate-200 flex flex-col items-center gap-1 transition-colors" href="#">
-<span class="material-symbols-outlined text-[20px]">help</span>
-<span class="text-[10px] font-label">Support</span>
-</a>
-<a class="text-slate-400 hover:text-slate-200 flex flex-col items-center gap-1 transition-colors" href="#">
-<span class="material-symbols-outlined text-[20px]">logout</span>
-<span class="text-[10px] font-label">Logout</span>
-</a>
-</div>
-</div>
-</nav>
-<!-- Main Content Area -->
-<main class="ml-[280px] flex-1 h-full overflow-y-auto bg-slate-900/40 relative">
-<!-- Abstract Background element -->
-<div class="absolute top-0 right-0 w-[600px] h-[600px] bg-secondary-500/5 rounded-full blur-[120px] pointer-events-none"></div>
-<div class="absolute bottom-0 left-1/4 w-[400px] h-[400px] bg-error-500/5 rounded-full blur-[100px] pointer-events-none"></div>
-<div class="p-10 max-w-7xl mx-auto flex flex-col gap-8 relative z-10">
-<!-- Main Content Header -->
-<header class="flex justify-between items-end border-b border-slate-800/50 pb-6">
-<div>
-<h1 class="text-4xl font-headline font-extrabold text-slate-100 tracking-tight flex items-center gap-4">
+            <div class="flex justify-around border-t border-slate-800/50 pt-4">
+                <a class="text-slate-400 hover:text-slate-200 flex flex-col items-center gap-1 transition-colors"
+                    href="#">
+                    <span class="material-symbols-outlined text-[20px]">help</span>
+                    <span class="text-[10px] font-label">Support</span>
+                </a>
+                <a class="text-slate-400 hover:text-slate-200 flex flex-col items-center gap-1 transition-colors"
+                    href="#">
+                    <span class="material-symbols-outlined text-[20px]">logout</span>
+                    <span class="text-[10px] font-label">Logout</span>
+                </a>
+            </div>
+        </div>
+    </nav>
+    <!-- Main Content Area -->
+    <main class="ml-[280px] flex-1 h-full overflow-y-auto bg-slate-900/40 relative">
+        <!-- Abstract Background element -->
+        <div
+            class="absolute top-0 right-0 w-[600px] h-[600px] bg-secondary-500/5 rounded-full blur-[120px] pointer-events-none">
+        </div>
+        <div
+            class="absolute bottom-0 left-1/4 w-[400px] h-[400px] bg-error-500/5 rounded-full blur-[100px] pointer-events-none">
+        </div>
+        <div class="p-10 max-w-7xl mx-auto flex flex-col gap-8 relative z-10">
+            <!-- Main Content Header -->
+            <header class="flex justify-between items-end border-b border-slate-800/50 pb-6">
+                <div>
+                    <h1
+                        class="text-4xl font-headline font-extrabold text-slate-100 tracking-tight flex items-center gap-4">
                         Fall Detection &amp; Safety
-                        <span class="inline-flex items-center gap-2 bg-error-500/10 text-error-500 border border-error-500/30 px-3 py-1 rounded-full text-sm font-semibold tracking-wide">
-<span class="w-2 h-2 rounded-full bg-error-500 pulse-active"></span>
+                        <span
+                            class="inline-flex items-center gap-2 bg-error-500/10 text-error-500 border border-error-500/30 px-3 py-1 rounded-full text-sm font-semibold tracking-wide">
+                            <span class="w-2 h-2 rounded-full bg-error-500 pulse-active"></span>
                             3 Active Alerts
                         </span>
-</h1>
-<p class="text-slate-400 mt-2 font-body">Real-time monitoring and event history for high-risk patients.</p>
-</div>
-<div class="flex items-center gap-3">
-<span class="text-sm text-slate-400 font-label">Mute Alert Sounds</span>
-<label class="relative inline-flex items-center cursor-pointer">
-<input class="sr-only peer" type="checkbox" value=""/>
-<div class="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-slate-500"></div>
-</label>
-</div>
-</header>
-<!-- Top Stats Row -->
-<div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-<!-- Stat 1 -->
-<div class="glass-card rounded-xl p-6 flex flex-col gap-4 relative overflow-hidden group">
-<div class="absolute inset-0 bg-gradient-to-br from-slate-800/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-<div class="flex justify-between items-start">
-<div class="p-3 bg-slate-800/80 rounded-lg text-slate-300 border border-slate-700">
-<span class="material-symbols-outlined">calendar_today</span>
-</div>
-</div>
-<div>
-<p class="text-sm font-label text-slate-400 uppercase tracking-wider mb-1">Total Falls Today</p>
-<p class="text-4xl font-headline font-bold text-slate-100">4</p>
-</div>
-</div>
-<!-- Stat 2 -->
-<div class="glass-card rounded-xl p-6 flex flex-col gap-4 relative overflow-hidden group border-error-500/20 bg-error-500/5">
-<div class="absolute top-0 right-0 w-32 h-32 bg-error-500/10 rounded-full blur-[40px]"></div>
-<div class="flex justify-between items-start">
-<div class="p-3 bg-error-500/20 rounded-lg text-error-500 border border-error-500/30">
-<span class="material-symbols-outlined pulse-active rounded-full bg-error-500/20" style="font-variation-settings: 'FILL' 1;">warning</span>
-</div>
-</div>
-<div>
-<p class="text-sm font-label text-error-400 uppercase tracking-wider mb-1">Active Alerts</p>
-<p class="text-4xl font-headline font-bold text-error-500">3</p>
-</div>
-</div>
-<!-- Stat 3 -->
-<div class="glass-card rounded-xl p-6 flex flex-col gap-4 relative overflow-hidden group border-primary-500/20">
-<div class="absolute inset-0 bg-gradient-to-br from-primary-500/5 to-transparent"></div>
-<div class="flex justify-between items-start">
-<div class="p-3 bg-primary-500/20 rounded-lg text-primary-500 border border-primary-500/30">
-<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">shield</span>
-</div>
-</div>
-<div>
-<p class="text-sm font-label text-slate-400 uppercase tracking-wider mb-1">Avg. Response</p>
-<p class="text-4xl font-headline font-bold text-primary-400">&lt; 30s</p>
-</div>
-</div>
-</div>
-<!-- Main Split Layout -->
-<div class="grid grid-cols-1 lg:grid-cols-3 gap-8 h-full pb-10">
-<!-- Fall Events Timeline (Col Span 2) -->
-<div class="lg:col-span-2 flex flex-col gap-6">
-<h3 class="text-xl font-headline font-semibold text-slate-200">Event Timeline</h3>
-<div class="flex flex-col gap-4">
-<!-- Event 1 (Active/Critical) -->
-<div class="glass-card rounded-xl p-5 border-l-4 border-l-error-500 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 hover:bg-slate-800/40 transition-colors">
-<div class="flex gap-4 items-start w-full">
-<div class="mt-1 bg-error-500/20 p-2 rounded-lg text-error-500 pulse-active">
-<span class="material-symbols-outlined text-[28px]" style="font-variation-settings: 'FILL' 1;">falling</span>
-</div>
-<div class="flex-1">
-<div class="flex justify-between items-center mb-1">
-<h4 class="text-lg font-headline font-bold text-slate-100 flex items-center gap-2">
+                    </h1>
+                    <p class="text-slate-400 mt-2 font-body">Real-time monitoring and event history for high-risk
+                        patients.</p>
+                </div>
+                <div class="flex items-center gap-3">
+                    <span class="text-sm text-slate-400 font-label">Mute Alert Sounds</span>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input class="sr-only peer" type="checkbox" value="" />
+                        <div
+                            class="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-slate-500">
+                        </div>
+                    </label>
+                </div>
+            </header>
+            <!-- Top Stats Row -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <!-- Stat 1 -->
+                <div class="glass-card rounded-xl p-6 flex flex-col gap-4 relative overflow-hidden group">
+                    <div
+                        class="absolute inset-0 bg-gradient-to-br from-slate-800/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
+                    </div>
+                    <div class="flex justify-between items-start">
+                        <div class="p-3 bg-slate-800/80 rounded-lg text-slate-300 border border-slate-700">
+                            <span class="material-symbols-outlined">calendar_today</span>
+                        </div>
+                    </div>
+                    <div>
+                        <p class="text-sm font-label text-slate-400 uppercase tracking-wider mb-1">Total Falls Today</p>
+                        <p class="text-4xl font-headline font-bold text-slate-100">4</p>
+                    </div>
+                </div>
+                <!-- Stat 2 -->
+                <div
+                    class="glass-card rounded-xl p-6 flex flex-col gap-4 relative overflow-hidden group border-error-500/20 bg-error-500/5">
+                    <div class="absolute top-0 right-0 w-32 h-32 bg-error-500/10 rounded-full blur-[40px]"></div>
+                    <div class="flex justify-between items-start">
+                        <div class="p-3 bg-error-500/20 rounded-lg text-error-500 border border-error-500/30">
+                            <span class="material-symbols-outlined pulse-active rounded-full bg-error-500/20"
+                                style="font-variation-settings: 'FILL' 1;">warning</span>
+                        </div>
+                    </div>
+                    <div>
+                        <p class="text-sm font-label text-error-400 uppercase tracking-wider mb-1">Active Alerts</p>
+                        <p class="text-4xl font-headline font-bold text-error-500">3</p>
+                    </div>
+                </div>
+                <!-- Stat 3 -->
+                <div
+                    class="glass-card rounded-xl p-6 flex flex-col gap-4 relative overflow-hidden group border-primary-500/20">
+                    <div class="absolute inset-0 bg-gradient-to-br from-primary-500/5 to-transparent"></div>
+                    <div class="flex justify-between items-start">
+                        <div class="p-3 bg-primary-500/20 rounded-lg text-primary-500 border border-primary-500/30">
+                            <span class="material-symbols-outlined"
+                                style="font-variation-settings: 'FILL' 1;">shield</span>
+                        </div>
+                    </div>
+                    <div>
+                        <p class="text-sm font-label text-slate-400 uppercase tracking-wider mb-1">Avg. Response</p>
+                        <p class="text-4xl font-headline font-bold text-primary-400">&lt; 30s</p>
+                    </div>
+                </div>
+            </div>
+            <!-- Main Split Layout -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 h-full pb-10">
+                <!-- Fall Events Timeline (Col Span 2) -->
+                <div class="lg:col-span-2 flex flex-col gap-6">
+                    <h3 class="text-xl font-headline font-semibold text-slate-200">Event Timeline</h3>
+                    <div class="flex flex-col gap-4">
+                        <!-- Event 1 (Active/Critical) -->
+                        <div
+                            class="glass-card rounded-xl p-5 border-l-4 border-l-error-500 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 hover:bg-slate-800/40 transition-colors">
+                            <div class="flex gap-4 items-start w-full">
+                                <div class="mt-1 bg-error-500/20 p-2 rounded-lg text-error-500 pulse-active">
+                                    <span class="material-symbols-outlined text-[28px]"
+                                        style="font-variation-settings: 'FILL' 1;">falling</span>
+                                </div>
+                                <div class="flex-1">
+                                    <div class="flex justify-between items-center mb-1">
+                                        <h4
+                                            class="text-lg font-headline font-bold text-slate-100 flex items-center gap-2">
                                             Critical Fall
-                                            <span class="text-[10px] bg-error-500/20 text-error-400 px-2 py-0.5 rounded border border-error-500/30">ACTIVE</span>
-</h4>
-<span class="text-xs text-slate-400 font-label">2 mins ago</span>
-</div>
-<p class="text-sm text-slate-300 font-medium">Arthur Pendelton</p>
-<div class="flex flex-wrap gap-3 mt-2 text-xs font-label">
-<span class="flex items-center gap-1 text-slate-400 bg-slate-800/50 px-2 py-1 rounded">
-<span class="material-symbols-outlined text-[14px]">videocam</span> Living Room Camera
+                                            <span
+                                                class="text-[10px] bg-error-500/20 text-error-400 px-2 py-0.5 rounded border border-error-500/30">ACTIVE</span>
+                                        </h4>
+                                        <span class="text-xs text-slate-400 font-label">2 mins ago</span>
+                                    </div>
+                                    <p class="text-sm text-slate-300 font-medium">Somsubhro</p>
+                                    <div class="flex flex-wrap gap-3 mt-2 text-xs font-label">
+                                        <span
+                                            class="flex items-center gap-1 text-slate-400 bg-slate-800/50 px-2 py-1 rounded">
+                                            <span class="material-symbols-outlined text-[14px]">videocam</span> Living
+                                            Room Camera
                                         </span>
-<span class="flex items-center gap-1 text-secondary-400 bg-secondary-500/10 px-2 py-1 rounded border border-secondary-500/20">
-<span class="material-symbols-outlined text-[14px]">psychology</span> 98% Confidence
+                                        <span
+                                            class="flex items-center gap-1 text-secondary-400 bg-secondary-500/10 px-2 py-1 rounded border border-secondary-500/20">
+                                            <span class="material-symbols-outlined text-[14px]">psychology</span> 98%
+                                            Confidence
                                         </span>
-</div>
-</div>
-</div>
-<div class="w-full sm:w-auto mt-4 sm:mt-0">
-<button class="w-full sm:w-auto px-6 py-2 bg-slate-700 hover:bg-slate-600 text-white text-sm font-semibold rounded-lg transition-colors border border-slate-600">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="w-full sm:w-auto mt-4 sm:mt-0">
+                                <button
+                                    class="w-full sm:w-auto px-6 py-2 bg-slate-700 hover:bg-slate-600 text-white text-sm font-semibold rounded-lg transition-colors border border-slate-600">
                                     Resolve
                                 </button>
-</div>
-</div>
-<!-- Event 2 (Active/Warning) -->
-<div class="glass-card rounded-xl p-5 border-l-4 border-l-tertiary-500 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 hover:bg-slate-800/40 transition-colors">
-<div class="flex gap-4 items-start w-full">
-<div class="mt-1 bg-tertiary-500/20 p-2 rounded-lg text-tertiary-500 pulse-active">
-<span class="material-symbols-outlined text-[28px]" style="font-variation-settings: 'FILL' 1;">speed</span>
-</div>
-<div class="flex-1">
-<div class="flex justify-between items-center mb-1">
-<h4 class="text-lg font-headline font-bold text-slate-100 flex items-center gap-2">
+                            </div>
+                        </div>
+                        <!-- Event 2 (Active/Warning) -->
+                        <div
+                            class="glass-card rounded-xl p-5 border-l-4 border-l-tertiary-500 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 hover:bg-slate-800/40 transition-colors">
+                            <div class="flex gap-4 items-start w-full">
+                                <div class="mt-1 bg-tertiary-500/20 p-2 rounded-lg text-tertiary-500 pulse-active">
+                                    <span class="material-symbols-outlined text-[28px]"
+                                        style="font-variation-settings: 'FILL' 1;">speed</span>
+                                </div>
+                                <div class="flex-1">
+                                    <div class="flex justify-between items-center mb-1">
+                                        <h4
+                                            class="text-lg font-headline font-bold text-slate-100 flex items-center gap-2">
                                             Rapid Descent
-                                            <span class="text-[10px] bg-error-500/20 text-error-400 px-2 py-0.5 rounded border border-error-500/30">ACTIVE</span>
-</h4>
-<span class="text-xs text-slate-400 font-label">15 mins ago</span>
-</div>
-<p class="text-sm text-slate-300 font-medium">Arthur Pendelton</p>
-<div class="flex flex-wrap gap-3 mt-2 text-xs font-label">
-<span class="flex items-center gap-1 text-slate-400 bg-slate-800/50 px-2 py-1 rounded">
-<span class="material-symbols-outlined text-[14px]">watch</span> IoT Bracelet - Hallway
+                                            <span
+                                                class="text-[10px] bg-error-500/20 text-error-400 px-2 py-0.5 rounded border border-error-500/30">ACTIVE</span>
+                                        </h4>
+                                        <span class="text-xs text-slate-400 font-label">15 mins ago</span>
+                                    </div>
+                                    <p class="text-sm text-slate-300 font-medium">Somsubhro</p>
+                                    <div class="flex flex-wrap gap-3 mt-2 text-xs font-label">
+                                        <span
+                                            class="flex items-center gap-1 text-slate-400 bg-slate-800/50 px-2 py-1 rounded">
+                                            <span class="material-symbols-outlined text-[14px]">watch</span> IoT
+                                            Bracelet - Hallway
                                         </span>
-<span class="flex items-center gap-1 text-secondary-400 bg-secondary-500/10 px-2 py-1 rounded border border-secondary-500/20">
-<span class="material-symbols-outlined text-[14px]">psychology</span> 85% Confidence
+                                        <span
+                                            class="flex items-center gap-1 text-secondary-400 bg-secondary-500/10 px-2 py-1 rounded border border-secondary-500/20">
+                                            <span class="material-symbols-outlined text-[14px]">psychology</span> 85%
+                                            Confidence
                                         </span>
-</div>
-</div>
-</div>
-<div class="w-full sm:w-auto mt-4 sm:mt-0">
-<button class="w-full sm:w-auto px-6 py-2 bg-slate-700 hover:bg-slate-600 text-white text-sm font-semibold rounded-lg transition-colors border border-slate-600">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="w-full sm:w-auto mt-4 sm:mt-0">
+                                <button
+                                    class="w-full sm:w-auto px-6 py-2 bg-slate-700 hover:bg-slate-600 text-white text-sm font-semibold rounded-lg transition-colors border border-slate-600">
                                     Resolve
                                 </button>
-</div>
-</div>
-<!-- Event 3 (Resolved) -->
-<div class="glass-card rounded-xl p-5 border-l-4 border-l-primary-500 opacity-70 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-<div class="flex gap-4 items-start w-full">
-<div class="mt-1 bg-slate-800 p-2 rounded-lg text-slate-400">
-<span class="material-symbols-outlined text-[28px]">warning</span>
-</div>
-<div class="flex-1">
-<div class="flex justify-between items-center mb-1">
-<h4 class="text-lg font-headline font-semibold text-slate-300 flex items-center gap-2">
+                            </div>
+                        </div>
+                        <!-- Event 3 (Resolved) -->
+                        <div
+                            class="glass-card rounded-xl p-5 border-l-4 border-l-primary-500 opacity-70 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                            <div class="flex gap-4 items-start w-full">
+                                <div class="mt-1 bg-slate-800 p-2 rounded-lg text-slate-400">
+                                    <span class="material-symbols-outlined text-[28px]">warning</span>
+                                </div>
+                                <div class="flex-1">
+                                    <div class="flex justify-between items-center mb-1">
+                                        <h4
+                                            class="text-lg font-headline font-semibold text-slate-300 flex items-center gap-2">
                                             Stumble Warning
-                                            <span class="text-[10px] bg-primary-500/10 text-primary-400 px-2 py-0.5 rounded border border-primary-500/30">RESOLVED</span>
-</h4>
-<span class="text-xs text-slate-500 font-label">1h ago</span>
-</div>
-<div class="flex flex-wrap gap-3 mt-2 text-xs font-label">
-<span class="flex items-center gap-1 text-slate-500 bg-slate-800/30 px-2 py-1 rounded">
-<span class="material-symbols-outlined text-[14px]">videocam</span> Bedroom Camera
+                                            <span
+                                                class="text-[10px] bg-primary-500/10 text-primary-400 px-2 py-0.5 rounded border border-primary-500/30">RESOLVED</span>
+                                        </h4>
+                                        <span class="text-xs text-slate-500 font-label">1h ago</span>
+                                    </div>
+                                    <div class="flex flex-wrap gap-3 mt-2 text-xs font-label">
+                                        <span
+                                            class="flex items-center gap-1 text-slate-500 bg-slate-800/30 px-2 py-1 rounded">
+                                            <span class="material-symbols-outlined text-[14px]">videocam</span> Bedroom
+                                            Camera
                                         </span>
-<span class="flex items-center gap-1 text-slate-500 bg-slate-800/30 px-2 py-1 rounded">
-<span class="material-symbols-outlined text-[14px]">psychology</span> 72% Confidence
+                                        <span
+                                            class="flex items-center gap-1 text-slate-500 bg-slate-800/30 px-2 py-1 rounded">
+                                            <span class="material-symbols-outlined text-[14px]">psychology</span> 72%
+                                            Confidence
                                         </span>
-</div>
-</div>
-</div>
-</div>
-<!-- Event 4 (Resolved) -->
-<div class="glass-card rounded-xl p-5 border-l-4 border-l-primary-500 opacity-70 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-<div class="flex gap-4 items-start w-full">
-<div class="mt-1 bg-slate-800 p-2 rounded-lg text-slate-400">
-<span class="material-symbols-outlined text-[28px]">falling</span>
-</div>
-<div class="flex-1">
-<div class="flex justify-between items-center mb-1">
-<h4 class="text-lg font-headline font-semibold text-slate-300 flex items-center gap-2">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Event 4 (Resolved) -->
+                        <div
+                            class="glass-card rounded-xl p-5 border-l-4 border-l-primary-500 opacity-70 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                            <div class="flex gap-4 items-start w-full">
+                                <div class="mt-1 bg-slate-800 p-2 rounded-lg text-slate-400">
+                                    <span class="material-symbols-outlined text-[28px]">falling</span>
+                                </div>
+                                <div class="flex-1">
+                                    <div class="flex justify-between items-center mb-1">
+                                        <h4
+                                            class="text-lg font-headline font-semibold text-slate-300 flex items-center gap-2">
                                             Critical Fall
-                                            <span class="text-[10px] bg-primary-500/10 text-primary-400 px-2 py-0.5 rounded border border-primary-500/30">RESOLVED</span>
-</h4>
-<span class="text-xs text-slate-500 font-label">3h ago</span>
-</div>
-<div class="flex flex-wrap gap-3 mt-2 text-xs font-label">
-<span class="flex items-center gap-1 text-slate-500 bg-slate-800/30 px-2 py-1 rounded">
-<span class="material-symbols-outlined text-[14px]">watch</span> Bathroom Bracelet
+                                            <span
+                                                class="text-[10px] bg-primary-500/10 text-primary-400 px-2 py-0.5 rounded border border-primary-500/30">RESOLVED</span>
+                                        </h4>
+                                        <span class="text-xs text-slate-500 font-label">3h ago</span>
+                                    </div>
+                                    <div class="flex flex-wrap gap-3 mt-2 text-xs font-label">
+                                        <span
+                                            class="flex items-center gap-1 text-slate-500 bg-slate-800/30 px-2 py-1 rounded">
+                                            <span class="material-symbols-outlined text-[14px]">watch</span> Bathroom
+                                            Bracelet
                                         </span>
-<span class="flex items-center gap-1 text-slate-500 bg-slate-800/30 px-2 py-1 rounded">
-<span class="material-symbols-outlined text-[14px]">psychology</span> 95% Confidence
+                                        <span
+                                            class="flex items-center gap-1 text-slate-500 bg-slate-800/30 px-2 py-1 rounded">
+                                            <span class="material-symbols-outlined text-[14px]">psychology</span> 95%
+                                            Confidence
                                         </span>
-</div>
-</div>
-</div>
-</div>
-</div>
-</div>
-<!-- Right Side Panel -->
-<aside class="flex flex-col gap-6">
-<div class="glass-card rounded-xl p-6 h-full flex flex-col gap-6 border-slate-700/50 bg-slate-900/60">
-<h3 class="text-xl font-headline font-semibold text-slate-200 border-b border-slate-800 pb-4">Detection Sources</h3>
-<div class="flex flex-col gap-5">
-<!-- Device 1 -->
-<div class="flex items-start gap-3">
-<div class="mt-1">
-<span class="material-symbols-outlined text-slate-400 bg-slate-800 p-1.5 rounded-md">watch</span>
-</div>
-<div class="flex-1">
-<div class="flex justify-between items-center">
-<p class="font-medium text-slate-200">ESP32 Smart Bracelet</p>
-<span class="flex items-center gap-1 text-[10px] font-bold text-primary-500 tracking-wider">
-<span class="w-2 h-2 bg-primary-500 rounded-full animate-pulse"></span> ONLINE
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- Right Side Panel -->
+                <aside class="flex flex-col gap-6">
+                    <div
+                        class="glass-card rounded-xl p-6 h-full flex flex-col gap-6 border-slate-700/50 bg-slate-900/60">
+                        <h3 class="text-xl font-headline font-semibold text-slate-200 border-b border-slate-800 pb-4">
+                            Detection Sources</h3>
+                        <div class="flex flex-col gap-5">
+                            <!-- Device 1 -->
+                            <div class="flex items-start gap-3">
+                                <div class="mt-1">
+                                    <span
+                                        class="material-symbols-outlined text-slate-400 bg-slate-800 p-1.5 rounded-md">watch</span>
+                                </div>
+                                <div class="flex-1">
+                                    <div class="flex justify-between items-center">
+                                        <p class="font-medium text-slate-200">ESP32 Smart Bracelet</p>
+                                        <span
+                                            class="flex items-center gap-1 text-[10px] font-bold text-primary-500 tracking-wider">
+                                            <span class="w-2 h-2 bg-primary-500 rounded-full animate-pulse"></span>
+                                            ONLINE
                                         </span>
-</div>
-<p class="text-xs text-slate-400 mt-1 font-label">Accelerometer + Gyroscope Active</p>
-</div>
-</div>
-<!-- Device 2 -->
-<div class="flex items-start gap-3">
-<div class="mt-1">
-<span class="material-symbols-outlined text-slate-400 bg-slate-800 p-1.5 rounded-md">videocam</span>
-</div>
-<div class="flex-1">
-<div class="flex justify-between items-center">
-<p class="font-medium text-slate-200">Raspberry Pi Vision</p>
-<span class="flex items-center gap-1 text-[10px] font-bold text-primary-500 tracking-wider">
-<span class="w-2 h-2 bg-primary-500 rounded-full animate-pulse"></span> ONLINE
+                                    </div>
+                                    <p class="text-xs text-slate-400 mt-1 font-label">Accelerometer + Gyroscope Active
+                                    </p>
+                                </div>
+                            </div>
+                            <!-- Device 2 -->
+                            <div class="flex items-start gap-3">
+                                <div class="mt-1">
+                                    <span
+                                        class="material-symbols-outlined text-slate-400 bg-slate-800 p-1.5 rounded-md">videocam</span>
+                                </div>
+                                <div class="flex-1">
+                                    <div class="flex justify-between items-center">
+                                        <p class="font-medium text-slate-200">Raspberry Pi Vision</p>
+                                        <span
+                                            class="flex items-center gap-1 text-[10px] font-bold text-primary-500 tracking-wider">
+                                            <span class="w-2 h-2 bg-primary-500 rounded-full animate-pulse"></span>
+                                            ONLINE
                                         </span>
-</div>
-<p class="text-xs text-slate-400 mt-1 font-label">Room AI Monitoring</p>
-</div>
-</div>
-<!-- Device 3 -->
-<div class="flex items-start gap-3">
-<div class="mt-1">
-<span class="material-symbols-outlined text-slate-400 bg-slate-800 p-1.5 rounded-md">router</span>
-</div>
-<div class="flex-1">
-<div class="flex justify-between items-center">
-<p class="font-medium text-slate-200">Gateway Hub</p>
-<span class="flex items-center gap-1 text-[10px] font-bold text-primary-500 tracking-wider">
-<span class="w-2 h-2 bg-primary-500 rounded-full animate-pulse"></span> ONLINE
+                                    </div>
+                                    <p class="text-xs text-slate-400 mt-1 font-label">Room AI Monitoring</p>
+                                </div>
+                            </div>
+                            <!-- Device 3 -->
+                            <div class="flex items-start gap-3">
+                                <div class="mt-1">
+                                    <span
+                                        class="material-symbols-outlined text-slate-400 bg-slate-800 p-1.5 rounded-md">router</span>
+                                </div>
+                                <div class="flex-1">
+                                    <div class="flex justify-between items-center">
+                                        <p class="font-medium text-slate-200">Gateway Hub</p>
+                                        <span
+                                            class="flex items-center gap-1 text-[10px] font-bold text-primary-500 tracking-wider">
+                                            <span class="w-2 h-2 bg-primary-500 rounded-full animate-pulse"></span>
+                                            ONLINE
                                         </span>
-</div>
-<p class="text-xs text-slate-400 mt-1 font-label">Signal Str: Excellent</p>
-</div>
-</div>
-</div>
-<!-- System status placeholder -->
-<div class="mt-auto pt-6 border-t border-slate-800">
-<div class="bg-slate-800/50 rounded-lg p-4 flex items-center gap-3">
-<span class="material-symbols-outlined text-primary-500">check_circle</span>
-<div>
-<p class="text-sm font-medium text-slate-300">System Healthy</p>
-<p class="text-xs text-slate-500 font-label">Last check: 2 min ago</p>
-</div>
-</div>
-</div>
-</div>
-</aside>
-</div>
-</div>
-</main>
-</body></html>
+                                    </div>
+                                    <p class="text-xs text-slate-400 mt-1 font-label">Signal Str: Excellent</p>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- System status placeholder -->
+                        <div class="mt-auto pt-6 border-t border-slate-800">
+                            <div class="bg-slate-800/50 rounded-lg p-4 flex items-center gap-3">
+                                <span class="material-symbols-outlined text-primary-500">check_circle</span>
+                                <div>
+                                    <p class="text-sm font-medium text-slate-300">System Healthy</p>
+                                    <p class="text-xs text-slate-500 font-label">Last check: 2 min ago</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </aside>
+            </div>
+        </div>
+    </main>
+</body>
+
+</html>

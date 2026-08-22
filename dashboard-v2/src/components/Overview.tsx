@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { 
-  FileText, 
-  Activity, 
-  Heart, 
-  User, 
-  ArrowRight, 
+import {
+  FileText,
+  Activity,
+  Heart,
+  User,
+  ArrowRight,
   Smartphone,
   AlertTriangle,
   Flame,
@@ -50,31 +50,31 @@ export default function Overview({
   const extractMetricsFromReports = () => {
     let heartRate = "--";
     let hrSource = "";
-    
+
     let hemoglobin = "--";
     let hbSource = "";
-    
+
     let gfr = "--";
     let gfrSource = "";
 
     // Iterate backwards so older reports populate first, then newer ones override them to reflect the latest state
     [...scannedHistory].reverse().forEach(report => {
       const text = report.summary || "";
-      
+
       // Extract heart rate
       const hrMatch = text.match(/(\d+)\s*BPM/i);
       if (hrMatch) {
         heartRate = hrMatch[1];
         hrSource = report.fileName;
       }
-      
+
       // Extract Hemoglobin
       const hbMatch = text.match(/(\d+\.\d+)\s*g\/dL/i);
       if (hbMatch) {
         hemoglobin = hbMatch[1];
         hbSource = report.fileName;
       }
-      
+
       // Extract Kidney GFR
       const gfrMatch = text.match(/GFR.*?(\d+)\s*mL\/min/i) || text.match(/(\d+)\s*mL\/min/i);
       if (gfrMatch) {
@@ -83,10 +83,10 @@ export default function Overview({
       }
     });
 
-    return { 
-      heartRate, hrSource, 
-      hemoglobin, hbSource, 
-      gfr, gfrSource 
+    return {
+      heartRate, hrSource,
+      hemoglobin, hbSource,
+      gfr, gfrSource
     };
   };
 
@@ -96,7 +96,7 @@ export default function Overview({
   // Custom JSX Renderer for parsed medical report notes with elegant layout
   const parseReportSummaryToJSX = (summaryText: string) => {
     if (!summaryText) return <p className="text-slate-400 text-xs font-mono">No analysis available for this document.</p>;
-    
+
     const lines = summaryText.split('\n');
     return lines.map((line, idx) => {
       const trimmed = line.trim();
@@ -173,7 +173,7 @@ export default function Overview({
         <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-headline font-bold text-slate-100 tracking-tight">
-              Arthur Pendelton's Health Overview
+              Somsubhro's Health Overview
             </h1>
             <p className="text-sm text-slate-400 mt-1">
               Synthesized clinical diagnostics from telemetry, cardiology reports, and laboratory exams.
@@ -184,8 +184,8 @@ export default function Overview({
               <span className="h-2 w-2 rounded-full bg-emerald-500 pulse-emerald" />
               <span className="text-xs font-semibold text-emerald-400 font-label">SYSTEM ONLINE</span>
             </div>
-            
-            <button 
+
+            <button
               onClick={handleTriggerAiDictator}
               className="px-4 py-2 font-bold text-xs font-label rounded-xl transition flex items-center gap-2 shadow-lg bg-violet-600 hover:bg-violet-500 text-white shadow-violet-600/20 active:scale-95"
             >
@@ -193,7 +193,7 @@ export default function Overview({
               <span>AI Dictator 🎙️</span>
             </button>
 
-            <button 
+            <button
               onClick={() => onNavigate('report-scanner')}
               className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs font-label rounded-xl transition flex items-center gap-1.5 shadow-lg shadow-emerald-500/20 active:scale-95"
             >
@@ -204,7 +204,7 @@ export default function Overview({
 
         {/* ── Key Metrics Bento Row (No BP) ── */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          
+
           {/* Heart Rate Card */}
           <div className="glass-card rounded-2xl p-5 relative overflow-hidden group">
             <div className="flex justify-between items-start mb-3">
@@ -253,7 +253,7 @@ export default function Overview({
           </div>
 
           {/* eGFR Kidney Function Card */}
-          <div className="glass-card rounded-2xl p-5 relative overflow-hidden">
+          {/* <div className="glass-card rounded-2xl p-5 relative overflow-hidden">
             <div className="flex justify-between items-start mb-3">
               <div className="flex items-center gap-2 text-slate-400">
                 <Droplet className="h-4 w-4 text-purple-400" />
@@ -272,10 +272,10 @@ export default function Overview({
             <div className="mt-2 w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
               <div className="bg-amber-400 h-1.5 rounded-full" style={{ width: '58%' }} />
             </div>
-          </div>
+          </div> */}
 
           {/* Hemoglobin Card */}
-          <div className="glass-card rounded-2xl p-5 relative overflow-hidden">
+          {/* <div className="glass-card rounded-2xl p-5 relative overflow-hidden">
             <div className="flex justify-between items-start mb-3">
               <div className="flex items-center gap-2 text-slate-400">
                 <Activity className="h-4 w-4 text-teal-400" />
@@ -294,25 +294,25 @@ export default function Overview({
             <div className="mt-2 text-[10px] text-slate-500 font-mono">
               Reference: 13.8 – 17.2 g/dL
             </div>
-          </div>
+          </div> */}
 
         </div>
 
         {/* ── Mid Row: Scanned Feed & Detailed Synthesized Analysis ── */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          
+
           {/* Left: Diagnostics Library */}
           <div className="lg:col-span-1 glass-card rounded-2xl p-5 flex flex-col justify-between h-[450px]">
             <div>
               <h2 className="text-sm font-bold font-headline text-white mb-4 flex items-center gap-2">
                 <FileText className="h-4 w-4 text-emerald-400" /> Diagnostics Library ({scannedHistory.length})
               </h2>
-              
+
               <div className="space-y-2.5 overflow-y-auto max-h-[340px] pr-1 custom-scrollbar">
                 {scannedHistory.length === 0 ? (
                   <div className="text-center py-10 space-y-3 bg-slate-950/40 rounded-xl border border-slate-900">
                     <p className="text-xs text-slate-500 font-mono">No clinical files scanned yet.</p>
-                    <button 
+                    <button
                       onClick={() => onNavigate('report-scanner')}
                       className="text-xs text-emerald-400 font-bold font-label hover:underline"
                     >
@@ -321,14 +321,13 @@ export default function Overview({
                   </div>
                 ) : (
                   scannedHistory.map((report, idx) => (
-                    <div 
+                    <div
                       key={idx}
                       onClick={() => setSelectedReportIdx(idx)}
-                      className={`p-3 rounded-xl border cursor-pointer transition-all ${
-                        selectedReportIdx === idx 
-                          ? 'bg-emerald-500/10 border-emerald-500/40 text-white' 
-                          : 'bg-slate-950/60 border-slate-800/80 text-slate-400 hover:border-slate-700 hover:bg-slate-900/30'
-                      }`}
+                      className={`p-3 rounded-xl border cursor-pointer transition-all ${selectedReportIdx === idx
+                        ? 'bg-emerald-500/10 border-emerald-500/40 text-white'
+                        : 'bg-slate-950/60 border-slate-800/80 text-slate-400 hover:border-slate-700 hover:bg-slate-900/30'
+                        }`}
                     >
                       <div className="flex items-start gap-3">
                         <div className={`p-2 rounded-lg ${selectedReportIdx === idx ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-900 text-slate-400'}`}>
@@ -414,7 +413,7 @@ export default function Overview({
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            
+
             <div className="p-4 bg-slate-950/70 rounded-xl border border-slate-900 flex gap-3.5 items-start">
               <div className="p-2 rounded-lg bg-rose-500/10 text-rose-400 font-label text-[10px] uppercase font-bold tracking-wider shrink-0 mt-0.5 border border-rose-500/20">
                 CRITICAL PRECAUTION

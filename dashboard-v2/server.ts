@@ -270,7 +270,7 @@ app.get("/api/vitals", async (_req, res) => {
           bpmData = json.history[json.history.length - 1];
         }
       }
-    } catch {}
+    } catch { }
 
     const state = await flaskGet("/api/state").catch(() => ({}));
     const isLive = bpmData && (Date.now() - (bpmData.timestamp || 0) < 10000);
@@ -312,7 +312,7 @@ app.get("/api/bpm/history", async (req, res) => {
       const data = await resp.json();
       return res.json(data);
     }
-  } catch {}
+  } catch { }
   return res.json({ history: [], stats: { bpm: {}, spo2: {} } });
 });
 
@@ -321,13 +321,13 @@ app.get("/api/esp32/status", async (_req, res) => {
   try {
     const r = await fetch("http://localhost:3001/api/bpm/status");
     if (r.ok) return res.json(await r.json());
-  } catch {}
+  } catch { }
   return res.json({
-    espConnected:   false,
+    espConnected: false,
     fingerDetected: false,
-    signal:         "unknown",
-    latestBpm:      null,
-    latestSpo2:     null,
+    signal: "unknown",
+    latestBpm: null,
+    latestSpo2: null,
   });
 });
 
@@ -349,7 +349,7 @@ app.post("/api/vitals", async (req, res) => {
     const body = req.body;
     if (body.bpm !== undefined) {
       saveBpmLocally(body.bpm);
-      await flaskPost("/api/heartrate", { bpm: body.bpm }).catch(() => {});
+      await flaskPost("/api/heartrate", { bpm: body.bpm }).catch(() => { });
     }
     broadcastSSE("vitals_update", body);
     return res.json({ success: true });
@@ -421,10 +421,10 @@ app.post("/api/bracelet/vitals", async (req, res) => {
   if (bpm === undefined) return res.status(400).json({ error: "bpm required" });
 
   // Update in-memory status
-  braceletStatus.bpm           = bpm;
+  braceletStatus.bpm = bpm;
   braceletStatus.fingerPresent = fingerPresent ?? false;
-  braceletStatus.lastSeen      = new Date().toISOString();
-  braceletStatus.online        = true;
+  braceletStatus.lastSeen = new Date().toISOString();
+  braceletStatus.online = true;
 
   // Broadcast to dashboard via SSE
   broadcastSSE("vitals_update", { heartRate: bpm, bpm, alert, fingerPresent });
@@ -434,7 +434,7 @@ app.post("/api/bracelet/vitals", async (req, res) => {
 
   // Forward to Flask for DB persistence
   if (bpm > 0) {
-    flaskPost("/api/heartrate", { bpm }).catch(() => {});
+    flaskPost("/api/heartrate", { bpm }).catch(() => { });
   }
 
   // Log abnormal BPM
@@ -455,13 +455,13 @@ app.post("/api/bracelet/heartbeat", (req, res) => {
     uptime?: number;
   };
 
-  braceletStatus.online        = true;
-  braceletStatus.lastSeen      = new Date().toISOString();
-  braceletStatus.bpm           = bpm ?? braceletStatus.bpm;
-  braceletStatus.fallPhase     = fallPhase ?? "IDLE";
+  braceletStatus.online = true;
+  braceletStatus.lastSeen = new Date().toISOString();
+  braceletStatus.bpm = bpm ?? braceletStatus.bpm;
+  braceletStatus.fallPhase = fallPhase ?? "IDLE";
   braceletStatus.fingerPresent = fingerPresent ?? false;
-  braceletStatus.uptime        = uptime ?? 0;
-  braceletStatus.deviceId      = deviceId ?? "bracelet-01";
+  braceletStatus.uptime = uptime ?? 0;
+  braceletStatus.deviceId = deviceId ?? "bracelet-01";
 
   // Persist bracelet status to MongoDB
   if (fireReady()) {
@@ -472,7 +472,7 @@ app.post("/api/bracelet/heartbeat", (req, res) => {
         updatedAt: new Date().toISOString()
       },
       { upsert: true }
-    ).catch(() => {});
+    ).catch(() => { });
   }
 
   broadcastSSE("bracelet_heartbeat", braceletStatus);
@@ -515,9 +515,9 @@ function markDeviceFallFired(deviceId: string) {
 
 // ── Gmail alert for fall event ─────────────────────────────────────────────
 async function sendFallEmailAlert(event: FallEventRecord) {
-  const gmailUser  = process.env.GMAIL_USER;
-  const gmailPass  = process.env.GMAIL_APP_PASSWORD;
-  const careEmail  = process.env.CAREGIVER_EMAIL || gmailUser;
+  const gmailUser = process.env.GMAIL_USER;
+  const gmailPass = process.env.GMAIL_APP_PASSWORD;
+  const careEmail = process.env.CAREGIVER_EMAIL || gmailUser;
 
   if (!gmailUser || !gmailPass) {
     console.warn("[MAIL] Gmail credentials not set — skipping fall email");
@@ -529,7 +529,7 @@ async function sendFallEmailAlert(event: FallEventRecord) {
 
   const sourceLabel = event.source === "bracelet" ? "🔵 Wrist Bracelet"
     : event.source === "camera" ? "📷 AI Camera"
-    : event.source === "both" ? "🔵 Bracelet + 📷 Camera" : event.source;
+      : event.source === "both" ? "🔵 Bracelet + 📷 Camera" : event.source;
 
   const transporter = nodemailer.createTransport({
     service: "gmail",
@@ -539,7 +539,7 @@ async function sendFallEmailAlert(event: FallEventRecord) {
   await transporter.sendMail({
     from: `"ElderCare Dashboard" <${gmailUser}>`,
     to: careEmail,
-    subject: `🚨 ${event.type} Detected — Arthur Pendelton`,
+    subject: `🚨 ${event.type} Detected — Somsubhro`,
     html: `
       <div style="font-family:sans-serif;max-width:520px;margin:auto;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden">
         <div style="background:${severityColor};padding:20px 24px">
@@ -548,7 +548,7 @@ async function sendFallEmailAlert(event: FallEventRecord) {
         </div>
         <div style="padding:24px">
           <p style="color:#1e293b;font-size:15px;margin:0 0 16px">
-            A fall event has been detected for <strong>Arthur Pendelton</strong>.
+            A fall event has been detected for <strong>Somsubhro</strong>.
             Please check on them immediately.
           </p>
           <table style="width:100%;border-collapse:collapse;border-radius:8px;overflow:hidden">
@@ -594,9 +594,9 @@ async function sendFallEmailAlert(event: FallEventRecord) {
 // ── SMS alert for fall event via Twilio ────────────────────────────────────
 async function sendFallSmsAlert(event: FallEventRecord) {
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
-  const authToken  = process.env.TWILIO_AUTH_TOKEN;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
   const fromNumber = process.env.TWILIO_FROM_NUMBER;   // e.g. "+12025551234"
-  const toNumber   = process.env.CAREGIVER_PHONE;      // e.g. "+919876543210"
+  const toNumber = process.env.CAREGIVER_PHONE;      // e.g. "+919876543210"
 
   if (!accountSid || !authToken || !fromNumber || !toNumber) {
     console.warn("[SMS] Twilio credentials not fully set — skipping fall SMS");
@@ -607,12 +607,12 @@ async function sendFallSmsAlert(event: FallEventRecord) {
 
   const sourceLabel = event.source === "bracelet" ? "Bracelet"
     : event.source === "camera" ? "Camera"
-    : event.source === "both" ? "Bracelet+Camera" : event.source;
+      : event.source === "both" ? "Bracelet+Camera" : event.source;
 
   const body =
     `🚨 ELDERCARE ALERT\n` +
     `${event.type.toUpperCase()} detected!\n` +
-    `Patient: Arthur Pendelton\n` +
+    `Patient: Somsubhro\n` +
     `Source: ${sourceLabel}\n` +
     `Location: ${event.location}\n` +
     `Confidence: ${Math.round(event.confidence * 100)}%\n` +
@@ -662,7 +662,7 @@ app.post("/api/fall-event", async (req, res) => {
 
     // ── Update camera online status on every valid camera event ───────────
     if (source === "camera") {
-      cameraStatus.online   = true;
+      cameraStatus.online = true;
       cameraStatus.lastSeen = new Date().toISOString();
     }
 
@@ -793,7 +793,7 @@ app.get("/api/medicine-schedule", async (_req, res) => {
 app.post("/api/medicine-schedule", async (req, res) => {
   try {
     const { slots } = req.body;
-    
+
     // Persist to MongoDB Atlas medbox_schedule collection
     if (Array.isArray(slots)) {
       const doses: DoseEntry[] = slots.map((s: any) => ({
@@ -811,12 +811,12 @@ app.post("/api/medicine-schedule", async (req, res) => {
     }
 
     const times = (slots || []).map((s: any) => s.scheduledTime).filter(Boolean);
-    await flaskPost("/api/schedule", times).catch(() => {});
-    
+    await flaskPost("/api/schedule", times).catch(() => { });
+
     broadcastSSE("medicine_schedule_updated", { slots });
     const updatedDoses = await readSchedule();
     broadcastSSE("schedule_updated", { doses: updatedDoses });
-    
+
     return res.json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ error: err?.message });
@@ -826,18 +826,18 @@ app.post("/api/medicine-schedule", async (req, res) => {
 app.post("/api/medicine-taken", async (req, res) => {
   try {
     const { slotId, lidOpen, touchVerified } = req.body;
-    
+
     // Update medbox_schedule in MongoDB Atlas
     if (slotId && typeof slotId === 'string') {
       const parts = slotId.split('-');
       let boxNumber = 1;
       let matched = false;
-      
+
       if (parts[0] === 'slot' && parts[1]) {
         boxNumber = parseInt(parts[1], 10) || 1;
         matched = true;
       }
-      
+
       const schedule = await readSchedule();
       const takenAt = new Date().toLocaleTimeString("en-US", { hour12: false });
       const updatedSchedule = schedule.map((dose) => {
@@ -850,7 +850,7 @@ app.post("/api/medicine-taken", async (req, res) => {
         }
         return dose;
       });
-      
+
       await writeSchedule(updatedSchedule);
       saveScheduleLocally(updatedSchedule);
       console.log(`[MongoDB] Marked box ${boxNumber} as TAKEN in medbox_schedule.`);
@@ -860,10 +860,10 @@ app.post("/api/medicine-taken", async (req, res) => {
     await flaskPost("/api/medicine", {
       lid_open: lidOpen ?? true,
       reminder_triggered: false,
-    }).catch(() => {});
-    
+    }).catch(() => { });
+
     broadcastSSE("medicine_taken", { slotId });
-    
+
     return res.json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ error: err?.message });
@@ -934,9 +934,9 @@ setInterval(async () => {
       // 1. Broadcast SSE alert to dashboard
       broadcastSSE("medicine_reminder", {
         medicine: med.name,
-        dosage:   med.dosage,
-        time:     med.scheduledTime,
-        message:  speakText,
+        dosage: med.dosage,
+        time: med.scheduledTime,
+        message: speakText,
       });
 
       // 2. Set pending speech for voice assistant polling
@@ -1068,7 +1068,7 @@ app.post("/api/scan-report", async (req, res) => {
 
     // Construct a beautiful markdown summary out of the structured schema fields for backward-compatible rendering
     const overviewSection = `## Document Overview\n${schemaData.overview || "No overview available."}\n\n`;
-    
+
     let metricsSection = `## Key Metrics & Readings\n`;
     if (Array.isArray(schemaData.metrics) && schemaData.metrics.length > 0) {
       schemaData.metrics.forEach((m: any) => {
@@ -1146,7 +1146,7 @@ app.post("/api/scan-report", async (req, res) => {
         disclaimer: schemaData.disclaimer
       });
       console.log(`[DB] Scanned report '${fileName}' saved to database successfully with full structured schema.`);
-      
+
       // Broadcast extracted medicines to dashboard UI via SSE
       if (schemaData.medicines && schemaData.medicines.length > 0) {
         broadcastSSE("medicines_extracted", { medicines: schemaData.medicines, source: "scan" });
@@ -1290,9 +1290,9 @@ async function getNextDoseTime(): Promise<string> {
 
 // ── Gmail / Nodemailer ────────────────────────────────────────────────────────
 async function sendMissedDoseAlert(medicine: string, time: string, dosage: string) {
-  const gmailUser    = process.env.GMAIL_USER;
-  const gmailPass    = process.env.GMAIL_APP_PASSWORD;
-  const careEmail    = process.env.CAREGIVER_EMAIL || gmailUser;
+  const gmailUser = process.env.GMAIL_USER;
+  const gmailPass = process.env.GMAIL_APP_PASSWORD;
+  const careEmail = process.env.CAREGIVER_EMAIL || gmailUser;
 
   if (!gmailUser || !gmailPass) {
     console.warn("[MAIL] GMAIL_USER / GMAIL_APP_PASSWORD not set — skipping email alert");
@@ -1307,7 +1307,7 @@ async function sendMissedDoseAlert(medicine: string, time: string, dosage: strin
   await transporter.sendMail({
     from: `"ElderCare Dashboard" <${gmailUser}>`,
     to: careEmail,
-    subject: `⚠️ Missed Dose Alert — Arthur Pendelton`,
+    subject: `⚠️ Missed Dose Alert — Somsubhro`,
     html: `
       <div style="font-family:sans-serif;max-width:480px;margin:auto;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden">
         <div style="background:#ef4444;padding:20px 24px">
@@ -1315,7 +1315,7 @@ async function sendMissedDoseAlert(medicine: string, time: string, dosage: strin
         </div>
         <div style="padding:24px">
           <p style="color:#1e293b;font-size:16px">
-            <strong>Arthur Pendelton</strong> missed their scheduled dose.
+            <strong>Somsubhro</strong> missed their scheduled dose.
           </p>
           <table style="width:100%;border-collapse:collapse;margin:16px 0">
             <tr style="background:#f8fafc">
@@ -1346,21 +1346,21 @@ app.get("/api/medication/schedule", async (_req, res) => {
   try {
     // 1. Fetch active medicines from MongoDB Atlas (via Flask API)
     const data = await flaskGet("/api/medicines");
-    
+
     if (data && Array.isArray(data.medicines) && data.medicines.length > 0) {
       const dbMeds = data.medicines;
       const sortedMeds = [...dbMeds].sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
       const mappedMeds = sortedMeds.slice(0, 2);
-      
+
       // 2. Read today's intake completion from MongoDB medbox_schedule
       const mongoSchedule = await readSchedule();
-      
+
       const doses: DoseEntry[] = [];
-      
+
       mappedMeds.forEach((med, index) => {
         const boxNumber = (index + 1) as 1 | 2;
         const times = Array.isArray(med.times) && med.times.length > 0 ? med.times : ["08:00"];
-        
+
         times.forEach((t: string) => {
           const match = mongoSchedule.find(
             (d) =>
@@ -1368,7 +1368,7 @@ app.get("/api/medication/schedule", async (_req, res) => {
               d.time === t &&
               d.medicine.toLowerCase() === med.name.toLowerCase()
           );
-          
+
           doses.push({
             time: t,
             medicine: med.name,
@@ -1380,11 +1380,11 @@ app.get("/api/medication/schedule", async (_req, res) => {
           });
         });
       });
-      
+
       console.log(`[MongoDB] Dynamic schedule: ${doses.length} doses for ${mappedMeds.length} medicines.`);
       return res.json({ deviceId: "medbox-01", doses });
     }
-    
+
     throw new Error("No medicines found in database");
   } catch (err: any) {
     console.warn(`[MongoDB] Schedule fetch failed (${err.message}). Falling back to medbox_schedule collection.`);
@@ -1439,7 +1439,7 @@ app.post("/api/hardware/heartbeat", (req, res) => {
         updatedAt: new Date().toISOString()
       },
       { upsert: true }
-    ).catch(() => {});
+    ).catch(() => { });
   }
 
   // Broadcast telemetry updates to the React UI via SSE
@@ -1468,7 +1468,7 @@ app.post("/api/hardware/medbox-event", async (req, res) => {
 
   if (event === "DOSE_TAKEN") {
     console.log(`[EVENT] Box ${box}: ${medicine} (${dosage}) taken at ${timestamp} on ${deviceId}`);
-    
+
     // Log to MongoDB medbox_events collection
     await appendMedboxEvent({ event, boxNumber: box, medicine, dosage, timestamp, deviceId });
 
@@ -1536,7 +1536,7 @@ function saveBpmLocally(bpm: number) {
     if (fs.existsSync(filePath)) {
       list = JSON.parse(fs.readFileSync(filePath, "utf-8"));
     }
-  } catch {}
+  } catch { }
   list.push({ bpm, timestamp: Math.floor(Date.now() / 1000) });
   if (list.length > 200) list.shift();
   try {
@@ -1553,7 +1553,7 @@ function saveFallEventLocally(event: FallEventRecord) {
     if (fs.existsSync(filePath)) {
       list = JSON.parse(fs.readFileSync(filePath, "utf-8"));
     }
-  } catch {}
+  } catch { }
   list.unshift(event);
   if (list.length > 100) list.pop();
   try {
@@ -1607,7 +1607,7 @@ function saveMedicinesLocally(medicines: any[]) {
     if (fs.existsSync(filePath)) {
       existing = JSON.parse(fs.readFileSync(filePath, "utf-8"));
     }
-  } catch {}
+  } catch { }
   for (const med of medicines) {
     const idx = existing.findIndex((m) => m.name.toLowerCase() === med.name.toLowerCase());
     if (idx >= 0) {
@@ -1643,7 +1643,7 @@ function logEventLocally(type: string, message: string, severity: string) {
     if (fs.existsSync(filePath)) {
       list = JSON.parse(fs.readFileSync(filePath, "utf-8"));
     }
-  } catch {}
+  } catch { }
   list.unshift({ type, message, severity, timestamp: Math.floor(Date.now() / 1000) });
   if (list.length > 100) list.pop();
   try {
@@ -1653,14 +1653,14 @@ function logEventLocally(type: string, message: string, severity: string) {
   }
 }
 
-function saveReportLocally(report: { fileName: string; summary: string; scanDate: string; [key: string]: any }) {
+function saveReportLocally(report: { fileName: string; summary: string; scanDate: string;[key: string]: any }) {
   const filePath = path.join(process.cwd(), "data", "reports.json");
   let list: any[] = [];
   try {
     if (fs.existsSync(filePath)) {
       list = JSON.parse(fs.readFileSync(filePath, "utf-8"));
     }
-  } catch {}
+  } catch { }
   list.unshift({ ...report, createdAt: Math.floor(Date.now() / 1000) });
   if (list.length > 50) list.pop();
   try {
@@ -1684,31 +1684,31 @@ async function buildPatientSnapshot() {
   try {
     const p = path.join(process.cwd(), "data", "bpm.json");
     if (fs.existsSync(p)) localBpm = JSON.parse(fs.readFileSync(p, "utf-8"));
-  } catch {}
+  } catch { }
 
   let localMeds: any[] = [];
   try {
     const p = path.join(process.cwd(), "data", "medicines.json");
     if (fs.existsSync(p)) localMeds = JSON.parse(fs.readFileSync(p, "utf-8"));
-  } catch {}
+  } catch { }
 
   let localEvents: any[] = [];
   try {
     const p = path.join(process.cwd(), "data", "events.json");
     if (fs.existsSync(p)) localEvents = JSON.parse(fs.readFileSync(p, "utf-8"));
-  } catch {}
+  } catch { }
 
   let localReports: any[] = [];
   try {
     const p = path.join(process.cwd(), "data", "reports.json");
     if (fs.existsSync(p)) localReports = JSON.parse(fs.readFileSync(p, "utf-8"));
-  } catch {}
+  } catch { }
 
   let localFallEvents: any[] = [];
   try {
     const p = path.join(process.cwd(), "data", "fall_events.json");
     if (fs.existsSync(p)) localFallEvents = JSON.parse(fs.readFileSync(p, "utf-8"));
-  } catch {}
+  } catch { }
 
   const bpmHistory: Array<{ bpm: number; timestamp: number }> =
     heartRes.status === "fulfilled" && heartRes.value.history?.length
@@ -1741,12 +1741,12 @@ async function buildPatientSnapshot() {
   } catch {
     dbFalls = localFallEvents;
   }
-  
+
   const allFalls = [
     ...(dbFalls.length ? dbFalls : localFallEvents),
     ...events.filter((e) => e.type === "fall"),
   ];
-  
+
   const activeFallCount = allFalls.filter((f) => f.status === "active").length;
   const now = Date.now();
   const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
@@ -1780,15 +1780,15 @@ function buildDictatorPrompt(snap: Awaited<ReturnType<typeof buildPatientSnapsho
 
   const medLines = medicines.length
     ? medicines
-        .map((m) => `${m.name}${m.dosage ? " " + m.dosage : ""}${m.times?.length ? " at " + m.times.join(", ") : ""}${m.purpose ? " (" + m.purpose + ")" : ""}`)
-        .join("; ")
+      .map((m) => `${m.name}${m.dosage ? " " + m.dosage : ""}${m.times?.length ? " at " + m.times.join(", ") : ""}${m.purpose ? " (" + m.purpose + ")" : ""}`)
+      .join("; ")
     : "No prescriptions found in patient records.";
 
   const reportLines = reports.slice(0, 3).length
     ? reports
-        .slice(0, 3)
-        .map((r: any) => `[${r.scanDate || "Unknown date"}] ${r.fileName}: ${(r.overview || r.summary || "").slice(0, 200)}`)
-        .join("\n")
+      .slice(0, 3)
+      .map((r: any) => `[${r.scanDate || "Unknown date"}] ${r.fileName}: ${(r.overview || r.summary || "").slice(0, 200)}`)
+      .join("\n")
     : "No scanned reports available.";
 
   const recentEvents = events.slice(0, 5).map((e: any) => e.message || "").filter(Boolean).join("; ") || "No recent events.";
@@ -1799,7 +1799,7 @@ function buildDictatorPrompt(snap: Awaited<ReturnType<typeof buildPatientSnapsho
 
   return `You are Mitra, a senior clinical AI assistant briefing a physician. Generate a professional, structured, doctor-oriented verbal summary of the following patient data. Be factual, concise, and use natural spoken English. Maximum 8 sentences. Do NOT use markdown, bullet points, or headers. Do NOT hallucinate — if data is missing, say so clearly.
 
-PATIENT: Arthur Pendelton, Age 82. Cardiology & IoT Monitoring Program.
+PATIENT: Somsubhro, Age 82. Cardiology & IoT Monitoring Program.
 
 HEART RATE (last 120 readings): ${bpmSummary}
 
@@ -1857,7 +1857,7 @@ app.post("/api/ai-dictator/trigger", async (_req, res) => {
     return res.json({
       success: true,
       summary,
-      patientName: "Arthur Pendelton",
+      patientName: "Somsubhro",
       analytics: snap.analytics,
     });
   } catch (err: any) {
@@ -1902,7 +1902,7 @@ app.post("/api/ai-dictator/ask", async (req, res) => {
       .map((e: any) => `[${e.type}] ${e.message}`)
       .join("; ");
 
-    const qaPrompt = `You are Mitra, a clinical AI assistant for the ElderCare monitoring system. A physician is asking you a question about patient Arthur Pendelton (Age 82). Answer ONLY using the patient data provided below. If the answer is not found in the data, say exactly: "Information not available in patient records." Keep your answer concise (2–4 sentences), factual, and professional.
+    const qaPrompt = `You are Mitra, a clinical AI assistant for the ElderCare monitoring system. A physician is asking you a question about patient Somsubhro (Age 82). Answer ONLY using the patient data provided below. If the answer is not found in the data, say exactly: "Information not available in patient records." Keep your answer concise (2–4 sentences), factual, and professional.
 
 PATIENT DATA:
 Heart Rate: Average ${analytics.avgBpm ?? "N/A"} BPM, Max ${analytics.maxBpm ?? "N/A"}, Min ${analytics.minBpm ?? "N/A"}. Abnormal readings: ${analytics.abnormalBpmCount}.
@@ -1974,9 +1974,9 @@ app.post("/api/hardware/medbox-event", async (req, res) => {
     event,
     box,
     medicine: medicine || slot?.medicine,
-    dosage:   dosage   || slot?.dosage,
+    dosage: dosage || slot?.dosage,
     timestamp: timestamp || new Date().toISOString(),
-    deviceId:  deviceId || "medbox-01",
+    deviceId: deviceId || "medbox-01",
   };
   broadcastSSE(event === "DOSE_TAKEN" ? "medicine_taken" : "medicine_missed", ssePayload);
 
@@ -2006,13 +2006,13 @@ app.post("/api/hardware/heartbeat", async (req, res) => {
     uptime?: number;
   };
 
-  medboxStatus.lastSeen        = new Date().toISOString();
-  medboxStatus.state           = state || "IDLE";
+  medboxStatus.lastSeen = new Date().toISOString();
+  medboxStatus.state = state || "IDLE";
   medboxStatus.presenceDetected = presenceDetected ?? false;
-  medboxStatus.nextDoseTime    = nextDoseTime || await getNextDoseTime();
-  medboxStatus.uptime          = uptime ?? 0;
-  medboxStatus.deviceId        = deviceId || "medbox-01";
-  medboxStatus.online          = true;
+  medboxStatus.nextDoseTime = nextDoseTime || await getNextDoseTime();
+  medboxStatus.uptime = uptime ?? 0;
+  medboxStatus.deviceId = deviceId || "medbox-01";
+  medboxStatus.online = true;
 
   // Persist to MongoDB device_status
   if (fireReady()) {
@@ -2023,7 +2023,7 @@ app.post("/api/hardware/heartbeat", async (req, res) => {
         updatedAt: new Date().toISOString()
       },
       { upsert: true }
-    ).catch(() => {});
+    ).catch(() => { });
   }
 
   broadcastSSE("medbox_heartbeat", medboxStatus);
@@ -2044,19 +2044,19 @@ if (process.env.VITE_HARDWARE_MODE === "simulated") {
 
   // Simulated heartbeat every 10 s
   setInterval(async () => {
-    medboxStatus.lastSeen         = new Date().toISOString();
-    medboxStatus.state            = simStates[simStateIdx % simStates.length];
-    medboxStatus.online           = true;
+    medboxStatus.lastSeen = new Date().toISOString();
+    medboxStatus.state = simStates[simStateIdx % simStates.length];
+    medboxStatus.online = true;
     medboxStatus.presenceDetected = Math.random() > 0.5;
-    medboxStatus.nextDoseTime     = await getNextDoseTime();
-    medboxStatus.uptime           = (medboxStatus.uptime || 0) + 10;
+    medboxStatus.nextDoseTime = await getNextDoseTime();
+    medboxStatus.uptime = (medboxStatus.uptime || 0) + 10;
     simStateIdx++;
     if (fireReady()) {
       mongoDb!.collection("device_status").replaceOne(
         { _id: "medbox-01-sim" as any },
         { ...medboxStatus, updatedAt: new Date().toISOString() },
         { upsert: true }
-      ).catch(() => {});
+      ).catch(() => { });
     }
     broadcastSSE("medbox_heartbeat", medboxStatus);
   }, 10_000);
@@ -2080,7 +2080,7 @@ if (process.env.VITE_HARDWARE_MODE === "simulated") {
       // Persist to Firestore
       await appendMedboxEvent(payload);
       if (eventType === "DOSE_TAKEN") {
-        dose.taken  = true;
+        dose.taken = true;
         dose.takenAt = payload.timestamp;
       } else {
         dose.missed = true;
@@ -2135,7 +2135,7 @@ async function updatePrescriptionStatus(id: string, status: string): Promise<voi
       { _id: new ObjectId(id) },
       { $set: { status } }
     );
-  } catch {}
+  } catch { }
 }
 
 // pending_changes — one row per proposed compartment change
@@ -2169,7 +2169,7 @@ async function updatePendingChange(id: string, fields: object): Promise<void> {
       { _id: new ObjectId(id) },
       { $set: fields }
     );
-  } catch {}
+  } catch { }
 }
 
 async function getPendingChangeById(id: string): Promise<any | null> {
@@ -2190,7 +2190,7 @@ async function appendDoseEvent(doc: object): Promise<void> {
       ...doc,
       loggedAt: new Date().toISOString()
     });
-  } catch {}
+  } catch { }
 }
 
 async function getDoseEvents(limit = 100): Promise<any[]> {
@@ -2274,7 +2274,7 @@ async function pollEsp32Schedule(): Promise<void> {
         await appendDoseEvent({
           compartment: key,
           label: dose.label,
-          scheduledTime: `${String(dose.hour).padStart(2,"0")}:${String(dose.minute).padStart(2,"0")}`,
+          scheduledTime: `${String(dose.hour).padStart(2, "0")}:${String(dose.minute).padStart(2, "0")}`,
           takenAt: now.toISOString(),
           status: "taken",
         });
@@ -2291,13 +2291,13 @@ async function pollEsp32Schedule(): Promise<void> {
           await appendDoseEvent({
             compartment: key,
             label: dose.label,
-            scheduledTime: `${String(dose.hour).padStart(2,"0")}:${String(dose.minute).padStart(2,"0")}`,
+            scheduledTime: `${String(dose.hour).padStart(2, "0")}:${String(dose.minute).padStart(2, "0")}`,
             takenAt: null,
             status: "missed",
           });
           broadcastSSE("dose_event", { compartment: key, label: dose.label, status: "missed", takenAt: null });
           // Also send missed-dose Gmail alert
-          sendMissedDoseAlert(dose.label, `${dose.hour}:${String(dose.minute).padStart(2,"0")}`, "").catch(() => {});
+          sendMissedDoseAlert(dose.label, `${dose.hour}:${String(dose.minute).padStart(2, "0")}`, "").catch(() => { });
         }
       }
 
@@ -2364,6 +2364,41 @@ app.get("/api/dose-events", async (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 100, 500);
   const events = await getDoseEvents(limit);
   return res.json({ events });
+});
+
+// ─── GET /api/vitals — proxy live BPM + SpO2 vitals from bpm-server (port 3001) ──
+app.get("/api/vitals", async (_req, res) => {
+  try {
+    const r = await fetch("http://localhost:3001/api/bpm/status", { signal: AbortSignal.timeout(2000) });
+    if (r.ok) {
+      const data = await r.json();
+      const last = data.lastReading || {};
+      return res.json({
+        heartRate: last.bpm || 0,
+        oxygenSpO2: last.spo2 || 0,
+        fingerPresent: Boolean(last.fingerDetected),
+        signalQuality: last.signal || "none",
+        movementState: "Resting",
+        roomPresence: true,
+        espConnected: Boolean(data.espConnected),
+        lastUpdated: new Date().toLocaleTimeString(),
+      });
+    }
+  } catch { }
+  return res.json({ _offline: true });
+});
+
+// ─── GET /api/bpm/history — proxy BPM/SpO2 history from bpm-server (port 3001) ──
+app.get("/api/bpm/history", async (req, res) => {
+  try {
+    const n = req.query.n || 60;
+    const r = await fetch(`http://localhost:3001/api/bpm/history?n=${n}`, { signal: AbortSignal.timeout(2000) });
+    if (r.ok) {
+      const data = await r.json();
+      return res.json(data);
+    }
+  } catch { }
+  return res.json({ history: [], stats: {} });
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -2800,13 +2835,13 @@ app.get("/api/voice-assistant/tts-pcm", async (req, res) => {
   try {
     const text = String(req.query.text || "").trim();
     if (!text) return res.status(400).send("Text is required");
-    
+
     const flaskTtsUrl = `${FLASK_URL}/api/voice-assistant/tts-pcm?text=${encodeURIComponent(text)}`;
     const response = await fetch(flaskTtsUrl);
     if (!response.ok) {
       throw new Error(`Flask TTS returned status ${response.status}`);
     }
-    
+
     res.setHeader("Content-Type", "audio/pcm");
     const arrayBuffer = await response.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
@@ -2826,9 +2861,9 @@ app.post("/api/voice-assistant/audio", async (req, res) => {
       if (audioBuffer.length === 0) {
         return res.status(400).json({ error: "Empty audio payload" });
       }
-      
+
       const base64Audio = audioBuffer.toString("base64");
-      
+
       let patientContext = "";
       try {
         const snapshot = await buildPatientSnapshot();
@@ -2860,7 +2895,7 @@ app.post("/api/voice-assistant/audio", async (req, res) => {
         contents: [
           audioPart,
           {
-            text: `You are Mitra, a kind, reassuring geriatric care voice assistant speaking to Arthur Pendelton (82).
+            text: `You are Mitra, a kind, reassuring geriatric care voice assistant speaking to Somsubhro (82).
             Answer Arthur's question politely and concisely (maximum 1-2 sentences). Speak in a simple, friendly manner suitable for speech synthesis.
             
             ${patientContext}

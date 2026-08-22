@@ -23,13 +23,13 @@ interface SidebarProps {
 }
 
 const menuItems: { id: ViewType; name: string; icon: React.ElementType; badge?: string; badgeType?: 'live' | 'alert' | 'iot' | 'ai' | 'rx' | 'hist' }[] = [
-  { id: 'overview',         name: 'Dashboard',          icon: LayoutDashboard },
-  { id: 'live-vitals',      name: 'Live Vitals',        icon: Heart,          badge: 'LIVE', badgeType: 'live' },
-  { id: 'fall-alerts',      name: 'Fall Detection',     icon: ShieldAlert,    badge: 'ALERT', badgeType: 'alert' },
-  { id: 'medicine',         name: 'Medicine Box',       icon: Pill,           badge: 'IoT', badgeType: 'iot' },
-  { id: 'report-scanner',   name: 'Clinical Scanner',   icon: FileText,       badge: 'AI', badgeType: 'ai' },
-  { id: 'rx-review',        name: 'Rx Scan & Review',   icon: Upload,         badge: 'RX',   badgeType: 'rx' },
-  { id: 'dose-history',     name: 'Dose History',       icon: BarChart3,      badge: 'HIST', badgeType: 'hist' },
+  { id: 'overview', name: 'Dashboard', icon: LayoutDashboard },
+  { id: 'live-vitals', name: 'Live Vitals', icon: Heart, badge: 'LIVE', badgeType: 'live' },
+  { id: 'fall-alerts', name: 'Fall Detection', icon: ShieldAlert, badge: 'ALERT', badgeType: 'alert' },
+  { id: 'medicine', name: 'Medicine Box', icon: Pill, badge: 'IoT', badgeType: 'iot' },
+  { id: 'report-scanner', name: 'Clinical Scanner', icon: FileText, badge: 'AI', badgeType: 'ai' },
+  { id: 'rx-review', name: 'Rx Scan & Review', icon: Upload, badge: 'RX', badgeType: 'rx' },
+  { id: 'dose-history', name: 'Dose History', icon: BarChart3, badge: 'HIST', badgeType: 'hist' },
 ];
 
 const badgeStyles: Record<string, string> = {
@@ -76,7 +76,7 @@ export default function Sidebar({
         <div className="flex justify-between items-start relative z-10">
           <div>
             <span className="text-[9px] text-slate-500 font-label tracking-widest uppercase">Patient Unit</span>
-            <h3 className="font-headline font-bold text-slate-100 text-sm mt-0.5">Arthur Pendelton</h3>
+            <h3 className="font-headline font-bold text-slate-100 text-sm mt-0.5">Somsubhro</h3>
             <span className="text-[10px] text-slate-400">Age 82 · Cardiology</span>
           </div>
           <span className="bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded text-[9px] font-bold font-label tracking-wider border border-emerald-500/20">
@@ -111,26 +111,23 @@ export default function Sidebar({
             <button
               key={item.id}
               onClick={() => onViewChange(item.id)}
-              className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm transition-all duration-200 group ${
-                isActive
-                  ? 'bg-emerald-500/10 text-emerald-400 font-bold'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-              }`}
+              className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm transition-all duration-200 group ${isActive
+                ? 'bg-emerald-500/10 text-emerald-400 font-bold'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                }`}
             >
               <div className="flex items-center gap-3">
-                <Icon className={`h-[18px] w-[18px] transition-transform duration-200 group-hover:scale-110 ${
-                  isActive ? 'text-emerald-400' : isFallAlert ? 'text-red-400' : isRxPending ? 'text-amber-400' : 'text-slate-500 group-hover:text-slate-300'
-                }`} />
+                <Icon className={`h-[18px] w-[18px] transition-transform duration-200 group-hover:scale-110 ${isActive ? 'text-emerald-400' : isFallAlert ? 'text-red-400' : isRxPending ? 'text-amber-400' : 'text-slate-500 group-hover:text-slate-300'
+                  }`} />
                 <span>{item.name}</span>
               </div>
               {item.badge && (
-                <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold font-label border ${
-                  isFallAlert
-                    ? 'bg-red-500/20 border-red-500/30 text-red-400 animate-pulse'
-                    : isRxPending
-                      ? 'bg-amber-500/20 border-amber-500/30 text-amber-400 animate-pulse'
-                      : badgeStyles[item.badgeType || 'ai']
-                }`}>
+                <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold font-label border ${isFallAlert
+                  ? 'bg-red-500/20 border-red-500/30 text-red-400 animate-pulse'
+                  : isRxPending
+                    ? 'bg-amber-500/20 border-amber-500/30 text-amber-400 animate-pulse'
+                    : badgeStyles[item.badgeType || 'ai']
+                  }`}>
                   {isFallAlert ? fallCount.toString() : isRxPending ? pendingRxCount.toString() : item.badge}
                 </span>
               )}

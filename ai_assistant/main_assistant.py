@@ -1664,7 +1664,7 @@ def run_ai_dictation_walkthrough(payload):
         import ollama
         print("\n[DICTATOR]: Triggered! Compiling clinical patient health data...")
         
-        patient_name = payload.get("patientName", "Arthur Pendelton")
+        patient_name = payload.get("patientName", "Somsubhro")
         bpm_history = payload.get("bpmHistory", [])
         fall_events = payload.get("fallEvents", [])
         medicines = payload.get("medicines", [])

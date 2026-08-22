@@ -1,6 +1,78 @@
 [
   {
     "type": "rx",
+    "message": "Schedule confirmed — compartment 1: \"Paracetamol - 500 mg\"",
+    "severity": "info",
+    "timestamp": 1787237950
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 2: \"Cetirizine - 10 mg\"",
+    "severity": "info",
+    "timestamp": 1787235931
+  },
+  {
+    "type": "rx",
+    "message": "Prescription 'medicine_schedule.pdf' uploaded — 3 medicines extracted, 2 changes pending",
+    "severity": "info",
+    "timestamp": 1787235877
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 2: \"Paracetamol - 500 mg\"",
+    "severity": "info",
+    "timestamp": 1787129091
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 2: \"Amoxicillin - 500 mg\"",
+    "severity": "info",
+    "timestamp": 1787127694
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 3: \"Cetirizine - 10 mg\"",
+    "severity": "info",
+    "timestamp": 1787127504
+  },
+  {
+    "type": "rx",
+    "message": "Prescription 'medicine_schedule.pdf' uploaded — 3 medicines extracted, 3 changes pending",
+    "severity": "info",
+    "timestamp": 1787127464
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 1: \"Paracetamol - 500 mg\"",
+    "severity": "info",
+    "timestamp": 1787127356
+  },
+  {
+    "type": "rx",
+    "message": "Prescription 'test_rx.png' uploaded — 0 medicines extracted, 0 changes pending",
+    "severity": "info",
+    "timestamp": 1787127217
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 1: \"Amoxicillin - 500 mg\"",
+    "severity": "info",
+    "timestamp": 1787126090
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 0: \"Cetirizine - 10 mg\"",
+    "severity": "info",
+    "timestamp": 1787086506
+  },
+  {
+    "type": "rx",
+    "message": "Prescription 'medicine_schedule.pdf' uploaded — 3 medicines extracted, 3 changes pending",
+    "severity": "info",
+    "timestamp": 1787086485
+  },
+  {
+    "type": "rx",
     "message": "Schedule confirmed — compartment 2: \"Amoxicillin - 500 mg\"",
     "severity": "info",
     "timestamp": 1787085188

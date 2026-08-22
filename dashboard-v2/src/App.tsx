@@ -200,7 +200,7 @@ export default function App() {
         if (!res.ok) return;
         const data = await res.json();
         const isConnected: boolean = data.espConnected ?? false;
-        const fingerDet: boolean   = data.fingerDetected ?? false;
+        const fingerDet: boolean = data.fingerDetected ?? false;
 
         // Detect transitions to show toast
         if (prevEspConnected.current !== null && prevEspConnected.current !== isConnected) {
@@ -252,7 +252,7 @@ export default function App() {
     fetch('/api/medbox-status')
       .then(r => r.json())
       .then(data => setMedboxStatus(prev => ({ ...prev, ...data })))
-      .catch(() => {});
+      .catch(() => { });
   }, []);
 
   // ── Fetch dynamic medication schedule from MongoDB Atlas on mount ────────────
@@ -289,7 +289,7 @@ export default function App() {
             timestamp: r.scanDate || new Date(r.createdAt * 1000).toLocaleString() || '',
             summary: r.summary || ''
           }));
-          
+
           setScannedHistory(prev => {
             const merged = [...formatted];
             DEFAULT_SCAN_HISTORY.forEach(def => {
@@ -650,7 +650,7 @@ export default function App() {
             </div>
             <div>
               <div className="flex items-baseline gap-2">
-                <h4 className="text-sm font-bold font-headline text-slate-100 leading-none">Arthur Pendelton</h4>
+                <h4 className="text-sm font-bold font-headline text-slate-100 leading-none">Somsubhro</h4>
                 <span className="text-[10px] text-slate-400 font-mono">Age 82</span>
               </div>
               <p className="text-[11px] text-slate-400 font-label mt-0.5">CARDIOLOGY · 360° AI MONITORING</p>
@@ -706,23 +706,20 @@ export default function App() {
         {/* ESP32 Connection/Disconnection Toast */}
         {connectionToast && (
           <div className="fixed top-6 right-6 z-50 max-w-xs w-full" style={{ animation: 'slideIn 0.35s cubic-bezier(0.34,1.56,0.64,1) forwards' }}>
-            <div className={`rounded-2xl p-4 shadow-2xl backdrop-blur-xl border ${
-              connectionToast.type === 'connected'
+            <div className={`rounded-2xl p-4 shadow-2xl backdrop-blur-xl border ${connectionToast.type === 'connected'
                 ? 'bg-emerald-500/10 border-emerald-500/40'
                 : 'bg-rose-500/10 border-rose-500/40'
-            }`}>
+              }`}>
               <div className="flex items-center gap-3">
-                <div className={`p-2 rounded-xl shrink-0 ${
-                  connectionToast.type === 'connected'
+                <div className={`p-2 rounded-xl shrink-0 ${connectionToast.type === 'connected'
                     ? 'bg-emerald-500/20 border border-emerald-500/30'
                     : 'bg-rose-500/20 border border-rose-500/30'
-                }`}>
+                  }`}>
                   <span className="text-lg">{connectionToast.type === 'connected' ? '🟢' : '🔴'}</span>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className={`text-xs font-bold uppercase tracking-wider font-mono ${
-                    connectionToast.type === 'connected' ? 'text-emerald-300' : 'text-rose-300'
-                  }`}>
+                  <p className={`text-xs font-bold uppercase tracking-wider font-mono ${connectionToast.type === 'connected' ? 'text-emerald-300' : 'text-rose-300'
+                    }`}>
                     {connectionToast.type === 'connected' ? 'ESP32 Connected' : 'ESP32 Disconnected'}
                   </p>
                   <p className="text-xs text-slate-300 mt-0.5">
