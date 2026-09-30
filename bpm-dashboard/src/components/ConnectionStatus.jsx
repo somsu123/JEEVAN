@@ -3,12 +3,13 @@
  *  ConnectionStatus.jsx — Connection Indicator
  * ============================================================
  *  Shows dashboard ↔ server and server ↔ ESP32 connection
- *  status with animated coloured dots and timestamps.
+ *  status with animated coloured dots and live timestamps.
+ *  Ticks every second so "Last update" stays real-time.
  * ============================================================
  */
 
-import React from 'react';
-import { Wifi, WifiOff, Radio, Clock } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Radio, Clock } from 'lucide-react';
 
 function formatTime(date) {
   if (!date) return 'Never';
@@ -18,13 +19,37 @@ function formatTime(date) {
 function timeSince(date) {
   if (!date) return '';
   const seconds = Math.floor((Date.now() - new Date(date).getTime()) / 1000);
-  if (seconds < 5) return 'Just now';
-  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 5)    return 'Just now';
+  if (seconds < 60)   return `${seconds}s ago`;
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
   return `${Math.floor(seconds / 3600)}h ago`;
 }
 
+function StatusDot({ active }) {
+  return (
+    <span className="relative flex h-3 w-3">
+      {active && (
+        <span
+          className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75"
+          style={{ backgroundColor: '#10b981' }}
+        />
+      )}
+      <span
+        className="relative inline-flex rounded-full h-3 w-3"
+        style={{ backgroundColor: active ? '#10b981' : '#ef4444' }}
+      />
+    </span>
+  );
+}
+
 export default function ConnectionStatus({ isConnected, espConnected, lastUpdate }) {
+  // Tick every second so timeSince() re-renders live
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick(t => t + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+
   return (
     <div className="glass-card p-6" id="connection-status">
       <div className="flex items-center gap-3 mb-5">
@@ -33,13 +58,10 @@ export default function ConnectionStatus({ isConnected, espConnected, lastUpdate
       </div>
 
       <div className="space-y-4">
-        {/* Dashboard ↔ Server */}
+        {/* Dashboard → Server */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div
-              className="status-dot"
-              style={{ backgroundColor: isConnected ? '#10b981' : '#ef4444', color: isConnected ? '#10b981' : '#ef4444' }}
-            />
+            <StatusDot active={isConnected} />
             <div>
               <p className="text-sm font-medium text-slate-200">Dashboard → Server</p>
               <p className="text-xs text-slate-500">Socket.IO</p>
@@ -54,13 +76,10 @@ export default function ConnectionStatus({ isConnected, espConnected, lastUpdate
           </span>
         </div>
 
-        {/* Server ↔ ESP32 */}
+        {/* Server → ESP32 */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div
-              className="status-dot"
-              style={{ backgroundColor: espConnected ? '#10b981' : '#ef4444', color: espConnected ? '#10b981' : '#ef4444' }}
-            />
+            <StatusDot active={espConnected} />
             <div>
               <p className="text-sm font-medium text-slate-200">Server → ESP32</p>
               <p className="text-xs text-slate-500">WebSocket</p>
@@ -75,12 +94,13 @@ export default function ConnectionStatus({ isConnected, espConnected, lastUpdate
           </span>
         </div>
 
-        {/* Divider */}
+        {/* Last update — ticks every second */}
         <div className="border-t border-white/[0.06] pt-4">
           <div className="flex items-center gap-2 text-slate-400">
             <Clock className="w-4 h-4" />
             <span className="text-xs">
-              Last update: <span className="text-slate-300 font-medium">{formatTime(lastUpdate)}</span>
+              Last update:{' '}
+              <span className="text-slate-300 font-medium">{formatTime(lastUpdate)}</span>
               {lastUpdate && (
                 <span className="text-slate-500 ml-2">({timeSince(lastUpdate)})</span>
               )}
@@ -91,3 +111,4 @@ export default function ConnectionStatus({ isConnected, espConnected, lastUpdate
     </div>
   );
 }
+

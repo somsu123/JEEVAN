@@ -30,8 +30,9 @@ function CustomTooltip({ active, payload }) {
   const entry = payload[0]?.payload;
   if (!entry) return null;
 
-  const bpmVal  = entry.displayBpm  ?? null;
-  const spo2Val = entry.displaySpo2 ?? null;
+  // Treat 0 as no-data in the tooltip (shows — instead of 0)
+  const bpmVal  = entry.displayBpm  > 0 ? entry.displayBpm  : null;
+  const spo2Val = entry.displaySpo2 > 0 ? entry.displaySpo2 : null;
 
   return (
     <div className="chart-tooltip">
@@ -86,16 +87,18 @@ function CustomLegend() {
 }
 
 export default function BpmChart({ history }) {
+  // Map to 0 (not null) when no finger — keeps the line continuous.
+  // Null would break the line into discrete segments (connectNulls=false).
   const chartData = history.map((entry, idx) => ({
     ...entry,
-    displayBpm:  entry.fingerDetected && entry.bpm  > 0  ? entry.bpm  : null,
-    displaySpo2: entry.fingerDetected && entry.spo2 > 0  ? entry.spo2 : null,
+    displayBpm:  entry.fingerDetected && entry.bpm  > 0 ? entry.bpm  : 0,
+    displaySpo2: entry.fingerDetected && entry.spo2 > 0 ? entry.spo2 : 0,
     index: idx,
   }));
 
-  const hasBpmData  = chartData.some((d) => d.displayBpm  !== null);
-  const hasSpo2Data = chartData.some((d) => d.displaySpo2 !== null);
-  const hasAnyData  = hasBpmData || hasSpo2Data;
+  const hasBpmData  = chartData.some((d) => d.displayBpm  > 0);
+  const hasSpo2Data = chartData.some((d) => d.displaySpo2 > 0);
+  const hasAnyData  = chartData.length > 0;
 
   return (
     <div className="glass-card p-6" id="bpm-chart">
@@ -161,10 +164,10 @@ export default function BpmChart({ history }) {
                 minTickGap={60}
               />
 
-              {/* Left Y axis — BPM */}
+              {/* Left Y axis — BPM (starts at 0 so drop-to-zero is visible) */}
               <YAxis
                 yAxisId="bpm"
-                domain={[30, 180]}
+                domain={[0, 180]}
                 stroke="rgba(148, 163, 184, 0.3)"
                 tick={{ fill: '#64748b', fontSize: 11, fontFamily: 'var(--font-mono)' }}
                 tickLine={false}
@@ -180,17 +183,17 @@ export default function BpmChart({ history }) {
                 }}
               />
 
-              {/* Right Y axis — SpO₂ */}
+              {/* Right Y axis — SpO₂ (starts at 0 so drop-to-zero is visible) */}
               <YAxis
                 yAxisId="spo2"
                 orientation="right"
-                domain={[85, 100]}
+                domain={[0, 100]}
                 stroke="rgba(148, 163, 184, 0.3)"
                 tick={{ fill: '#64748b', fontSize: 11, fontFamily: 'var(--font-mono)' }}
                 tickLine={false}
                 axisLine={false}
                 width={46}
-                tickFormatter={(v) => `${v}%`}
+                tickFormatter={(v) => v === 0 ? '0' : `${v}%`}
                 label={{
                   value: 'SpO₂',
                   angle: 90,
@@ -225,41 +228,34 @@ export default function BpmChart({ history }) {
 
               <Tooltip content={<CustomTooltip />} />
 
-              {/* BPM — filled area */}
-              {hasBpmData && (
-                <Area
-                  yAxisId="bpm"
-                  type="monotone"
-                  dataKey="displayBpm"
-                  stroke="url(#bpmLineGrad)"
-                  strokeWidth={2.5}
-                  fill="url(#bpmAreaGrad)"
-                  dot={false}
-                  activeDot={{ r: 5, stroke: '#10b981', strokeWidth: 2, fill: '#0a0e1a' }}
-                  isAnimationActive
-                  animationDuration={300}
-                  animationEasing="ease-in-out"
-                  connectNulls={false}
-                  name="BPM"
-                />
-              )}
+              {/* BPM — continuous filled area; drops to 0 when no finger */}
+              <Area
+                yAxisId="bpm"
+                type="monotone"
+                dataKey="displayBpm"
+                stroke="url(#bpmLineGrad)"
+                strokeWidth={2.5}
+                fill="url(#bpmAreaGrad)"
+                dot={false}
+                activeDot={{ r: 5, stroke: '#10b981', strokeWidth: 2, fill: '#0a0e1a' }}
+                isAnimationActive={false}
+                connectNulls={true}
+                name="Heart Rate (BPM)"
+              />
 
-              {/* SpO₂ — thin line on right axis */}
-              {hasSpo2Data && (
-                <Line
-                  yAxisId="spo2"
-                  type="monotone"
-                  dataKey="displaySpo2"
-                  stroke="#60a5fa"
-                  strokeWidth={2}
-                  dot={false}
-                  activeDot={{ r: 4, stroke: '#60a5fa', strokeWidth: 2, fill: '#0a0e1a' }}
-                  isAnimationActive
-                  animationDuration={300}
-                  connectNulls={false}
-                  name="SpO₂"
-                />
-              )}
+              {/* SpO₂ — continuous line; drops to 0 when no finger */}
+              <Line
+                yAxisId="spo2"
+                type="monotone"
+                dataKey="displaySpo2"
+                stroke="#60a5fa"
+                strokeWidth={2}
+                dot={false}
+                activeDot={{ r: 4, stroke: '#60a5fa', strokeWidth: 2, fill: '#0a0e1a' }}
+                isAnimationActive={false}
+                connectNulls={true}
+                name="SpO₂ (%)"
+              />
             </ComposedChart>
           </ResponsiveContainer>
         )}

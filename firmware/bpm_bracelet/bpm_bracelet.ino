@@ -35,7 +35,7 @@
 // ────────────────────────────────────────────────────────────────
 #define WIFI_SSID "ElderCare "
 #define WIFI_PASS "ami bolbona"
-#define SERVER_HOST "10.249.53.135"
+#define SERVER_HOST "10.143.152.135"   // ← Updated: PC Wi-Fi IP (run ipconfig to verify)
 #define SERVER_PORT 3001
 #define SERVER_PATH "/ws/esp32"
 
@@ -65,9 +65,16 @@ MAX30105 particleSensor;
 bool sensorFound = false;
 WebSocketsClient ws;
 
-#define FINGER_THRESHOLD 20000L // IR value threshold for finger contact
-#define BEAT_BEEP_MS 80         // Duration of pulse beep/flash in ms
-#define REPORT_INTERVAL 1000    // Send report every 1000 ms
+#define FINGER_THRESHOLD 20000L  // IR value threshold for finger contact
+#define BEAT_BEEP_MS     80       // Duration of pulse beep/flash in ms
+#define REPORT_INTERVAL  250      // Send report every 250 ms (4 Hz) for instant dashboard
+
+// ── Living Tissue Detection ───────────────────────────────────────
+// A non-living object reflects IR but has zero pulsatile (AC) component.
+// Perfusion Index = (AC amplitude / DC baseline) * 100
+// Living tissue: PI typically 0.02%–20% | Dead/non-living: PI ≈ 0
+#define MIN_PERFUSION_INDEX 0.30f  // Below this % → not a living finger
+#define BEAT_TIMEOUT_MS     5000   // No beat for 5 s → reset BPM (non-living)
 
 // ── BPM Dynamic Peak Detection State ─────────────────────────────
 float currentBPM = 0.0f;
@@ -120,6 +127,11 @@ unsigned long bootMs = 0;
 bool wifiOk = false;
 bool wsConnected = false;
 bool wsInitialized = false;
+
+// Living tissue detection state
+unsigned long lastBeatMs   = 0;     // millis() of last confirmed heartbeat peak
+bool          livingTissue = false; // true only when PI + beat cadence confirm living finger
+float         perfusionPct = 0.0f;  // current perfusion index %
 
 const char *signalQuality = "none";
 
@@ -352,12 +364,13 @@ void processSample(uint32_t red, uint32_t ir) {
 
         if (instantBPM >= 40.0f && instantBPM <= 200.0f) {
           if (currentBPM < 30.0f) {
-            currentBPM = instantBPM; // Initialize immediately to avoid long warm-up
+            currentBPM = instantBPM; // Seed immediately — no warm-up delay
           } else {
-            // Exponential moving average to smooth heart rate
-            currentBPM = (currentBPM * 0.7f) + (instantBPM * 0.3f);
+            // Faster EMA (60/40) → responds quicker to real BPM changes
+            currentBPM = (currentBPM * 0.60f) + (instantBPM * 0.40f);
           }
           beatAvg = (int)round(currentBPM);
+          lastBeatMs = millis(); // Record time of this confirmed beat
         }
       }
 
@@ -544,28 +557,55 @@ void updateDisplay() {
 void reportVitals() {
   long uptime = (long)((millis() - bootMs) / 1000UL);
 
+  // ── Living tissue check ────────────────────────────────────────
+  // Perfusion Index = AC amplitude / DC baseline × 100 %
+  // Only living tissue has a pulsatile (heartbeat) AC component.
+  if (fingerDetected && dcIR > 5000.0f) {
+    float acAmplitude = runningMaxIR - runningMinIR; // filtered peak-to-peak
+    perfusionPct = (acAmplitude / dcIR) * 100.0f;
+  } else {
+    perfusionPct = 0.0f;
+  }
+
+  // Beat timeout: if no beat for BEAT_TIMEOUT_MS, reset — non-living object
+  bool beatRecent = (lastBeatMs > 0) && (millis() - lastBeatMs < BEAT_TIMEOUT_MS);
+  if (fingerDetected && !beatRecent) {
+    // No heartbeat peaks detected — clear BPM so dashboard shows "--"
+    currentBPM = 0.0f;
+    beatAvg    = 0;
+  }
+
+  // Living tissue = IR above threshold + meaningful PI% + recent heartbeat
+  livingTissue = fingerDetected
+                 && (perfusionPct >= MIN_PERFUSION_INDEX)
+                 && beatRecent;
+
   Serial.println(F("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"));
   if (fingerDetected) {
-    Serial.printf("  Finger   : DETECTED (IR: %ld, Red: %ld)\n", latestIR,
-                  latestRed);
+    Serial.printf("  Finger   : DETECTED (IR: %ld, Red: %ld)\n", latestIR, latestRed);
+    Serial.printf("  PI%%      : %.2f%% (%s)\n", perfusionPct,
+                  livingTissue ? "LIVING" : "non-living/warming up");
     Serial.printf("  Live BPM : %.1f | Avg BPM: %d\n", currentBPM, beatAvg);
-    Serial.printf("  SpO2     : %d %% (%s)\n", spo2Valid ? estimatedSpo2 : 0,
-                  spo2Valid ? "DC-filtered R-ratio" : "sensing");
+    Serial.printf("  SpO2     : %d %% (%s)\n",
+                  spo2Valid ? estimatedSpo2 : 0,
+                  spo2Valid ? "valid" : "sensing");
     Serial.printf("  Signal   : %s\n", signalQuality);
   } else {
-    Serial.println(F("  Finger   : NOT DETECTED (Place finger on sensor)"));
-    Serial.println(F("  BPM      : 0"));
-    Serial.println(F("  SpO2     : 0"));
+    Serial.println(F("  Finger   : NOT DETECTED"));
   }
-  Serial.printf("  WiFi     : %s (IP: %s)\n", wifiOk ? "Connected" : "Offline",
-                WiFi.localIP().toString().c_str());
-  Serial.printf("  WS       : %s\n",
-                wsConnected ? "Connected" : "Disconnected");
-  Serial.printf("  Uptime   : %ld s\n", uptime);
+  Serial.printf("  WiFi     : %s | WS: %s | Uptime: %ld s\n",
+                wifiOk ? "OK" : "Offline",
+                wsConnected ? "OK" : "No",
+                uptime);
 
   if (wsConnected) {
-    int reportSpo2 = (spo2Valid && beatAvg > 0) ? estimatedSpo2 : 0;
-    char json[300];
+    // Only report non-zero BPM/SpO2 for confirmed living tissue.
+    // Dashboard shows '--' (No Signal) for non-living objects.
+    bool validReading = livingTissue && beatAvg > 0;
+    int  reportBpm   = validReading ? beatAvg : 0;
+    int  reportSpo2  = (validReading && spo2Valid) ? estimatedSpo2 : 0;
+
+    char json[320];
     snprintf(json, sizeof(json),
              "{"
              "\"type\":\"vitals\","
@@ -575,12 +615,16 @@ void reportVitals() {
              "\"redValue\":%ld,"
              "\"fingerDetected\":%s,"
              "\"signal\":\"%s\","
-             "\"uptime\":%ld"
+             "\"uptime\":%ld,"
+             "\"perfusionPct\":%.2f"
              "}",
-             beatAvg, reportSpo2, latestIR, latestRed,
-             fingerDetected ? "true" : "false", signalQuality, uptime);
+             reportBpm, reportSpo2, latestIR, latestRed,
+             livingTissue ? "true" : "false",
+             signalQuality, uptime, perfusionPct);
     ws.sendTXT(json);
-    Serial.println(F("  WS Sent  : OK"));
+    Serial.printf("  WS Sent  : BPM=%d SpO2=%d living=%s PI=%.2f%%\n",
+                  reportBpm, reportSpo2,
+                  livingTissue ? "YES" : "NO", perfusionPct);
   }
   Serial.println(F("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"));
 }

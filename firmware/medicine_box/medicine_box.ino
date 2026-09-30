@@ -1,554 +1,702 @@
 /*
- * =================================================================================
- *  medicine_box.ino — 4-Compartment Smart Medicine Box Firmware (ESP32)
- * =================================================================================
- *  Hardware Connections (matching circuit diagram):
- *    • ESP32 DevKit V1
- *    • LCD 16x2 I2C Backpack: SDA -> GPIO 21, SCL -> GPIO 22, VCC -> 5V, GND -> GND
- *    • Lid Servo Motor: Signal -> GPIO 13, VCC -> 5V, GND -> GND
- *    • HC-SR04 Ultrasonic Distance Sensor: Trig -> GPIO 5, Echo -> GPIO 18 (via 1k/2k divider)
- *    • Compartment LEDs (4x): 
- *        - Compartment 0 (LED 1): GPIO 27 (+ 220Ω resistor)
- *        - Compartment 1 (LED 2): GPIO 26 (+ 220Ω resistor)
- *        - Compartment 2 (LED 3): GPIO 25 (+ 220Ω resistor)
- *        - Compartment 3 (LED 4): GPIO 33 (+ 220Ω resistor)
- *    • Confirm Push Switch: GPIO 4 (Active LOW with internal PULLUP, other leg to GND)
- * 
- *  API Endpoints (Port 80, CORS Enabled):
- *    • GET  /api/schedule   -> Returns 4 schedule entries with givenToday status
- *    • POST /api/schedule   -> Overwrites schedule in RAM & persists to NVS flash
- *    • GET  /status         -> Device telemetry (state, lid, distance, uptime, IP)
- *    • POST /api/test       -> Test servo open/close & LED flashing
- * =================================================================================
+ * ================================================================
+ *  bpm_bracelet.ino — ESP32 Wearable BPM + SpO2 Monitor
+ * ================================================================
+ *  Hardware:
+ *    • ESP32 Dev Module (2.4 GHz WiFi)
+ *    • MAX30102 / MAX30105 Pulse Oximeter Sensor (I2C)
+ *        VIN → 3V3, GND → GND, SDA → GPIO21, SCL → GPIO22
+ *    • Optional 128x32 / 128x64 OLED Display (I2C 0x3C)
+ *        Shares SDA (GPIO21) and SCL (GPIO22)
+ *    • Optional Buzzer (GPIO4 or configured pin)
+ *    • Built-in LED (GPIO2)
+ *
+ *  Algorithm:
+ *    • High-Speed 400Hz Sampling (No digital averaging, 2.5ms interval)
+ *    • Wire I2C Clock: Fast Mode (400 kHz)
+ *    • Filtering: High-Pass IIR DC Filter + 4-Sample LPF Moving Average
+ *    • BPM: Dynamic Peak Threshold with Exponential Decay & 300ms Refractory
+ * Window • SpO2: Beat-to-Beat Cardiac-Cycle Peak-to-Peak Ratio of Ratios R =
+ * (AC_red / DC_red) / (AC_ir / DC_ir) SpO2 = 104 - 17 * R
+ * ================================================================
  */
 
+#include "MAX30105.h"
+#include "esp_wifi.h"
+#include "heartRate.h"
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <WebSocketsClient.h>
 #include <WiFi.h>
-#include <WebServer.h>
-#include <Preferences.h>
-#include <LiquidCrystal_I2C.h>
-#include <ESP32Servo.h>
-#include <ArduinoJson.h>
-#include <time.h>
+#include <Wire.h>
 
-// ─────────────────────────────────────────────────────────────────────────────────
-//  Hardware Configuration & Pin Definitions
-// ─────────────────────────────────────────────────────────────────────────────────
-#define HC_TRIG_PIN       5     // HC-SR04 Trigger Output
-#define HC_ECHO_PIN       18    // HC-SR04 Echo Input (via 1k/2k resistor divider)
-#define SERVO_PIN         13    // Lid Servo Control Signal Pin
-#define CONFIRM_SW_PIN    4     // Confirm Push Switch (Pullup, LOW when pressed)
+// ────────────────────────────────────────────────────────────────
+//  WiFi / Server Configuration
+// ────────────────────────────────────────────────────────────────
+#define WIFI_SSID "ElderCare "
+#define WIFI_PASS "ami bolbona"
+#define SERVER_HOST "10.143.152.135"   // ← Updated: PC Wi-Fi IP (run ipconfig to verify)
+#define SERVER_PORT 3001
+#define SERVER_PATH "/ws/esp32"
 
-#define LED_COMP_0        27    // Compartment 1 LED Pin
-#define LED_COMP_1        26    // Compartment 2 LED Pin
-#define LED_COMP_2        25    // Compartment 3 LED Pin
-#define LED_COMP_3        33    // Compartment 4 LED Pin
+// ────────────────────────────────────────────────────────────────
+//  Hardware Pin Definitions (ESP32)
+// ────────────────────────────────────────────────────────────────
+#define I2C_SDA_PIN 21      // MAX30102 SDA & OLED SDA
+#define I2C_SCL_PIN 22      // MAX30102 SCL & OLED SCL
+#define LED_PIN 2           // Built-in LED on ESP32
+#define BUZZER_PIN 4        // Buzzer Pin (set to -1 if no buzzer)
+#define ENABLE_BUZZER false // Change to true if buzzer is wired
 
-#define I2C_SDA_PIN       21    // LCD I2C SDA
-#define I2C_SCL_PIN       22    // LCD I2C SCL
+// ────────────────────────────────────────────────────────────────
+//  OLED Display Settings
+// ────────────────────────────────────────────────────────────────
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 32 // Set to 64 if using 128x64 OLED
+#define OLED_RESET -1
 
-#define SERVO_CLOSED_ANGLE 0    // Servo angle for closed lid
-#define SERVO_OPEN_ANGLE   90   // Servo angle for open lid
-#define PRESENCE_DIST_CM   15   // Distance threshold (cm) for hand detection
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+bool oledFound = false;
 
-// ─────────────────────────────────────────────────────────────────────────────────
-//  WiFi & Network Configuration
-// ─────────────────────────────────────────────────────────────────────────────────
-const char* WIFI_SSID = "ElderCare";
-const char* WIFI_PASS = "ami bolbona";
+// ────────────────────────────────────────────────────────────────
+//  Heart Rate & Sensor Objects
+// ────────────────────────────────────────────────────────────────
+MAX30105 particleSensor;
+bool sensorFound = false;
+WebSocketsClient ws;
 
-// NTP Server setup for real-time schedule checks
-const char* NTP_SERVER = "pool.ntp.org";
-const long  GMT_OFFSET_SEC = 19800; // GMT+5:30 (India Standard Time)
-const int   DAYLIGHT_OFFSET_SEC = 0;
+#define FINGER_THRESHOLD 20000L // IR value threshold for finger contact
+#define BEAT_BEEP_MS 80         // Duration of pulse beep/flash in ms
+#define REPORT_INTERVAL 1000    // Send report every 1000 ms
 
-// ─────────────────────────────────────────────────────────────────────────────────
-//  Data Structures & Objects
-// ─────────────────────────────────────────────────────────────────────────────────
-struct DoseEntry {
-  int hour;          // 0 - 23
-  int minute;        // 0 - 59
-  int compartment;   // 0 - 3
-  char label[24];    // Medicine name + dosage string
-  bool givenToday;   // Dose completion flag
-};
+// ── BPM Dynamic Peak Detection State ─────────────────────────────
+float currentBPM = 0.0f;
+int beatAvg = 0;
+float dynamicThreshold = 100.0f;
+float runningMaxIR = -1e6f;
+float runningMinIR = 1e6f;
+float lastPeakVal = 200.0f;
+float lastTroughVal = 0.0f;
+float prevFilteredIR = 0.0f;
+unsigned long lastPeakSample = 0;
+unsigned long sampleCount = 0;
+const unsigned long REFRACTORY_PERIOD_MS = 380; // Limits max BPM to ~158
 
-#define NUM_SLOTS 4
-DoseEntry schedule[NUM_SLOTS] = {
-  { 8,  0, 0, "Lisinopril 10mg", false },
-  { 13, 0, 1, "Metformin 500mg", false },
-  { 18, 0, 2, "Aspirin 81mg",    false },
-  { 21, 0, 3, "Atorvastatin 20mg", false }
-};
+// ── LPF (Moving Average) Variables ──────────────────────────────
+const int LPF_WINDOW = 4;
+float lpfBufferIR[LPF_WINDOW];
+float lpfBufferRed[LPF_WINDOW];
+int lpfIndex = 0;
+float lpfSumIR = 0;
+float lpfSumRed = 0;
 
-const int ledPins[NUM_SLOTS] = { LED_COMP_0, LED_COMP_1, LED_COMP_2, LED_COMP_3 };
+// ── SpO2 State & DC-Filtered R-Ratio Method ─────────────────────
+const float alpha =
+    0.992f; // High-pass filter coefficient (~0.5Hz cutoff at 400Hz sample rate)
+float dcIR = 0.0f;
+float dcRed = 0.0f;
 
-enum SystemState {
-  STATE_IDLE,
-  STATE_DUE_REMINDER,
-  STATE_LID_OPEN,
-  STATE_CONFIRMED
-};
+// Peak-to-peak tracking within each cardiac cycle
+float cycleAcRedMax = -1e6f, cycleAcRedMin = 1e6f;
+float cycleAcIRMax = -1e6f, cycleAcIRMin = 1e6f;
 
-SystemState currentState = STATE_IDLE;
-int activeDoseIndex = -1;
+const byte SPO2_AVG_SIZE = 5;
+int spo2Buffer[SPO2_AVG_SIZE];
+byte spo2Spot = 0;
+byte spo2Count = 0;
+int estimatedSpo2 = 0;
+bool spo2Valid = false;
 
-WebServer server(80);
-Preferences preferences;
-LiquidCrystal_I2C lcd(0x27, 16, 2); // Default address 0x27 (or 0x3F)
-Servo lidServo;
+// Runtime state variables
+long latestIR = 0;
+long latestRed = 0;
+bool fingerDetected = false;
+bool beatActive = false;
+unsigned long beatTriggerMs = 0;
+unsigned long lastReportMs = 0;
+unsigned long lastSensorRetryMs = 0;
+unsigned long lastDisplayMs = 0;
+unsigned long bootMs = 0;
+bool wifiOk = false;
+bool wsConnected = false;
+bool wsInitialized = false;
 
-bool lidOpenState = false;
-int currentDistanceCm = 999;
-unsigned long stateTimerMs = 0;
-unsigned long lastDisplayRefreshMs = 0;
-int lastResetDay = -1;
+const char *signalQuality = "none";
 
-// ─────────────────────────────────────────────────────────────────────────────────
-//  Helper Functions
-// ─────────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────
+//  Heart Bitmaps for OLED Animation
+// ────────────────────────────────────────────────────────────────
+static const unsigned char PROGMEM logo2_bmp[] = {
+    0x03, 0xC0, 0xF0, 0x06, 0x71, 0x8C, 0x0C, 0x1B, 0x06, 0x18, 0x0E,
+    0x02, 0x10, 0x0C, 0x03, 0x10, 0x04, 0x01, 0x10, 0x04, 0x01, 0x10,
+    0x40, 0x01, 0x10, 0x40, 0x01, 0x10, 0xC0, 0x03, 0x08, 0x88, 0x02,
+    0x08, 0xB8, 0x04, 0xFF, 0x37, 0x08, 0x01, 0x30, 0x18, 0x01, 0x90,
+    0x30, 0x00, 0xC0, 0x60, 0x00, 0x60, 0xC0, 0x00, 0x31, 0x80, 0x00,
+    0x1B, 0x00, 0x00, 0x0E, 0x00, 0x00, 0x04, 0x00};
 
-void setLidPosition(bool open) {
-  if (open) {
-    lidServo.write(SERVO_OPEN_ANGLE);
-    lidOpenState = true;
+static const unsigned char PROGMEM logo3_bmp[] = {
+    0x01, 0xF0, 0x0F, 0x80, 0x06, 0x1C, 0x38, 0x60, 0x18, 0x06, 0x60, 0x18,
+    0x10, 0x01, 0x80, 0x08, 0x20, 0x01, 0x80, 0x04, 0x40, 0x00, 0x00, 0x02,
+    0x40, 0x00, 0x00, 0x02, 0xC0, 0x00, 0x08, 0x03, 0x80, 0x00, 0x08, 0x01,
+    0x80, 0x00, 0x18, 0x01, 0x80, 0x00, 0x1C, 0x01, 0x80, 0x00, 0x14, 0x00,
+    0x80, 0x00, 0x14, 0x00, 0x80, 0x00, 0x14, 0x00, 0x40, 0x10, 0x12, 0x00,
+    0x40, 0x10, 0x12, 0x00, 0x7E, 0x1F, 0x23, 0xFE, 0x03, 0x31, 0xA0, 0x04,
+    0x01, 0xA0, 0xA0, 0x0C, 0x00, 0xA0, 0xA0, 0x08, 0x00, 0x60, 0xE0, 0x10,
+    0x00, 0x20, 0x60, 0x20, 0x06, 0x00, 0x40, 0x60, 0x03, 0x00, 0x40, 0xC0,
+    0x01, 0x80, 0x01, 0x80, 0x00, 0xC0, 0x03, 0x00, 0x00, 0x60, 0x06, 0x00,
+    0x00, 0x60, 0x06, 0x00, 0x00, 0x30, 0x0C, 0x00, 0x00, 0x08, 0x10, 0x00,
+    0x00, 0x06, 0x60, 0x00, 0x00, 0x03, 0xC0, 0x00, 0x00, 0x01, 0x80, 0x00};
+
+// ────────────────────────────────────────────────────────────────
+//  DC Removal Filter (High-Pass Filter)
+// ────────────────────────────────────────────────────────────────
+float removeDC_IR(uint32_t rawSample) {
+  dcIR = (alpha * dcIR) + ((1.0f - alpha) * rawSample);
+  return (float)rawSample - dcIR;
+}
+
+float removeDC_Red(uint32_t rawSample) {
+  dcRed = (alpha * dcRed) + ((1.0f - alpha) * rawSample);
+  return (float)rawSample - dcRed;
+}
+
+// ────────────────────────────────────────────────────────────────
+//  Low-Pass Filter (Moving Average)
+// ────────────────────────────────────────────────────────────────
+float lowPassIR(float input) {
+  lpfSumIR -= lpfBufferIR[lpfIndex];
+  lpfBufferIR[lpfIndex] = input;
+  lpfSumIR += input;
+  return lpfSumIR / (float)LPF_WINDOW;
+}
+
+float lowPassRed(float input) {
+  lpfSumRed -= lpfBufferRed[lpfIndex];
+  lpfBufferRed[lpfIndex] = input;
+  lpfSumRed += input;
+  float out = lpfSumRed / (float)LPF_WINDOW;
+  lpfIndex = (lpfIndex + 1) % LPF_WINDOW;
+  return out;
+}
+
+// ────────────────────────────────────────────────────────────────
+//  Reset Vitals State
+// ────────────────────────────────────────────────────────────────
+void resetVitals() {
+  currentBPM = 0.0f;
+  beatAvg = 0;
+  dynamicThreshold = 100.0f;
+  runningMaxIR = -1e6f;
+  runningMinIR = 1e6f;
+  lastPeakVal = 200.0f;
+  lastTroughVal = 0.0f;
+  prevFilteredIR = 0.0f;
+  lastPeakSample = 0;
+  sampleCount = 0;
+
+  dcIR = 0.0f;
+  dcRed = 0.0f;
+  cycleAcRedMax = -1e6f;
+  cycleAcRedMin = 1e6f;
+  cycleAcIRMax = -1e6f;
+  cycleAcIRMin = 1e6f;
+
+  estimatedSpo2 = 0;
+  spo2Valid = false;
+  spo2Spot = 0;
+  spo2Count = 0;
+  for (byte i = 0; i < SPO2_AVG_SIZE; i++)
+    spo2Buffer[i] = 0;
+
+  lpfSumIR = 0;
+  lpfSumRed = 0;
+  lpfIndex = 0;
+  for (int i = 0; i < LPF_WINDOW; i++) {
+    lpfBufferIR[i] = 0.0f;
+    lpfBufferRed[i] = 0.0f;
+  }
+}
+
+// ────────────────────────────────────────────────────────────────
+//  Compute SpO2 from Peak-to-Peak AC and DC baselines
+// ────────────────────────────────────────────────────────────────
+void computeSpO2() {
+  float redPTP = cycleAcRedMax - cycleAcRedMin;
+  float irPTP = cycleAcIRMax - cycleAcIRMin;
+
+  // Reset cycle extrema for the next pulse cycle
+  cycleAcRedMax = -1e6f;
+  cycleAcRedMin = 1e6f;
+  cycleAcIRMax = -1e6f;
+  cycleAcIRMin = 1e6f;
+
+  // Require measurable pulsatile AC amplitude and valid DC level
+  if (redPTP < 10.0f || irPTP < 10.0f)
+    return;
+  if (dcIR < 5000.0f || dcRed < 5000.0f)
+    return;
+
+  float rRed = redPTP / dcRed;
+  float rIR = irPTP / dcIR;
+
+  if (rIR < 0.0001f)
+    return;
+
+  float R = rRed / rIR;
+
+  // Standard Empirical SpO2 Calibration for MAX30102
+  // R ~ 0.40 -> 100%, R ~ 0.52 -> 97%, R ~ 0.80 -> 90%
+  float rawSpo2 = 104.0f - 17.0f * R;
+
+  if (rawSpo2 > 100.0f)
+    rawSpo2 = 100.0f;
+  if (rawSpo2 < 70.0f)
+    rawSpo2 = 70.0f;
+
+  int spo2Val = (int)round(rawSpo2);
+
+  if (spo2Val >= 75 && spo2Val <= 100) {
+    spo2Buffer[spo2Spot] = spo2Val;
+    spo2Spot = (spo2Spot + 1) % SPO2_AVG_SIZE;
+    if (spo2Count < SPO2_AVG_SIZE)
+      spo2Count++;
+
+    int sum = 0;
+    for (byte i = 0; i < spo2Count; i++) {
+      sum += spo2Buffer[i];
+    }
+    estimatedSpo2 = sum / spo2Count;
+    spo2Valid = true;
+  }
+}
+
+// ────────────────────────────────────────────────────────────────
+//  Update Signal Quality Indicator
+// ────────────────────────────────────────────────────────────────
+void updateSignalQuality() {
+  if (latestIR > 80000L) {
+    signalQuality = "excellent";
+  } else if (latestIR > 45000L) {
+    signalQuality = "good";
+  } else if (latestIR > 25000L) {
+    signalQuality = "fair";
+  } else if (latestIR > FINGER_THRESHOLD) {
+    signalQuality = "weak";
   } else {
-    lidServo.write(SERVO_CLOSED_ANGLE);
-    lidOpenState = false;
+    signalQuality = "none";
   }
 }
 
-void setCompartmentLED(int compIndex, bool state) {
-  for (int i = 0; i < NUM_SLOTS; i++) {
-    if (i == compIndex && state) {
-      digitalWrite(ledPins[i], HIGH);
-    } else if (compIndex < 0 && state) {
-      digitalWrite(ledPins[i], HIGH); // All ON
-    } else if (compIndex < 0 && !state) {
-      digitalWrite(ledPins[i], LOW);  // All OFF
-    } else if (i == compIndex && !state) {
-      digitalWrite(ledPins[i], LOW);
+// ────────────────────────────────────────────────────────────────
+//  Process Each Genuine Sample from MAX30102 FIFO
+// ────────────────────────────────────────────────────────────────
+void processSample(uint32_t red, uint32_t ir) {
+  latestIR = (long)ir;
+  latestRed = (long)red;
+  updateSignalQuality();
+
+  if (ir < FINGER_THRESHOLD) {
+    if (fingerDetected) {
+      fingerDetected = false;
+      resetVitals();
     }
-  }
-}
-
-int measureDistanceCm() {
-  digitalWrite(HC_TRIG_PIN, LOW);
-  delayMicroseconds(2);
-  digitalWrite(HC_TRIG_PIN, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(HC_TRIG_PIN, LOW);
-
-  long duration = pulseIn(HC_ECHO_PIN, HIGH, 25000); // 25ms timeout (~4m max)
-  if (duration == 0) return 999;
-  return (int)(duration * 0.0343 / 2.0);
-}
-
-void saveScheduleToNVS() {
-  preferences.begin("med_schedule", false);
-  for (int i = 0; i < NUM_SLOTS; i++) {
-    char keyH[12], keyM[12], keyC[12], keyL[12], keyG[12];
-    sprintf(keyH, "h_%d", i);
-    sprintf(keyM, "m_%d", i);
-    sprintf(keyC, "c_%d", i);
-    sprintf(keyL, "l_%d", i);
-    sprintf(keyG, "g_%d", i);
-
-    preferences.putInt(keyH, schedule[i].hour);
-    preferences.putInt(keyM, schedule[i].minute);
-    preferences.putInt(keyC, schedule[i].compartment);
-    preferences.putString(keyL, String(schedule[i].label));
-    preferences.putBool(keyG, schedule[i].givenToday);
-  }
-  preferences.end();
-  Serial.println("[NVS] Schedule saved to Flash memory.");
-}
-
-void loadScheduleFromNVS() {
-  preferences.begin("med_schedule", true);
-  for (int i = 0; i < NUM_SLOTS; i++) {
-    char keyH[12], keyM[12], keyC[12], keyL[12], keyG[12];
-    sprintf(keyH, "h_%d", i);
-    sprintf(keyM, "m_%d", i);
-    sprintf(keyC, "c_%d", i);
-    sprintf(keyL, "l_%d", i);
-    sprintf(keyG, "g_%d", i);
-
-    if (preferences.isKey(keyH)) {
-      schedule[i].hour = preferences.getInt(keyH, schedule[i].hour);
-      schedule[i].minute = preferences.getInt(keyM, schedule[i].minute);
-      schedule[i].compartment = preferences.getInt(keyC, schedule[i].compartment);
-      String lbl = preferences.getString(keyL, String(schedule[i].label));
-      lbl.toCharArray(schedule[i].label, sizeof(schedule[i].label));
-      schedule[i].givenToday = preferences.getBool(keyG, false);
-    }
-  }
-  preferences.end();
-  Serial.println("[NVS] Schedule loaded from Flash memory.");
-}
-
-// Enable CORS headers on all HTTP responses
-void sendCORSHeaders() {
-  server.sendHeader("Access-Control-Allow-Origin", "*");
-  server.sendHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  server.sendHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────
-//  HTTP REST Handlers
-// ─────────────────────────────────────────────────────────────────────────────────
-
-void handleOptions() {
-  sendCORSHeaders();
-  server.send(204);
-}
-
-void handleGetSchedule() {
-  sendCORSHeaders();
-  
-  DynamicJsonDocument doc(1536);
-  JsonArray arr = doc.createNestedArray("schedule");
-
-  for (int i = 0; i < NUM_SLOTS; i++) {
-    JsonObject obj = arr.createNestedObject();
-    obj["hour"] = schedule[i].hour;
-    obj["minute"] = schedule[i].minute;
-    obj["compartment"] = schedule[i].compartment;
-    obj["label"] = schedule[i].label;
-    obj["givenToday"] = schedule[i].givenToday;
-  }
-
-  String jsonOut;
-  serializeJson(doc, jsonOut);
-  server.send(200, "application/json", jsonOut);
-}
-
-void handlePostSchedule() {
-  sendCORSHeaders();
-  if (!server.hasArg("plain")) {
-    server.send(400, "application/json", "{\"error\":\"Missing body\"}");
     return;
   }
 
-  String body = server.arg("plain");
-  DynamicJsonDocument doc(2048);
-  DeserializationError err = deserializeJson(doc, body);
+  fingerDetected = true;
+  sampleCount++;
 
-  if (err) {
-    server.send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
-    return;
+  // Step A: Signal Filtering
+  float acIR = removeDC_IR(ir);
+  float acRed = removeDC_Red(red);
+
+  float filteredIR = lowPassIR(acIR);
+  float filteredRed = lowPassRed(acRed);
+
+  // Track Peak-to-Peak amplitudes within current cardiac cycle (for SpO2 calculation)
+  if (filteredRed > cycleAcRedMax)
+    cycleAcRedMax = filteredRed;
+  if (filteredRed < cycleAcRedMin)
+    cycleAcRedMin = filteredRed;
+  if (filteredIR > cycleAcIRMax)
+    cycleAcIRMax = filteredIR;
+  if (filteredIR < cycleAcIRMin)
+    cycleAcIRMin = filteredIR;
+
+  // Track running max and min of the filtered signal during the current cardiac cycle
+  if (filteredIR > runningMaxIR) {
+    runningMaxIR = filteredIR;
+  }
+  if (filteredIR < runningMinIR) {
+    runningMinIR = filteredIR;
   }
 
-  JsonArray arr;
-  if (doc.is<JsonArray>()) {
-    arr = doc.as<JsonArray>();
-  } else if (doc.containsKey("schedule")) {
-    arr = doc["schedule"].as<JsonArray>();
+  // Calculate elapsed time since last beat
+  unsigned long sampleDelta = sampleCount - lastPeakSample;
+  float timeDeltaMs = sampleDelta * 2.5f; // 400Hz sample rate = 2.5ms interval per sample
+
+  // Step B: If no beat is detected for 1.5 seconds, slowly decay threshold to prevent getting stuck
+  if (timeDeltaMs > 1500.0f) {
+    dynamicThreshold *= 0.998f;
+    if (dynamicThreshold < 50.0f) {
+      dynamicThreshold = 50.0f;
+    }
+  }
+
+  // Step C: Peak Trigger Check (Positive zero/threshold crossing)
+  if (filteredIR > dynamicThreshold && prevFilteredIR <= dynamicThreshold && filteredIR > 50.0f) {
+    if (timeDeltaMs > (float)REFRACTORY_PERIOD_MS) {
+      // Valid beat detected!
+      if (lastPeakSample > 0) {
+        float instantBPM = 60000.0f / timeDeltaMs;
+
+        if (instantBPM >= 40.0f && instantBPM <= 200.0f) {
+          if (currentBPM < 30.0f) {
+            currentBPM = instantBPM; // Initialize immediately to avoid long warm-up
+          } else {
+            // Exponential moving average to smooth heart rate
+            currentBPM = (currentBPM * 0.7f) + (instantBPM * 0.3f);
+          }
+          beatAvg = (int)round(currentBPM);
+        }
+      }
+
+      beatActive = true;
+      beatTriggerMs = millis(); // Turn-off time scheduling is fine using CPU millisecond
+      digitalWrite(LED_PIN, HIGH);
+      if (ENABLE_BUZZER && BUZZER_PIN >= 0) {
+        digitalWrite(BUZZER_PIN, HIGH);
+      }
+
+      lastPeakSample = sampleCount;
+
+      // Update adaptive threshold parameters for the next cycle
+      lastPeakVal = runningMaxIR;
+      lastTroughVal = runningMinIR;
+
+      float amplitude = lastPeakVal - lastTroughVal;
+      if (amplitude > 50.0f && amplitude < 3000.0f) {
+        dynamicThreshold = lastTroughVal + (amplitude * 0.6f);
+      } else {
+        dynamicThreshold = 100.0f; // Fallback threshold
+      }
+
+      // Reset running peak trackers for the new cycle
+      runningMaxIR = filteredIR;
+      runningMinIR = filteredIR;
+
+      // Calculate SpO2 on each detected cardiac cycle peak
+      computeSpO2();
+    }
+  }
+
+  prevFilteredIR = filteredIR;
+}
+
+// ────────────────────────────────────────────────────────────────
+//  WebSocket Event Handler
+// ────────────────────────────────────────────────────────────────
+void wsEventHandler(WStype_t type, uint8_t *payload, size_t length) {
+  switch (type) {
+  case WStype_CONNECTED:
+    wsConnected = true;
+    Serial.printf("[WS] Connected to ws://%s:%d%s\n", SERVER_HOST, SERVER_PORT,
+                  SERVER_PATH);
+    break;
+  case WStype_DISCONNECTED:
+    wsConnected = false;
+    Serial.println(F("[WS] Disconnected."));
+    break;
+  case WStype_ERROR:
+    wsConnected = false;
+    Serial.println(F("[WS] Error."));
+    break;
+  default:
+    break;
+  }
+}
+
+// ────────────────────────────────────────────────────────────────
+//  WiFi Event Handler
+// ────────────────────────────────────────────────────────────────
+void onWiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
+  switch (event) {
+  case ARDUINO_EVENT_WIFI_STA_START:
+    Serial.println(
+        F("[WiFi] Station Started. Scanning channels 1-13 for 'ElderCare'..."));
+    WiFi.setTxPower(WIFI_POWER_19_5dBm);
+    break;
+  case ARDUINO_EVENT_WIFI_STA_CONNECTED:
+    Serial.println(
+        F("[WiFi] Associated with 'ElderCare' AP! Waiting for IP..."));
+    break;
+  case ARDUINO_EVENT_WIFI_STA_GOT_IP:
+    wifiOk = true;
+    Serial.printf("\n[WiFi] Connected! IP: %s | Gateway: %s\n",
+                  WiFi.localIP().toString().c_str(),
+                  WiFi.gatewayIP().toString().c_str());
+    if (!wsInitialized) {
+      ws.begin(SERVER_HOST, SERVER_PORT, SERVER_PATH);
+      ws.onEvent(wsEventHandler);
+      ws.setReconnectInterval(3000);
+      wsInitialized = true;
+      Serial.printf("[WS] Initialized -> ws://%s:%d%s\n", SERVER_HOST,
+                    SERVER_PORT, SERVER_PATH);
+    }
+    break;
+  case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
+    wifiOk = false;
+    wsConnected = false;
+    Serial.printf("[WiFi] Disconnected (Reason code: %d). Retrying...\n",
+                  info.wifi_sta_disconnected.reason);
+    break;
+  default:
+    break;
+  }
+}
+
+// ────────────────────────────────────────────────────────────────
+//  Try Initializing MAX30102 Sensor
+// ────────────────────────────────────────────────────────────────
+bool initSensor() {
+  if (particleSensor.begin(Wire, I2C_SPEED_FAST)) {
+    byte powerLevel = 0x1F; // ~6.4mA LED current
+    byte sampleAverage = 1; // No FIFO sample averaging
+    byte ledMode = 2;       // Red + IR mode
+    int sampleRate = 400;   // 400 Hz sampling rate
+    int pulseWidth = 215;   // 17-bit resolution
+    int adcRange = 4096;    // 4096nA dynamic range
+
+    particleSensor.setup(powerLevel, sampleAverage, ledMode, sampleRate,
+                         pulseWidth, adcRange);
+    particleSensor.setPulseAmplitudeRed(powerLevel);
+    particleSensor.setPulseAmplitudeIR(powerLevel);
+    particleSensor.setPulseAmplitudeGreen(0);
+    particleSensor.enableFIFORollover();
+    sensorFound = true;
+    Serial.println(
+        F("[SENSOR] MAX30102 OK! (400Hz, Red+IR, Avg1, 17-bit, 400kHz I2C)"));
+    return true;
+  }
+  sensorFound = false;
+  return false;
+}
+
+// ────────────────────────────────────────────────────────────────
+//  Update OLED Display
+// ────────────────────────────────────────────────────────────────
+void updateDisplay() {
+  if (!oledFound)
+    return;
+  if (millis() - lastDisplayMs < 50)
+    return;
+  lastDisplayMs = millis();
+
+  display.clearDisplay();
+
+  if (fingerDetected) {
+    if (beatActive) {
+      display.drawBitmap(0, 0, logo3_bmp, 32, 32, SSD1306_WHITE);
+    } else {
+      display.drawBitmap(5, 5, logo2_bmp, 24, 21, SSD1306_WHITE);
+    }
+
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+
+    display.setCursor(42, 2);
+    if (beatAvg > 0) {
+      display.print(beatAvg);
+      display.print(" BPM");
+    } else {
+      display.print("Sensing...");
+    }
+
+    display.setCursor(42, 14);
+    if (spo2Valid && estimatedSpo2 > 0) {
+      display.print("SpO2: ");
+      display.print(estimatedSpo2);
+      display.print("%");
+    } else {
+      display.print("SpO2: ---");
+    }
+
+    display.setCursor(42, 25);
+    display.setTextSize(1);
+    display.print("Sig: ");
+    display.print(signalQuality);
+
   } else {
-    server.send(400, "application/json", "{\"error\":\"No schedule array provided\"}");
-    return;
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(16, 6);
+    display.println(F("Elder-Care Bracelet"));
+    display.setCursor(10, 18);
+    display.println(F("Please place finger"));
   }
 
-  int idx = 0;
-  for (JsonObject obj : arr) {
-    if (idx >= NUM_SLOTS) break;
-    if (obj.containsKey("hour")) schedule[idx].hour = obj["hour"];
-    if (obj.containsKey("minute")) schedule[idx].minute = obj["minute"];
-    if (obj.containsKey("compartment")) schedule[idx].compartment = obj["compartment"];
-    if (obj.containsKey("label")) {
-      const char* lbl = obj["label"];
-      strncpy(schedule[idx].label, lbl, sizeof(schedule[idx].label) - 1);
-      schedule[idx].label[sizeof(schedule[idx].label) - 1] = '\0';
-    }
-    if (obj.containsKey("givenToday")) schedule[idx].givenToday = obj["givenToday"];
-    idx++;
+  display.display();
+}
+
+// ────────────────────────────────────────────────────────────────
+//  Periodic Vitals Report
+// ────────────────────────────────────────────────────────────────
+void reportVitals() {
+  long uptime = (long)((millis() - bootMs) / 1000UL);
+
+  Serial.println(F("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"));
+  if (fingerDetected) {
+    Serial.printf("  Finger   : DETECTED (IR: %ld, Red: %ld)\n", latestIR,
+                  latestRed);
+    Serial.printf("  Live BPM : %.1f | Avg BPM: %d\n", currentBPM, beatAvg);
+    Serial.printf("  SpO2     : %d %% (%s)\n", spo2Valid ? estimatedSpo2 : 0,
+                  spo2Valid ? "DC-filtered R-ratio" : "sensing");
+    Serial.printf("  Signal   : %s\n", signalQuality);
+  } else {
+    Serial.println(F("  Finger   : NOT DETECTED (Place finger on sensor)"));
+    Serial.println(F("  BPM      : 0"));
+    Serial.println(F("  SpO2     : 0"));
   }
+  Serial.printf("  WiFi     : %s (IP: %s)\n", wifiOk ? "Connected" : "Offline",
+                WiFi.localIP().toString().c_str());
+  Serial.printf("  WS       : %s\n",
+                wsConnected ? "Connected" : "Disconnected");
+  Serial.printf("  Uptime   : %ld s\n", uptime);
 
-  saveScheduleToNVS();
-  server.send(200, "application/json", "{\"success\":true,\"message\":\"Schedule updated & persisted\"}");
+  if (wsConnected) {
+    int reportSpo2 = (spo2Valid && beatAvg > 0) ? estimatedSpo2 : 0;
+    char json[300];
+    snprintf(json, sizeof(json),
+             "{"
+             "\"type\":\"vitals\","
+             "\"bpm\":%d,"
+             "\"spo2\":%d,"
+             "\"irValue\":%ld,"
+             "\"redValue\":%ld,"
+             "\"fingerDetected\":%s,"
+             "\"signal\":\"%s\","
+             "\"uptime\":%ld"
+             "}",
+             beatAvg, reportSpo2, latestIR, latestRed,
+             fingerDetected ? "true" : "false", signalQuality, uptime);
+    ws.sendTXT(json);
+    Serial.println(F("  WS Sent  : OK"));
+  }
+  Serial.println(F("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"));
 }
 
-void handleStatus() {
-  sendCORSHeaders();
-  DynamicJsonDocument doc(512);
-
-  doc["online"] = true;
-  doc["deviceId"] = "medbox-01";
-  doc["state"] = (currentState == STATE_IDLE) ? "IDLE" :
-                 (currentState == STATE_DUE_REMINDER) ? "REMINDER" :
-                 (currentState == STATE_LID_OPEN) ? "DISPENSING" : "CONFIRMED";
-  doc["lidOpen"] = lidOpenState;
-  doc["presenceDetected"] = (currentDistanceCm <= PRESENCE_DIST_CM);
-  doc["distanceCm"] = currentDistanceCm;
-  doc["uptime"] = millis() / 1000;
-  doc["ip"] = WiFi.localIP().toString();
-
-  String jsonOut;
-  serializeJson(doc, jsonOut);
-  server.send(200, "application/json", jsonOut);
-}
-
-void handleTest() {
-  sendCORSHeaders();
-  setLidPosition(true);
-  setCompartmentLED(-1, true);
-  delay(1500);
-  setLidPosition(false);
-  setCompartmentLED(-1, false);
-  server.send(200, "application/json", "{\"success\":true,\"message\":\"Test triggered\"}");
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────
-//  Setup & Initialization
-// ─────────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────
+//  SETUP
+// ────────────────────────────────────────────────────────────────
 void setup() {
   Serial.begin(115200);
-  Serial.println("\n==============================================");
-  Serial.println("  Smart Medicine Box ESP32 Firmware Starting  ");
-  Serial.println("==============================================");
+  delay(300);
+  bootMs = millis();
 
-  // Initialize Pin Modes
-  pinMode(HC_TRIG_PIN, OUTPUT);
-  pinMode(HC_ECHO_PIN, INPUT);
-  pinMode(CONFIRM_SW_PIN, INPUT_PULLUP);
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, LOW);
 
-  for (int i = 0; i < NUM_SLOTS; i++) {
-    pinMode(ledPins[i], OUTPUT);
-    digitalWrite(ledPins[i], LOW);
+  if (ENABLE_BUZZER && BUZZER_PIN >= 0) {
+    pinMode(BUZZER_PIN, OUTPUT);
+    digitalWrite(BUZZER_PIN, LOW);
   }
 
-  // Initialize Servo
-  lidServo.setPeriodHertz(50);
-  lidServo.attach(SERVO_PIN, 500, 2400);
-  setLidPosition(false);
+  Serial.println();
+  Serial.println(F("╔══════════════════════════════════════════════╗"));
+  Serial.println(F("║   Elder-Care — ESP32 BPM + SpO2 Monitor     ║"));
+  Serial.println(F("║   MAX30102 DC-Filtered R-Ratio Algorithm     ║"));
+  Serial.println(F("╚══════════════════════════════════════════════╝"));
 
-  // Initialize I2C & LCD
-  Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
-  lcd.init();
-  lcd.backlight();
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("ElderCare MedBox");
-  lcd.setCursor(0, 1);
-  lcd.print("Connecting WiFi...");
+  // 1. Initialize I2C Bus for ESP32 with 400kHz fast speed
+  Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN, 400000);
 
-  // Load schedule from flash NVS
-  loadScheduleFromNVS();
+  // 2. Initialize OLED Display (Optional)
+  if (display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    oledFound = true;
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(18, 10);
+    display.println(F("Elder-Care System"));
+    display.display();
+    Serial.println(F("[OLED]   SSD1306 initialized at 0x3C"));
+  }
 
-  // Connect to WiFi with scan-based SSID matching
+  // 3. Initialize MAX30102 Sensor
+  Serial.print(F("[SENSOR] Initializing MAX30102..."));
+  if (initSensor()) {
+    Serial.println(F(" OK!"));
+  } else {
+    Serial.println(
+        F("\n[WARN]   MAX30102 not detected on I2C. Will retry in loop."));
+  }
+
+  // 4. Initialize SpO2 state
+  resetVitals();
+
+  // 5. Connect WiFi to ElderCare Hotspot
+  Serial.println(F("[WiFi] Scanning visible networks..."));
+  int n = WiFi.scanNetworks();
+  Serial.printf("[WiFi] Found %d networks:\n", n);
+  for (int i = 0; i < n; ++i) {
+    Serial.printf("  %2d: '%s' (RSSI: %d, Ch: %d, Auth: %d)\n", i + 1,
+                  WiFi.SSID(i).c_str(), WiFi.RSSI(i), WiFi.channel(i),
+                  (int)WiFi.encryptionType(i));
+  }
+
+  Serial.printf("[WiFi] Connecting to '%s'...\n", WIFI_SSID);
+  WiFi.onEvent(onWiFiEvent);
   WiFi.mode(WIFI_STA);
-  WiFi.disconnect(true, true);
-  delay(100);
   WiFi.setSleep(false);
   WiFi.setAutoReconnect(true);
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
 
-  Serial.println(F("\n[WiFi] Scanning visible 2.4 GHz networks..."));
-  int numNetworks = WiFi.scanNetworks();
-  String targetSSID = WIFI_SSID;
-
-  for (int i = 0; i < numNetworks; i++) {
-    String foundStr = WiFi.SSID(i);
-    Serial.printf("   %2d: '%s' (RSSI: %d dBm, Ch: %d)\n",
-                  i + 1, foundStr.c_str(), WiFi.RSSI(i), WiFi.channel(i));
-    if (foundStr == "ElderCare" || foundStr == "ElderCare " || foundStr.startsWith("ElderCare")) {
-      targetSSID = foundStr;
-      Serial.printf("      --> Match selected: '%s'\n", targetSSID.c_str());
-      break;
-    }
-  }
-
-  Serial.printf("[WiFi] Connecting to '%s'...\n", targetSSID.c_str());
-  WiFi.begin(targetSSID.c_str(), WIFI_PASS);
-
-  int timeout = 0;
-  while (WiFi.status() != WL_CONNECTED && timeout < 30) {
-    delay(500);
-    Serial.print(".");
-    timeout++;
-  }
-
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.print(F("\n[WiFi] Connected! IP: "));
-    Serial.println(WiFi.localIP().toString());
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("WiFi Connected!");
-    lcd.setCursor(0, 1);
-    lcd.print(WiFi.localIP().toString());
-
-    // Configure NTP time sync
-    configTime(GMT_OFFSET_SEC, DAYLIGHT_OFFSET_SEC, NTP_SERVER);
-  } else {
-    Serial.println(F("\n[WiFi] Connection failed. Operating in local mode."));
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("WiFi Offline");
-    lcd.setCursor(0, 1);
-    lcd.print("Local Mode");
-  }
-
-  delay(2000);
-
-  // Setup HTTP API Endpoints
-  server.on("/api/schedule", HTTP_GET, handleGetSchedule);
-  server.on("/api/schedule", HTTP_POST, handlePostSchedule);
-  server.on("/api/schedule", HTTP_OPTIONS, handleOptions);
-  server.on("/status", HTTP_GET, handleStatus);
-  server.on("/status", HTTP_OPTIONS, handleOptions);
-  server.on("/api/test", HTTP_POST, handleTest);
-  server.on("/api/test", HTTP_OPTIONS, handleOptions);
-
-  server.begin();
-  Serial.println("[HTTP] WebServer started on port 80");
+  lastReportMs = millis();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────────
-//  Main Loop & State Machine
-// ─────────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────
+//  LOOP
+// ────────────────────────────────────────────────────────────────
 void loop() {
-  server.handleClient();
-  currentDistanceCm = measureDistanceCm();
-  bool confirmPressed = (digitalRead(CONFIRM_SW_PIN) == LOW);
-
-  // Obtain local time
-  struct tm timeinfo;
-  bool timeValid = getLocalTime(&timeinfo);
-
-  // Midnight reset check (reset givenToday flags every new day)
-  if (timeValid && timeinfo.tm_mday != lastResetDay) {
-    if (lastResetDay != -1) {
-      Serial.println("[SYSTEM] New day detected! Resetting givenToday flags.");
-      for (int i = 0; i < NUM_SLOTS; i++) {
-        schedule[i].givenToday = false;
-      }
-      saveScheduleToNVS();
-    }
-    lastResetDay = timeinfo.tm_mday;
+  // Maintain WebSocket
+  if (wifiOk && wsInitialized) {
+    ws.loop();
   }
 
-  // State Machine logic
-  switch (currentState) {
+  // Retry sensor initialization if not found initially
+  if (!sensorFound && (millis() - lastSensorRetryMs > 3000)) {
+    lastSensorRetryMs = millis();
+    initSensor();
+  }
 
-    case STATE_IDLE: {
-      setLidPosition(false);
-      setCompartmentLED(-1, false);
+  // If sensor is active, read data
+  if (sensorFound) {
+    particleSensor.check(); // Check sensor FIFO for new data
 
-      // Check if any scheduled dose is due
-      if (timeValid) {
-        for (int i = 0; i < NUM_SLOTS; i++) {
-          if (!schedule[i].givenToday &&
-              timeinfo.tm_hour == schedule[i].hour &&
-              timeinfo.tm_min >= schedule[i].minute) {
-            
-            activeDoseIndex = i;
-            currentState = STATE_DUE_REMINDER;
-            stateTimerMs = millis();
-            Serial.printf("[STATE] Dose due for slot %d (%s)\n", i, schedule[i].label);
-            break;
-          }
-        }
-      }
+    while (particleSensor.available()) {
+      uint32_t rawRed = particleSensor.getFIFORed();
+      uint32_t rawIR = particleSensor.getFIFOIR();
+      particleSensor.nextSample(); // Advance FIFO tail pointer
 
-      // LCD Display Update for IDLE
-      if (millis() - lastDisplayRefreshMs > 2000) {
-        lastDisplayRefreshMs = millis();
-        lcd.clear();
-        lcd.setCursor(0, 0);
-        if (timeValid) {
-          char timeStr[16];
-          sprintf(timeStr, "Time: %02d:%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
-          lcd.print(timeStr);
-        } else {
-          lcd.print("ElderCare MedBox");
-        }
-
-        lcd.setCursor(0, 1);
-        if (WiFi.status() == WL_CONNECTED) {
-          lcd.print(WiFi.localIP().toString());
-        } else {
-          lcd.print("Ready / Standby");
-        }
-      }
-      break;
-    }
-
-    case STATE_DUE_REMINDER: {
-      // Flash the compartment LED for active dose
-      if (activeDoseIndex >= 0) {
-        bool flash = (millis() / 500) % 2;
-        setCompartmentLED(activeDoseIndex, flash);
-      }
-
-      // LCD Display for Reminder
-      if (millis() - lastDisplayRefreshMs > 500) {
-        lastDisplayRefreshMs = millis();
-        lcd.clear();
-        lcd.setCursor(0, 0);
-        lcd.print("TIME FOR MEDS!");
-        lcd.setCursor(0, 1);
-        if (activeDoseIndex >= 0) {
-          lcd.print(schedule[activeDoseIndex].label);
-        }
-      }
-
-      // Hand presence detection opens the lid
-      if (currentDistanceCm <= PRESENCE_DIST_CM) {
-        setLidPosition(true);
-        currentState = STATE_LID_OPEN;
-        stateTimerMs = millis();
-        Serial.println("[STATE] Hand detected! Opening lid.");
-      }
-      break;
-    }
-
-    case STATE_LID_OPEN: {
-      // Solid LED for active compartment
-      if (activeDoseIndex >= 0) {
-        setCompartmentLED(activeDoseIndex, true);
-      }
-
-      // LCD Display while lid is open
-      if (millis() - lastDisplayRefreshMs > 1000) {
-        lastDisplayRefreshMs = millis();
-        lcd.clear();
-        lcd.setCursor(0, 0);
-        lcd.print("TAKE DOSE & PRESS");
-        lcd.setCursor(0, 1);
-        lcd.print("CONFIRM BUTTON");
-      }
-
-      // Patient presses confirm button
-      if (confirmPressed) {
-        if (activeDoseIndex >= 0) {
-          schedule[activeDoseIndex].givenToday = true;
-          saveScheduleToNVS();
-        }
-        setLidPosition(false);
-        setCompartmentLED(-1, false);
-        currentState = STATE_CONFIRMED;
-        stateTimerMs = millis();
-        Serial.println("[STATE] Dose confirmed taken!");
-      }
-      break;
-    }
-
-    case STATE_CONFIRMED: {
-      if (millis() - lastDisplayRefreshMs > 1000) {
-        lastDisplayRefreshMs = millis();
-        lcd.clear();
-        lcd.setCursor(0, 0);
-        lcd.print("DOSE RECORDED!");
-        lcd.setCursor(0, 1);
-        lcd.print("THANK YOU");
-      }
-
-      // Hold message for 3 seconds then return to IDLE
-      if (millis() - stateTimerMs > 3000) {
-        activeDoseIndex = -1;
-        currentState = STATE_IDLE;
-      }
-      break;
+      processSample(rawRed, rawIR);
     }
   }
 
-  delay(50);
+  // Handle pulse LED turn off
+  if (beatActive && (millis() - beatTriggerMs >= BEAT_BEEP_MS)) {
+    beatActive = false;
+    digitalWrite(LED_PIN, LOW);
+    if (ENABLE_BUZZER && BUZZER_PIN >= 0) {
+      digitalWrite(BUZZER_PIN, LOW);
+    }
+  }
+
+  // Update OLED Animation & Text
+  updateDisplay();
+
+  // Periodic Vitals Output
+  if (millis() - lastReportMs >= REPORT_INTERVAL) {
+    reportVitals();
+    lastReportMs = millis();
+  }
 }

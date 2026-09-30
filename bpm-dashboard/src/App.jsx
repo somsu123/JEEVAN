@@ -1,6 +1,6 @@
 /**
  * ============================================================
- *  App.jsx — Elder-Care Vitals Dashboard (BPM + SpO₂)
+ *  App.jsx — JEEVAN Dashboard (BPM + SpO₂)
  * ============================================================
  *  Layout:
  *   Left column  (4/12) — BpmCard + SpO₂Card + Connection + Sensor
@@ -47,7 +47,7 @@ export default function App() {
             </div>
             <div>
               <h1 className="text-2xl md:text-3xl font-bold text-white tracking-tight">
-                Elder-Care Vitals
+                JEEVAN
               </h1>
               <p className="text-sm text-slate-400 mt-0.5">
                 Real-time BPM &amp; SpO₂ monitoring · ESP32 + MAX30102

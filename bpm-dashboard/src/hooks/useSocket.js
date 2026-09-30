@@ -4,6 +4,11 @@
  * ============================================================
  *  Manages the WebSocket connection to the vitals backend.
  *  Returns live BPM, SpO₂, history, connection states, etc.
+ *
+ *  Real-time fixes:
+ *  - bpm:status fully hydrates lastUpdate + sensorStatus on reconnect
+ *  - Local 1-second tick increments uptime between ESP32 messages
+ *  - Stats poll seeds lastUpdate from server's lastReceived timestamp
  * ============================================================
  */
 
@@ -33,10 +38,26 @@ export default function useSocket() {
 
   const socketRef = useRef(null);
 
+  // ── Local uptime tick ──────────────────────────────────────
+  // Increments sensorStatus.uptime by 1 every second so the
+  // "Device Uptime" field keeps ticking even between ESP32 packets.
   useEffect(() => {
-    // Connect to backend server
+    const id = setInterval(() => {
+      setSensorStatus(prev =>
+        prev.uptime > 0 ? { ...prev, uptime: prev.uptime + 1 } : prev
+      );
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    // Connect directly to the backend on port 3001.
+    // IMPORTANT: transports must be ['polling', 'websocket'] — polling
+    // first so Socket.IO can establish the session via HTTP, then
+    // upgrade to WebSocket. Reversing this order causes silent failures
+    // when the WS upgrade is proxied or blocked.
     const socket = io('http://localhost:3001', {
-      transports: ['websocket', 'polling'],
+      transports: ['polling', 'websocket'],
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
@@ -63,6 +84,20 @@ export default function useSocket() {
     // ── ESP32 connection status ─────────────────────────────
     socket.on('esp:connected', (status) => {
       setEspConnected(status);
+      // ⚡ Clear ALL vitals immediately when ESP32 goes offline
+      // so the dashboard never shows stale/hardcoded-looking values.
+      if (!status) {
+        setBpm(null);
+        setSpo2(null);
+        setLastUpdate(null);
+        setSensorStatus({
+          fingerDetected: false,
+          signal: 'unknown',
+          irValue: 0,
+          redValue: 0,
+          uptime: 0,
+        });
+      }
     });
 
     // ── Hydrate chart with history on connect ───────────────
@@ -77,11 +112,26 @@ export default function useSocket() {
       }
     });
 
-    // ── Server status on connect ────────────────────────────
+    // ── Server status on connect — full hydration ───────────
     socket.on('bpm:status', (status) => {
-      if (status) {
-        setEspConnected(status.espConnected);
+      if (!status) return;
+      setEspConnected(status.espConnected);
+
+      // Restore sensor status from latest server snapshot
+      setSensorStatus(prev => ({
+        ...prev,
+        fingerDetected: status.fingerDetected ?? prev.fingerDetected,
+        signal:         status.signal         ?? prev.signal,
+      }));
+
+      // Restore lastUpdate from server's lastReceived timestamp
+      if (status.lastReceived) {
+        setLastUpdate(new Date(status.lastReceived));
       }
+
+      // Restore BPM / SpO₂ from latest snapshot
+      if (status.latestBpm  != null) setBpm(status.latestBpm);
+      if (status.latestSpo2 != null && status.latestSpo2 > 0) setSpo2(status.latestSpo2);
     });
 
     // ── Live vitals data ────────────────────────────────────
@@ -115,11 +165,12 @@ export default function useSocket() {
     return () => { socket.disconnect(); };
   }, []);
 
-  // Fetch stats periodically (every 5 s)
+  // ── Fetch stats periodically (every 5 s) ──────────────────
   useEffect(() => {
     const fetchStats = async () => {
       try {
-        const res  = await fetch('http://localhost:3001/api/bpm/history?n=300');
+        // Use Vite proxy path so fetch also goes through the proxy
+        const res  = await fetch('/api/bpm/history?n=300');
         const data = await res.json();
         if (data.stats) setStats(data.stats);
       } catch { /* ignore */ }
@@ -128,6 +179,29 @@ export default function useSocket() {
     fetchStats();
     const interval = setInterval(fetchStats, 5000);
     return () => clearInterval(interval);
+  }, []);
+
+  // ── Stale-data watchdog (every 3 s) ───────────────────────
+  // Safety net: if espConnected is false but stale bpm/spo2 values
+  // are still on screen (e.g. device hard-reset without clean WS close),
+  // force-clear them so the display is never misleadingly live-looking.
+  useEffect(() => {
+    const id = setInterval(() => {
+      setEspConnected(prev => {
+        if (!prev) {
+          // espConnected is false — clear any lingering vitals
+          setBpm(null);
+          setSpo2(null);
+          setSensorStatus(s =>
+            s.fingerDetected
+              ? { fingerDetected: false, signal: 'unknown', irValue: 0, redValue: 0, uptime: 0 }
+              : s
+          );
+        }
+        return prev;
+      });
+    }, 3000);
+    return () => clearInterval(id);
   }, []);
 
   return {
@@ -141,3 +215,4 @@ export default function useSocket() {
     stats,
   };
 }
+
