@@ -24,7 +24,7 @@
 // ─── CONFIGURATION ──────────────────────────────────────────
 #define WIFI_SSID         "ElderCare"
 #define WIFI_PASSWORD     "ami bolbona"
-#define SERVER_IP         "10.113.44.135"   // Current PC hotspot IP
+#define SERVER_IP         "10.122.37.135"   // Current PC Wi-Fi IP
 #define SERVER_PORT       5050
 
 // Stringify helper for port number in URL macro

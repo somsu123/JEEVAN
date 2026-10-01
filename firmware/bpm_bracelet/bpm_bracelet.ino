@@ -35,7 +35,7 @@
 // ────────────────────────────────────────────────────────────────
 #define WIFI_SSID "ElderCare "
 #define WIFI_PASS "ami bolbona"
-#define SERVER_HOST "10.143.152.135"   // ← Updated: PC Wi-Fi IP (run ipconfig to verify)
+#define SERVER_HOST "10.122.37.135"   // ← Updated: PC Wi-Fi IP (run ipconfig to verify)
 #define SERVER_PORT 3001
 #define SERVER_PATH "/ws/esp32"
 

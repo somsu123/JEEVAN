@@ -20,8 +20,8 @@ netsh advfirewall firewall add rule ^
 echo.
 if %ERRORLEVEL%==0 (
   echo [SUCCESS] Port 3001 is now open for inbound connections!
-  echo  Your PC IP   : 10.143.152.135
-  echo  ESP32 target : ws://10.143.152.135:3001/ws/esp32
+  echo  Your PC IP   : 10.122.37.135
+  echo  ESP32 target : ws://10.122.37.135:3001/ws/esp32
 ) else (
   echo [ERROR] Failed to add rule. Make sure you ran this as Administrator.
 )

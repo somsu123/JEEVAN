@@ -23,7 +23,7 @@ echo ===================================================
 echo   ElderCare System is fully running!
 echo   Dashboard:     http://localhost:5050
 echo   AI Fall Cam:   Active with live Pose Tracking HUD
-echo   Vitals Server: ws://10.113.44.135:3001/ws/esp32
+echo   Vitals Server: ws://10.122.37.135:3001/ws/esp32
 echo   Backend API:   http://localhost:5000
 echo ===================================================
 pause
