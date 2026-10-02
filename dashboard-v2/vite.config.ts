@@ -16,6 +16,9 @@ export default defineConfig(() => {
       },
     },
     server: {
+      fs: {
+        strict: false,
+      },
       hmr: process.env.DISABLE_HMR !== 'true',
       watch: process.env.DISABLE_HMR === 'true' ? null : {
         ignored: ['**/data/**', '**/stitch-designs/**'],

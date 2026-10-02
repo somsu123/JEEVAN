@@ -18,7 +18,7 @@
 - **What it does**: Physical voice assistant device near the elder
   - Press BOOT button → speak a question
   - INMP441 records 4 seconds of audio
-  - Sends WAV to dashboard server → Gemini AI answers
+  - Sends WAV to dashboard server → Local AI (Whisper + Ollama) answers
   - MAX98357 + Speaker plays the response
   - OLED shows: IDLE / LISTENING / THINKING / SPEAKING
 
@@ -103,7 +103,7 @@ INMP441 records 4s audio
        ↓
 WAV bytes → POST /api/voice-assistant/audio (port 5050)
        ↓
-Node server → Gemini 2.5 Flash → text response
+Node server → Local Ollama → text response
        ↓
 { reply: "..." } → ESP32-S3
        ↓

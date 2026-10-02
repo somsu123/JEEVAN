@@ -3,13 +3,56 @@ import path from "path";
 import fs from "fs";
 import os from "os";
 import dotenv from "dotenv";
-import { GoogleGenAI } from "@google/genai";
+import {
+  extractWithVision,
+  generateWithText,
+  isOllamaReady,
+  sanitizeRxMeds,
+  sanitizeScanReport,
+  VISION_MODEL,
+  TEXT_MODEL,
+  LOCAL_AI_ONLY,
+} from "./localAi.js";
+import {
+  preprocessImage,
+  checkImageQuality,
+  classifyDocument,
+  pdfFirstPageToPng,
+} from "./tfPreprocess.js";
+import { transcribeAudio } from "./whisperBridge.js";
 import nodemailer from "nodemailer";
 import twilio from "twilio";
 import { createServer as createViteServer } from "vite";
 import { MongoClient, Db, ObjectId } from "mongodb";
 
 dotenv.config();
+
+const RX_EXTRACTION_PROMPT = `You are a clinical AI assistant.
+Examine this document carefully. Extract ONLY the medicines/drugs prescribed.
+
+Return ONLY a valid JSON array.
+Each item must follow this exact schema:
+[{"name": string, "dosage": string|null, "frequency": string|null, "suggestedTime": "HH:MM", "confidence": "high"|"low"}]
+Rules:
+- name: exact medicine name as written (never empty)
+- dosage: strength and unit if readable (e.g. "10mg"), null if unclear
+- frequency: dosing instructions if readable (e.g. "once daily", "3X a day"), null if unclear
+- suggestedTime: HH:MM from frequency (morning=08:00, noon=13:00, evening=18:00, night=21:00)
+- confidence: "high" if readable, "low" if ambiguous
+- Return [] if no medicines identified`;
+
+const SCAN_EXTRACTION_PROMPT = `You are a clinical AI assistant.
+Examine this clinical document (e.g. blood test, pathology report, discharge summary) carefully.
+Extract a summary of the findings, key metrics, recommended action items, and a medical disclaimer.
+
+Return ONLY a valid JSON object matching this schema:
+{
+  "overview": "A clear, 2-3 sentence summary of the report",
+  "metrics": [{"name": "Metric Name", "value": "Value", "status": "NORMAL|ELEVATED|CONCERNING", "interpretation": "Short explanation"}],
+  "actions": ["Action item 1", "Action item 2"],
+  "doctorQuestions": ["Question 1"],
+  "disclaimer": "Standard disclaimer"
+}`;
 
 // ─── MongoDB Atlas Connection ───────────────────────────────────────────────
 let mongoClient: MongoClient | null = null;
@@ -91,42 +134,20 @@ app.use((_req, res, next) => {
   next();
 });
 
-// ─── Helper to load and clean API Key ─────────────────────────────────────────
-function getCleanApiKey(): string | undefined {
-  try {
-    const envPath = path.join(process.cwd(), ".env");
-    if (fs.existsSync(envPath)) {
-      const envContent = fs.readFileSync(envPath, "utf-8");
-      const match = envContent.match(/^GEMINI_API_KEY\s*=\s*["']?([^"'\r\n]+)["']?/m);
-      if (match && match[1]) {
-        const fileKey = match[1].trim();
-        if (fileKey && fileKey !== "your_gemini_api_key_here") {
-          return fileKey;
-        }
-      }
-    }
-  } catch (e) {
-    console.error("[WARN] Failed to read .env file directly for key:", e);
+
+
+
+// ─── Local AI (Ollama) initialization ────────────────────────────────────────
+console.log(`[AI] LOCAL_AI_ONLY=${LOCAL_AI_ONLY} (Local Ollama + Whisper stack)`);
+isOllamaReady().then((ready) => {
+  if (ready) {
+    console.log("[AI] ✅ Ollama is reachable — local AI stack active.");
+  } else {
+    console.warn("[AI] ⚠️  Ollama is NOT reachable. Please ensure Ollama is running on port 11434.");
   }
-
-  const envKey = process.env.GEMINI_API_KEY;
-  if (!envKey || envKey === "your_gemini_api_key_here") return undefined;
-  return envKey.replace(/^["']|["']$/g, "").trim();
-}
-
-// ─── Gemini SDK ───────────────────────────────────────────────────────────────
-const apiKey = getCleanApiKey();
-let ai: GoogleGenAI | null = null;
-
-if (apiKey) {
-  ai = new GoogleGenAI({
-    apiKey,
-    httpOptions: { headers: { "User-Agent": "eldercare-dashboard-v2" } },
-  });
-  console.log("[INFO] Gemini AI successfully initialized with API key from .env");
-} else {
-  console.warn("[WARN] GEMINI_API_KEY not set — AI features will be disabled.");
-}
+}).catch(() => {
+  console.warn("[AI] ⚠️  Ollama health check failed. Please ensure Ollama is running on port 11434.");
+});
 
 // ─── SSE clients ─────────────────────────────────────────────────────────────
 const sseClients: express.Response[] = [];
@@ -892,7 +913,7 @@ app.get("/api/medicine-state", async (_req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// REPORT SCANNER — Gemini vision analysis + medicine extraction + MongoDB save
+// REPORT SCANNER — Local AI vision analysis + medicine extraction + MongoDB save
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Voice Assistant buffer for checkPendingSpeak
@@ -954,213 +975,164 @@ setInterval(async () => {
 
 app.post("/api/scan-report", async (req, res) => {
   try {
-    const { fileData, mimeType, fileName } = req.body;
+    const { fileData, mimeType, fileName, promptText } = req.body;
+    if (!fileData && !promptText) return res.status(400).json({ error: "Missing fileData (base64 string)" });
 
-    if (!fileData) {
-      return res.status(400).json({ error: "Missing fileData (base64 string)" });
+    if (!(await isOllamaReady())) {
+      return res.status(503).json({ error: "Local AI vision service (Ollama) is not running. Please start Ollama." });
     }
 
-    // Dynamically load the API key from .env directly to pick up updates without restarting
-    dotenv.config({ override: true });
-    const currentApiKey = getCleanApiKey();
-    const activeAi = currentApiKey
-      ? new GoogleGenAI({ apiKey: currentApiKey, httpOptions: { headers: { "User-Agent": "eldercare-dashboard-v2" } } })
-      : null;
+    let raw = "";
+    let parsed: any = null;
+    let usedModel = "";
 
-    if (!activeAi) {
-      return res.status(500).json({
-        error: "Gemini AI is not initialized. Please verify your GEMINI_API_KEY is configured in the Secrets manager.",
-      });
+    // If preset promptText is provided and fileData is small/simulated:
+    if (promptText && (!fileData || fileData.length < 200)) {
+      console.log("[SCAN] Extracting medicines from preset clinical text...");
+      const textPrompt = `You are a medical prescription parser.
+Analyze this clinical text carefully:
+"${promptText}"
+
+Extract all prescribed medicines and drugs.
+Respond ONLY with a valid JSON object matching this exact format:
+{
+  "medicines": [
+    {
+      "name": "Medicine Name",
+      "dosage": "dosage string",
+      "frequency": "frequency string",
+      "suggestedTime": "08:00",
+      "purpose": "instructions or indication if noted"
     }
-
-    // Prepare multi-part content matching @google/genai SDK guidelines
-    const filePart = {
-      inlineData: {
-        mimeType: mimeType || "image/jpeg",
-        data: fileData,
-      },
-    };
-
-    const textPart = {
-      text: `You are an expert senior geriatric healthcare consultant and medical analyst named AI_CARE. 
-      Analyze this clinical report or medical document carefully. 
-      Extract structured data matching the schema perfectly. Keep explanations patient-friendly and geriatric care-focused.`,
-    };
-
-    const response = await activeAi.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: { parts: [filePart, textPart] },
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: "OBJECT",
-          properties: {
-            overview: { type: "STRING", description: "Brief patient-friendly overview of the clinical report and what was analyzed." },
-            metrics: {
-              type: "ARRAY",
-              description: "Extracted key readings or laboratory values with patient-focused status and explanation.",
-              items: {
-                type: "OBJECT",
-                properties: {
-                  name: { type: "STRING", description: "Name of the metric or test, e.g. BP, Hemoglobin, Heart Rate, GFR." },
-                  value: { type: "STRING", description: "The reading value, e.g. 138/84 mmHg, 11.2 g/dL." },
-                  status: { type: "STRING", description: "Geriatric clinical status, e.g. NORMAL, ELEVATED, CONCERNING." },
-                  interpretation: { type: "STRING", description: "Simple, highly reassuring explanation of what this reading means for the patient." }
-                },
-                required: ["name", "value", "status", "interpretation"]
-              }
-            },
-            actions: {
-              type: "ARRAY",
-              description: "List of reassuring action steps and lifestyle tips for the elderly individual.",
-              items: { type: "STRING" }
-            },
-            doctorQuestions: {
-              type: "ARRAY",
-              description: "Practical questions for the patient to bring up with their doctor during their next visit.",
-              items: { type: "STRING" }
-            },
-            disclaimer: { type: "STRING", description: "Empathetic medical disclaimer advising consulting their physician." },
-            medicines: {
-              type: "ARRAY",
-              description: "Extracted daily medications listed in the prescription or note. Extract all of them carefully.",
-              items: {
-                type: "OBJECT",
-                properties: {
-                  name: { type: "STRING", description: "Exact name of the medicine, e.g. Lisinopril, Metformin." },
-                  dosage: { type: "STRING", description: "Dosage detail, e.g. 10mg, 500mg, or leave blank if unspecified." },
-                  times: {
-                    type: "ARRAY",
-                    description: "Specific scheduled times in 24h format HH:MM (e.g. ['08:00', '20:00']). If times are not explicitly specified, map or extrapolate logical daily timings based on instructions (e.g., 'morning' -> ['08:00'], 'twice daily' -> ['08:00', '20:00']). Default to morning ['08:00'] if unspecified.",
-                    items: { type: "STRING" }
-                  },
-                  purpose: { type: "STRING", description: "Brief patient-friendly description of the clinical purpose." }
-                },
-                required: ["name", "times"]
-              }
-            }
-          },
-          required: ["overview", "metrics", "actions", "doctorQuestions", "disclaimer", "medicines"]
+  ],
+  "overview": "Brief note on medicines extracted."
+}
+`;
+      const resText = await generateWithText(textPrompt);
+      raw = resText.text;
+      try { parsed = JSON.parse(raw); } catch { }
+      usedModel = resText.model;
+    } else {
+      // -- Step 1: Decode + PDF rasterise
+      let cleanBase64 = fileData;
+      if (cleanBase64.includes(",")) cleanBase64 = cleanBase64.split(",")[1];
+      let imageBuffer = Buffer.from(cleanBase64, "base64");
+      const isPdf = (mimeType || "").toLowerCase().includes("pdf") || (fileName || "").toLowerCase().endsWith(".pdf");
+      if (isPdf) {
+        console.log("[SCAN] PDF detected -- rasterising first page...");
+        try {
+          imageBuffer = await pdfFirstPageToPng(imageBuffer);
+        } catch (pdfErr: any) {
+          console.warn("[SCAN] PDF rasterisation failed:", pdfErr.message);
         }
       }
-    });
 
-    const responseText = response.text;
-    if (!responseText) {
-      return res.status(500).json({ error: "Failed to generate structured scanner output from Gemini." });
+      // -- Step 2: Quality gate (advisory)
+      try {
+        const quality = await checkImageQuality(imageBuffer);
+        if (!quality.pass) console.warn("[SCAN] Image quality warning:", quality.reason);
+      } catch { }
+
+      // -- Step 3: Sharp preprocessing (auto-orient + normalize contrast)
+      let processedBase64 = cleanBase64;
+      try {
+        const prep = await preprocessImage(imageBuffer);
+        if (prep?.base64) processedBase64 = prep.base64;
+      } catch { }
+
+      // -- Step 4: Vision extraction (Dedicated to medicines)
+      console.log("[SCAN] Extracting medicines from document using Ollama Vision...");
+      const resScan = await extractWithVision(processedBase64, SCAN_EXTRACTION_PROMPT);
+      raw = resScan.raw;
+      parsed = resScan.parsed;
+      usedModel = resScan.model;
     }
 
-    // Parse the structured schema from Gemini
-    let schemaData;
-    try {
-      schemaData = JSON.parse(responseText);
-    } catch (parseErr) {
-      console.warn("[WARN] Gemini did not return valid JSON. Falling back to plain text parsing.", parseErr);
-      schemaData = {
-        overview: responseText,
-        metrics: [],
-        actions: [],
-        doctorQuestions: [],
-        disclaimer: "Disclaimer: Always consult with a doctor.",
-        medicines: []
-      };
-    }
+    if (!parsed && !raw) return res.status(500).json({ error: "Vision model returned empty response." });
 
-    // Construct a beautiful markdown summary out of the structured schema fields for backward-compatible rendering
-    const overviewSection = `## Document Overview\n${schemaData.overview || "No overview available."}\n\n`;
+    // -- Step 5: Sanitise into Schema-B focusing strictly on medicines
+    const schemaData = sanitizeScanReport(parsed ?? raw);
+    console.log(`[SCAN] Extracted via ${usedModel}: ${schemaData.medicines.length} medicines`);
 
-    let metricsSection = `## Key Metrics & Readings\n`;
-    if (Array.isArray(schemaData.metrics) && schemaData.metrics.length > 0) {
+    // -- Step 6: Build markdown clinical summary
+    let summaryText = `## AI Clinical Summary\n${schemaData.overview || "Document scan complete."}\n`;
+    
+    if (schemaData.metrics && schemaData.metrics.length > 0) {
+      summaryText += `\n## Full OCR Test Report\n`;
       schemaData.metrics.forEach((m: any) => {
-        metricsSection += `* **${m.name}**: ${m.value} (${m.status}) — *${m.interpretation}*\n`;
+        summaryText += `* **${m.name}**: ${m.value} (${m.status}) — *${m.interpretation}*\n`;
       });
-    } else {
-      metricsSection += `* No critical metrics recorded.\n`;
     }
-    metricsSection += `\n`;
-
-    let medicinesSection = `## Prescribed Medications\n`;
-    if (Array.isArray(schemaData.medicines) && schemaData.medicines.length > 0) {
-      schemaData.medicines.forEach((m: any) => {
-        const timeList = Array.isArray(m.times) ? m.times.join(", ") : "";
-        const timeStr = timeList ? ` at ${timeList}` : "";
-        const purposeStr = m.purpose ? ` — *${m.purpose}*` : "";
-        medicinesSection += `* **${m.name}**${m.dosage ? ` (${m.dosage})` : ""}${timeStr}${purposeStr}\n`;
-      });
-    } else {
-      medicinesSection += `* No medications extracted from prescription.\n`;
+    if (schemaData.actions && schemaData.actions.length > 0) {
+      summaryText += `\n## Action Items\n`;
+      schemaData.actions.forEach((a: string) => { summaryText += `* ${a}\n`; });
     }
-    medicinesSection += `\n`;
+    summaryText += `\n## Medical Disclaimer\n${schemaData.disclaimer}\n`;
 
-    let actionsSection = `## Action Items & Lifestyle Recommendations\n`;
-    if (Array.isArray(schemaData.actions) && schemaData.actions.length > 0) {
-      schemaData.actions.forEach((a: string) => {
-        actionsSection += `* ${a}\n`;
-      });
-    } else {
-      actionsSection += `* Continue current daily routine as advised.\n`;
-    }
-    actionsSection += `\n`;
-
-    let questionsSection = `## Questions to Ask your Doctor\n`;
-    if (Array.isArray(schemaData.doctorQuestions) && schemaData.doctorQuestions.length > 0) {
-      schemaData.doctorQuestions.forEach((q: string) => {
-        questionsSection += `* ${q}\n`;
-      });
-    } else {
-      questionsSection += `* Ask if any medications require routine lab tests.\n`;
-    }
-    questionsSection += `\n`;
-
-    const disclaimerSection = `## Medical Disclaimer\n${schemaData.disclaimer || "Consult your physician for personalized medical advice."}`;
-
-    const summaryText = overviewSection + metricsSection + medicinesSection + actionsSection + questionsSection + disclaimerSection;
-
-    // Automatically save the scanned report AND the raw extracted schema fields to MongoDB Atlas via Flask
+    // -- Step 7: Persist to MongoDB + SSE
     try {
-      const scanDate = new Date().toLocaleTimeString("en-US", { hour12: false }) + " — " + new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-      saveReportLocally({
-        fileName: fileName || "unnamed document",
-        summary: summaryText,
-        scanDate,
-        overview: schemaData.overview,
-        metrics: schemaData.metrics,
-        actions: schemaData.actions,
-        doctorQuestions: schemaData.doctorQuestions,
-        disclaimer: schemaData.disclaimer
-      });
-      if (schemaData.medicines && schemaData.medicines.length > 0) {
-        saveMedicinesLocally(schemaData.medicines);
+      const scanDate = new Date().toLocaleTimeString("en-US", { hour12: false }) + " -- " + new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+      saveReportLocally({ fileName: fileName || "unnamed document", summary: summaryText, scanDate, medicines: schemaData.medicines, overview: schemaData.overview });
+      if (schemaData.medicines && schemaData.medicines.length > 0) saveMedicinesLocally(schemaData.medicines);
+      logEventLocally("scan", `Prescription report scanned: ${schemaData.medicines.length} medicines extracted`, "info");
+      await flaskPost("/api/reports/save", { fileName: fileName || "unnamed document", summary: summaryText, scanDate, medicines: schemaData.medicines || [] });
+      if (mongoDb) {
+        await mongoDb.collection("scanned_reports").insertOne({
+          fileName: fileName || "unnamed document",
+          scanDate: new Date(),
+          summaryText,
+          schemaData,
+          usedModel
+        });
       }
-      logEventLocally("scan", `Prescription report '${fileName}' scanned successfully`, "info");
+      console.log(`[DB] Scanned report saved to MongoDB.`);
+      if (schemaData.medicines && schemaData.medicines.length > 0) broadcastSSE("medicines_extracted", { medicines: schemaData.medicines, source: "scan" });
+    } catch (dbErr: any) { console.error("[WARN] Failed to save scanned report:", dbErr?.message); }
 
-      await flaskPost("/api/reports/save", {
-        fileName: fileName || "unnamed document",
-        summary: summaryText,
-        scanDate,
-        medicines: schemaData.medicines || [],
-        overview: schemaData.overview,
-        metrics: schemaData.metrics,
-        actions: schemaData.actions,
-        doctorQuestions: schemaData.doctorQuestions,
-        disclaimer: schemaData.disclaimer
-      });
-      console.log(`[DB] Scanned report '${fileName}' saved to database successfully with full structured schema.`);
+    // -- Step 6b: Extract structured Rx fields from raw parsed (new schema)
+    const rawParsedScan = (parsed && typeof parsed === "object") ? parsed as Record<string, any> : {};
+    const hwQuality: string = rawParsedScan.handwriting_quality || "legible";
+    const langDetected: string = rawParsedScan.language_detected || "en";
+    const uncertainItemsList: string[] = Array.isArray(rawParsedScan.uncertain_items) ? rawParsedScan.uncertain_items : [];
 
-      // Broadcast extracted medicines to dashboard UI via SSE
-      if (schemaData.medicines && schemaData.medicines.length > 0) {
-        broadcastSSE("medicines_extracted", { medicines: schemaData.medicines, source: "scan" });
-      }
-    } catch (dbErr: any) {
-      console.error("[WARN] Failed to automatically save scanned report schema to database:", dbErr?.message);
-    }
-
-    return res.json({ success: true, summary: summaryText });
-  } catch (error: any) {
-    console.error("Gemini Scan Error:", error);
-    return res.status(500).json({
-      error: error?.message || "Internal server error occurred while scanning with Gemini.",
+    // Enrich medicines with structured fields from the new schema
+    const enrichedMeds = schemaData.medicines.map((m: any, i: number) => {
+      const rawMed = Array.isArray(rawParsedScan.medicines) ? rawParsedScan.medicines[i] : null;
+      return {
+        ...m,
+        name_as_written: rawMed?.name_as_written || m.name,
+        normalized_name: rawMed?.normalized_name || m.name,
+        form: rawMed?.form || "unknown",
+        strength: rawMed?.strength || m.dosage || null,
+        dosage: rawMed?.dosage || null,
+        frequency_raw: rawMed?.frequency_raw || m.frequency || m.purpose || "",
+        timings: rawMed?.timings || {
+          morning: null, afternoon: null, night: null,
+          before_food: null, after_food: null, duration_days: null,
+        },
+        source_line: rawMed?.source_line || i + 1,
+        confidence: typeof rawMed?.confidence === "number" ? rawMed.confidence : 0.85,
+        confidence_reason: rawMed?.confidence_reason || "Extracted from document",
+        illegible_fields: Array.isArray(rawMed?.illegible_fields) ? rawMed.illegible_fields : [],
+        suggestedTime: m.times?.[0] || rawMed?.suggestedTime || "08:00",
+        frequency: rawMed?.frequency_raw || m.frequency || "",
+      };
     });
+
+    return res.json({
+      success: true,
+      summary: summaryText,
+      medicines: enrichedMeds,
+      handwriting_quality: hwQuality,
+      language_detected: langDetected,
+      uncertain_items: uncertainItemsList,
+      overview: schemaData.overview,
+      actions: schemaData.actions,
+      disclaimer: schemaData.disclaimer,
+    });
+  } catch (error: any) {
+    console.error("[SCAN] Local AI Scan Error:", error);
+    return res.status(500).json({ error: error?.message || "Internal server error with local AI." });
   }
 });
 
@@ -1525,7 +1497,7 @@ app.post("/api/assistant/heartbeat", (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AI DICTATOR — Gemini-powered clinical summary (PC-native, no Pi/Ollama needed)
+// AI DICTATOR — Local AI clinical summary (Ollama text model)
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ── Local File Persistence Helpers for Robust Fallback ─────────────────────────
@@ -1543,6 +1515,16 @@ function saveBpmLocally(bpm: number) {
     fs.writeFileSync(filePath, JSON.stringify(list, null, 2), "utf-8");
   } catch (err: any) {
     console.error("Failed to write local bpm file:", err.message);
+  }
+
+  // Also permanently save to MongoDB vitals_log schema folder
+  if (fireReady() && mongoDb) {
+    mongoDb.collection("vitals_log").insertOne({
+      type: "heart_rate",
+      bpm,
+      timestamp: new Date().toISOString(),
+      date: new Date().toLocaleDateString("en-US")
+    }).catch(err => console.error("[MongoDB] Failed to log vital:", err.message));
   }
 }
 
@@ -1774,7 +1756,7 @@ async function buildPatientSnapshot() {
   };
 }
 
-/** Helper: build the Gemini clinical summary prompt */
+/** Helper: build the clinical summary prompt */
 function buildDictatorPrompt(snap: Awaited<ReturnType<typeof buildPatientSnapshot>>): string {
   const { analytics, medicines, reports, events } = snap;
 
@@ -1815,51 +1797,18 @@ RECENT SYSTEM EVENTS: ${recentEvents}
 Provide the verbal clinical briefing now. Begin with "Doctor," and end with a recommendation for the physician's attention.`;
 }
 
-// POST /api/ai-dictator/trigger — Gemini-powered clinical summary (PC-native)
+// POST /api/ai-dictator/trigger — Local AI clinical summary (Ollama text model)
 app.post("/api/ai-dictator/trigger", async (_req, res) => {
   try {
-    // Reload API key dynamically to pick up .env changes without restart
-    dotenv.config({ override: true });
-    const currentApiKey = getCleanApiKey();
-    const activeAi = currentApiKey
-      ? new GoogleGenAI({ apiKey: currentApiKey, httpOptions: { headers: { "User-Agent": "eldercare-dashboard-v2" } } })
-      : null;
-
-    if (!activeAi) {
-      return res.status(500).json({
-        error: "Gemini AI is not initialized. Please set GEMINI_API_KEY in the .env file.",
-      });
-    }
-
-    console.log("[DICTATOR] Compiling clinical patient data from MongoDB...");
-
-    // 1. Gather all patient data
+    if (!(await isOllamaReady())) return res.status(503).json({ error: "Local AI (Ollama) not running." });
+    console.log("[DICTATOR] Compiling patient data from MongoDB...");
     const snap = await buildPatientSnapshot();
-
-    // 2. Build prompt and call Gemini
     const prompt = buildDictatorPrompt(snap);
-    console.log("[DICTATOR] Sending data to Gemini for clinical summary generation...");
-
-    const response = await activeAi.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: prompt,
-      config: { temperature: 0.3 },
-    });
-
-    const summary = (response.text || "").trim();
-    if (!summary) {
-      throw new Error("Gemini returned an empty summary.");
-    }
-
-    console.log("[DICTATOR] Clinical summary generated successfully.");
-    console.log("[DICTATOR] Summary preview:", summary.slice(0, 120) + "...");
-
-    return res.json({
-      success: true,
-      summary,
-      patientName: "Somsubhro",
-      analytics: snap.analytics,
-    });
+    console.log("[DICTATOR] Sending to Ollama text model...");
+    const { text: summary, model: usedModel } = await generateWithText(prompt);
+    if (!summary) throw new Error("Ollama returned an empty summary.");
+    console.log(`[DICTATOR] Summary via ${usedModel}: ${summary.slice(0, 120)}...`);
+    return res.json({ success: true, summary, patientName: "Somsubhro", analytics: snap.analytics });
   } catch (err: any) {
     console.error("[DICTATOR] Summary generation failed:", err.message);
     return res.status(500).json({ error: `AI Dictator failed: ${err.message}` });
@@ -1870,67 +1819,40 @@ app.post("/api/ai-dictator/trigger", async (_req, res) => {
 app.post("/api/ai-dictator/ask", async (req, res) => {
   try {
     const { question } = req.body as { question: string };
-    if (!question?.trim()) {
-      return res.status(400).json({ error: "question is required" });
-    }
+    if (!question?.trim()) return res.status(400).json({ error: "question is required" });
+    if (!(await isOllamaReady())) return res.status(503).json({ error: "Local AI (Ollama) not running." });
 
-    dotenv.config({ override: true });
-    const currentApiKey = getCleanApiKey();
-    const activeAi = currentApiKey
-      ? new GoogleGenAI({ apiKey: currentApiKey, httpOptions: { headers: { "User-Agent": "eldercare-dashboard-v2" } } })
-      : null;
-
-    if (!activeAi) {
-      return res.status(500).json({ error: "Gemini AI not initialized." });
-    }
-
-    // Fetch fresh patient data to ground the answer
     const snap = await buildPatientSnapshot();
     const { analytics, medicines, reports, events } = snap;
-
     const medLines = medicines.length
-      ? medicines.map((m: any) => `${m.name} ${m.dosage || ""} — ${m.purpose || "purpose unknown"}`).join("; ")
+      ? medicines.map((m: any) => `${m.name} ${m.dosage || ""} -- ${m.purpose || "purpose unknown"}`).join("; ")
       : "None on record.";
+    const recentReportSummaries = reports.slice(0, 5).map((r: any) => `${r.fileName} (${r.scanDate || "?"}): ${(r.overview || r.summary || "").slice(0, 300)}`).join("\n");
+    const recentEvents = events.slice(0, 10).map((e: any) => `[${e.type}] ${e.message}`).join("; ");
 
-    const recentReportSummaries = reports
-      .slice(0, 5)
-      .map((r: any) => `${r.fileName} (${r.scanDate || "?"}): ${(r.overview || r.summary || "").slice(0, 300)}`)
-      .join("\n");
-
-    const recentEvents = events
-      .slice(0, 10)
-      .map((e: any) => `[${e.type}] ${e.message}`)
-      .join("; ");
-
-    const qaPrompt = `You are Mitra, a clinical AI assistant for the ElderCare monitoring system. A physician is asking you a question about patient Somsubhro (Age 82). Answer ONLY using the patient data provided below. If the answer is not found in the data, say exactly: "Information not available in patient records." Keep your answer concise (2–4 sentences), factual, and professional.
+    const qaPrompt = `You are Mitra, a clinical AI for ElderCare. A physician is asking about patient Somsubhro (Age 82).
+Answer ONLY from the patient data below. If unavailable, say: "Information not available in patient records." 2-4 sentences, factual, professional.
 
 PATIENT DATA:
-Heart Rate: Average ${analytics.avgBpm ?? "N/A"} BPM, Max ${analytics.maxBpm ?? "N/A"}, Min ${analytics.minBpm ?? "N/A"}. Abnormal readings: ${analytics.abnormalBpmCount}.
-Falls (last 30 days): ${analytics.recentFalls30Days}. Total recorded: ${analytics.totalFalls}. Active unresolved: ${analytics.activeFalls}.
+Heart Rate: Avg ${analytics.avgBpm ?? "N/A"} BPM, Max ${analytics.maxBpm ?? "N/A"}, Min ${analytics.minBpm ?? "N/A"}. Abnormal: ${analytics.abnormalBpmCount}.
+Falls (last 30d): ${analytics.recentFalls30Days}. Total: ${analytics.totalFalls}. Active: ${analytics.activeFalls}.
 Medications: ${medLines}
-Recent Lab Reports:
-${recentReportSummaries || "No reports available."}
-Recent System Events: ${recentEvents || "None."}
+Recent Reports:\n${recentReportSummaries || "No reports."}
+Recent Events: ${recentEvents || "None."}
 
-DOCTOR'S QUESTION: ${question.trim()}
+QUESTION: ${question.trim()}
 
 Answer:`;
 
-    const response = await activeAi.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: qaPrompt,
-      config: { temperature: 0.2 },
-    });
-
-    const answer = (response.text || "").trim() || "Information not available in patient records.";
-    return res.json({ success: true, answer });
+    const { text: answer, model: usedModel } = await generateWithText(qaPrompt);
+    console.log(`[DICTATOR/ASK] Answered via ${usedModel}`);
+    return res.json({ success: true, answer: answer || "Information not available in patient records." });
   } catch (err: any) {
     console.error("[DICTATOR/ASK] Q&A failed:", err.message);
     return res.status(500).json({ error: `Q&A failed: ${err.message}` });
   }
 });
 
-// ── POST /api/hardware/medbox-event (duplicate route — fully MongoDB-backed) ──
 app.post("/api/hardware/medbox-event", async (req, res) => {
   const { event, box, medicine, timestamp, deviceId, dosage } = req.body as {
     event: "DOSE_TAKEN" | "DOSE_MISSED";
@@ -2105,30 +2027,48 @@ if (process.env.VITE_HARDWARE_MODE === "simulated") {
 // ── ESP32 config ──────────────────────────────────────────────────────────────
 const ESP32_BASE_URL = (process.env.ESP32_BASE_URL || "").replace(/\/$/, "");
 
-// ─── Firestore helpers: new collections ──────────────────────────────────────
+// ─── Resilient in-memory fallback store for offline/local development ─────────
+const inMemoryPrescriptions: any[] = [];
+const inMemoryPendingChanges: any[] = [];
+const inMemoryScheduleCache: any[] = [];
 
 // prescriptions — raw OCR + parsed result per upload
 async function savePrescription(doc: object): Promise<string> {
-  if (!fireReady()) return `local-${Date.now()}`;
-  const res = await mongoDb!.collection("prescriptions").insertOne({
+  const item = {
     ...doc,
     uploadedAt: new Date().toISOString()
-  });
-  return res.insertedId.toString();
+  };
+  if (fireReady()) {
+    try {
+      const res = await mongoDb!.collection("prescriptions").insertOne(item);
+      const id = res.insertedId.toString();
+      inMemoryPrescriptions.unshift({ id, ...item });
+      return id;
+    } catch (err: any) {
+      console.warn("[RX] Mongo savePrescription failed, storing in memory:", err.message);
+    }
+  }
+  const id = `local-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  inMemoryPrescriptions.unshift({ id, ...item });
+  return id;
 }
 
 async function getPrescriptions(limit = 20): Promise<any[]> {
-  if (!fireReady()) return [];
-  try {
-    const docs = await mongoDb!.collection("prescriptions").find({}).sort({ uploadedAt: -1 }).limit(limit).toArray();
-    return docs.map((d: any) => {
-      const { _id, ...rest } = d;
-      return { id: _id.toString(), ...rest };
-    });
-  } catch { return []; }
+  if (fireReady()) {
+    try {
+      const docs = await mongoDb!.collection("prescriptions").find({}).sort({ uploadedAt: -1 }).limit(limit).toArray();
+      return docs.map((d: any) => {
+        const { _id, ...rest } = d;
+        return { id: _id.toString(), ...rest };
+      });
+    } catch { }
+  }
+  return inMemoryPrescriptions.slice(0, limit);
 }
 
 async function updatePrescriptionStatus(id: string, status: string): Promise<void> {
+  const p = inMemoryPrescriptions.find(x => x.id === id);
+  if (p) p.status = status;
   if (!fireReady()) return;
   try {
     await mongoDb!.collection("prescriptions").updateOne(
@@ -2140,29 +2080,44 @@ async function updatePrescriptionStatus(id: string, status: string): Promise<voi
 
 // pending_changes — one row per proposed compartment change
 async function savePendingChange(doc: object): Promise<string> {
-  if (!fireReady()) return `local-${Date.now()}`;
-  const res = await mongoDb!.collection("pending_changes").insertOne({
+  const item = {
     ...doc,
     createdAt: new Date().toISOString(),
     status: "pending"
-  });
-  return res.insertedId.toString();
+  };
+  if (fireReady()) {
+    try {
+      const res = await mongoDb!.collection("pending_changes").insertOne(item);
+      const id = res.insertedId.toString();
+      inMemoryPendingChanges.unshift({ id, ...item });
+      return id;
+    } catch (err: any) {
+      console.warn("[RX] Mongo savePendingChange failed, storing in memory:", err.message);
+    }
+  }
+  const id = `local-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  inMemoryPendingChanges.unshift({ id, ...item });
+  return id;
 }
 
 async function getPendingChanges(statusFilter?: string): Promise<any[]> {
-  if (!fireReady()) return [];
-  try {
-    const query: any = {};
-    if (statusFilter) query.status = statusFilter;
-    const docs = await mongoDb!.collection("pending_changes").find(query).sort({ createdAt: -1 }).toArray();
-    return docs.map((d: any) => {
-      const { _id, ...rest } = d;
-      return { id: _id.toString(), ...rest };
-    });
-  } catch { return []; }
+  if (fireReady()) {
+    try {
+      const query: any = {};
+      if (statusFilter) query.status = statusFilter;
+      const docs = await mongoDb!.collection("pending_changes").find(query).sort({ createdAt: -1 }).toArray();
+      return docs.map((d: any) => {
+        const { _id, ...rest } = d;
+        return { id: _id.toString(), ...rest };
+      });
+    } catch { }
+  }
+  return statusFilter ? inMemoryPendingChanges.filter(x => x.status === statusFilter) : [...inMemoryPendingChanges];
 }
 
 async function updatePendingChange(id: string, fields: object): Promise<void> {
+  const pc = inMemoryPendingChanges.find(x => x.id === id);
+  if (pc) Object.assign(pc, fields);
   if (!fireReady()) return;
   try {
     await mongoDb!.collection("pending_changes").updateOne(
@@ -2173,13 +2128,16 @@ async function updatePendingChange(id: string, fields: object): Promise<void> {
 }
 
 async function getPendingChangeById(id: string): Promise<any | null> {
-  if (!fireReady()) return null;
-  try {
-    const doc = await mongoDb!.collection("pending_changes").findOne({ _id: new ObjectId(id) });
-    if (!doc) return null;
-    const { _id, ...rest } = doc;
-    return { id: _id.toString(), ...rest };
-  } catch { return null; }
+  if (fireReady()) {
+    try {
+      const doc = await mongoDb!.collection("pending_changes").findOne({ _id: new ObjectId(id) });
+      if (doc) {
+        const { _id, ...rest } = doc;
+        return { id: _id.toString(), ...rest };
+      }
+    } catch { }
+  }
+  return inMemoryPendingChanges.find(x => x.id === id) || null;
 }
 
 // dose_events — history/adherence log, built from polling givenToday
@@ -2206,17 +2164,21 @@ async function getDoseEvents(limit = 100): Promise<any[]> {
 
 // schedule_cache — last known ESP32 schedule state (refreshed each poll)
 async function readScheduleCache(): Promise<any[]> {
-  if (!fireReady()) return [];
-  try {
-    const docs = await mongoDb!.collection("schedule_cache").find({}).sort({ compartment: 1 }).toArray();
-    return docs.map((d: any) => {
-      const { _id, ...rest } = d;
-      return { id: _id.toString(), ...rest };
-    });
-  } catch { return []; }
+  if (fireReady()) {
+    try {
+      const docs = await mongoDb!.collection("schedule_cache").find({}).sort({ compartment: 1 }).toArray();
+      return docs.map((d: any) => {
+        const { _id, ...rest } = d;
+        return { id: _id.toString(), ...rest };
+      });
+    } catch { }
+  }
+  return [...inMemoryScheduleCache];
 }
 
 async function writeScheduleCache(entries: any[]): Promise<void> {
+  inMemoryScheduleCache.length = 0;
+  inMemoryScheduleCache.push(...entries);
   if (!fireReady()) return;
   try {
     const col = mongoDb!.collection("schedule_cache");
@@ -2402,129 +2364,148 @@ app.get("/api/bpm/history", async (req, res) => {
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
-// RX UPLOAD — Prescription OCR + Gemini Extraction
+// RX UPLOAD — Prescription OCR + Local AI Vision Extraction
 // ═════════════════════════════════════════════════════════════════════════════
 
-// POST /api/rx/upload — upload prescription image, extract medicines, generate pending_changes
+// POST /api/rx/upload — upload prescription image or text, extract medicines, generate pending_changes
 app.post("/api/rx/upload", async (req, res) => {
   try {
-    const { fileData, mimeType, fileName } = req.body as {
-      fileData: string;
+    const { fileData, mimeType, fileName, promptText } = req.body as {
+      fileData?: string;
       mimeType?: string;
       fileName?: string;
+      promptText?: string;
     };
 
-    if (!fileData) return res.status(400).json({ error: "fileData (base64) is required" });
-
-    dotenv.config({ override: true });
-    const currentApiKey = getCleanApiKey();
-    const activeAi = currentApiKey
-      ? new GoogleGenAI({ apiKey: currentApiKey, httpOptions: { headers: { "User-Agent": "eldercare-dashboard-v2" } } })
-      : null;
-
-    if (!activeAi) {
-      return res.status(500).json({ error: "Gemini AI not initialized — set GEMINI_API_KEY in .env" });
-    }
+    if (!fileData && !promptText) return res.status(400).json({ error: "fileData (base64) or promptText is required" });
 
     console.log(`[RX] Processing prescription upload: ${fileName || "unnamed"}`);
 
-    // ── Step 1: Gemini Vision — OCR + strict JSON extraction in one pass ─────
-    const extractionPrompt = `You are a prescription digitizer for a medical device system.
-Examine this prescription image carefully. Extract ONLY the medicines/drugs listed.
-
-Return ONLY a valid JSON array — no markdown, no extra text, no explanation.
-Each item must follow this exact schema:
-{"name": string, "dosage": string|null, "frequency": string|null, "suggestedTime": "HH:MM", "confidence": "high"|"low"}
-
-Rules:
-- name: exact medicine name as written (required)
-- dosage: strength and unit if readable (e.g. "10mg", "500mg twice"), null if unclear
-- frequency: dosing instructions if readable (e.g. "once daily", "twice a day"), null if unclear
-- suggestedTime: best-guess 24h time based on frequency (morning=08:00, noon=13:00, evening=18:00, night=21:00). If frequency implies multiple times, use the first.
-- confidence: "high" if you can read the text clearly, "low" if the handwriting/print is ambiguous
-- If a field is unclear, mark confidence "low" and set that field to null — do NOT guess
-- Return [] if no medicines can be read`;
-
-    let extractedMeds: any[] = [];
-    let ocrText = "";
-
-    try {
-      const response = await activeAi.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: [
-          { inlineData: { mimeType: mimeType || "image/jpeg", data: fileData } },
-          { text: extractionPrompt },
-        ],
-        config: {
-          temperature: 0.1,
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: "ARRAY",
-            items: {
-              type: "OBJECT",
-              properties: {
-                name: { type: "STRING" },
-                dosage: { type: "STRING" },
-                frequency: { type: "STRING" },
-                suggestedTime: { type: "STRING" },
-                confidence: { type: "STRING", enum: ["high", "low"] }
-              },
-              required: ["name", "suggestedTime", "confidence"]
-            }
-          }
-        },
-      });
-
-      const rawText = (response.text || "").trim();
-      ocrText = rawText;
-
-      const parsed = JSON.parse(rawText);
-      if (!Array.isArray(parsed)) throw new Error("Gemini returned a non-array response");
-
-      // Schema-validate each item
-      extractedMeds = parsed.map((m: any) => ({
-        name: String(m.name || "").trim(),
-        dosage: m.dosage ? String(m.dosage).trim() : null,
-        frequency: m.frequency ? String(m.frequency).trim() : null,
-        suggestedTime: /^\d{2}:\d{2}$/.test(m.suggestedTime) ? m.suggestedTime : "08:00",
-        confidence: m.confidence === "low" ? "low" : "high",
-      })).filter((m: any) => m.name.length > 0);
-
-    } catch (parseErr: any) {
-      console.error("[RX] Gemini extraction parse error:", parseErr.message);
-      return res.status(422).json({
-        error: "Extraction failed — Gemini did not return valid JSON. Raw output saved. Please try a clearer image.",
-        ocrText,
+    if (!(await isOllamaReady())) {
+      return res.status(503).json({
+        error: "Local AI vision service (Ollama) is not running. Please start Ollama.",
       });
     }
 
-    console.log(`[RX] Extracted ${extractedMeds.length} medicines from prescription`);
+    let extractedMeds: any[] = [];
+    let ocrText = "";
+    let usedModel = "";
 
-    // ── Step 2: Store prescription to Firestore ───────────────────────────────
+    if (promptText && (!fileData || fileData.length < 500)) {
+      console.log("[RX] Extracting medicines from text prompt via Ollama LLM...");
+      const textPrompt = `You are an expert clinical prescription digitizer.
+Analyze this medical prescription text carefully:
+"${promptText}"
+
+EXTRACT ONLY PRESCRIBED MEDICINES AND DRUGS.
+Return ONLY a valid JSON object matching this exact schema:
+{
+  "medicines": [
+    {
+      "name": "Medicine Name",
+      "dosage": "500mg",
+      "frequency": "twice daily",
+      "suggestedTime": "08:00",
+      "confidence": "high",
+      "purpose": "instructions or indication"
+    }
+  ]
+}
+
+Rules:
+- name: Exact medicine name (required)
+- dosage: Strength and unit if present, or null
+- frequency: Schedule if present, or null
+- suggestedTime: HH:MM 24-hour format (e.g. "08:00" for OD/BD/morning, "13:00" for noon, "18:00" for evening, "21:00" for HS/bedtime/night)
+- confidence: "high"
+- purpose: Directions or indications
+`;
+      const resText = await generateWithText(textPrompt);
+      ocrText = resText.text;
+      usedModel = resText.model;
+      try {
+        const parsed = JSON.parse(ocrText);
+        extractedMeds = sanitizeRxMeds(parsed);
+      } catch {
+        extractedMeds = sanitizeRxMeds(ocrText);
+      }
+    } else if (fileData) {
+      // -- Step 1a: Decode + quality gate + TF.js preprocess
+      let cleanBase64 = fileData;
+      if (cleanBase64.includes(",")) cleanBase64 = cleanBase64.split(",")[1];
+      let imageBuffer = Buffer.from(cleanBase64, "base64");
+      const isPdf = (mimeType || "").toLowerCase().includes("pdf") || (fileName || "").toLowerCase().endsWith(".pdf");
+      if (isPdf) {
+        console.log("[RX] PDF detected -- rasterising first page...");
+        try {
+          imageBuffer = await pdfFirstPageToPng(imageBuffer);
+        } catch (pdfErr: any) {
+          console.warn("[RX] PDF rasterisation failed:", pdfErr.message);
+        }
+      }
+
+      try {
+        const quality = await checkImageQuality(imageBuffer);
+        if (!quality.pass) {
+          console.warn("[RX] Image quality warning:", quality.reason);
+        }
+      } catch (qErr: any) {
+        console.warn("[RX] Quality check skipped:", qErr.message);
+      }
+
+      let processedBase64 = cleanBase64;
+      try {
+        const prep = await preprocessImage(imageBuffer);
+        if (prep?.base64) {
+          processedBase64 = prep.base64;
+        }
+      } catch (prepErr: any) {
+        console.warn("[RX] Preprocessing fallback to raw base64:", prepErr.message);
+      }
+
+      try {
+        console.log("[RX] Using local Ollama vision extraction...");
+        const { raw, parsed, model: mdl } = await extractWithVision(processedBase64, RX_EXTRACTION_PROMPT);
+        ocrText = raw;
+        usedModel = mdl;
+        extractedMeds = sanitizeRxMeds(parsed);
+        if (extractedMeds.length === 0 && raw) {
+          try { extractedMeds = sanitizeRxMeds(JSON.parse(raw)); } catch { }
+        }
+      } catch (ollamaErr: any) {
+        console.error("[RX] Ollama extraction error:", ollamaErr.message);
+        return res.status(422).json({
+          error: `Extraction failed: ${ollamaErr.message}. Please try again with a clearer image.`,
+          ocrText,
+        });
+      }
+    }
+
+    console.log(`[RX] Extracted ${extractedMeds.length} medicines via ${usedModel}`);
+
+    // -- Step 2: Store prescription to MongoDB (UNCHANGED)
     const prescriptionId = await savePrescription({
       fileName: fileName || "unnamed",
       ocrText,
       extractedMeds,
-      llmModel: "gemini-2.5-flash",
+      llmModel: usedModel || "ollama-vision",
       status: "pending_review",
     });
 
-    // ── Step 3: Diff extracted vs. current ESP32 schedule cache ──────────────
+    // -- Step 3: Diff vs. ESP32 schedule cache
     const cacheEntries = await readScheduleCache();
-
-    // Build a pending_change for each extracted medicine that differs from current box state
     const pendingChanges: any[] = [];
     for (let i = 0; i < Math.min(extractedMeds.length, 4); i++) {
       const med = extractedMeds[i];
       const cacheEntry = cacheEntries.find(c => c.compartment === i) || null;
       const currentLabel = cacheEntry ? cacheEntry.label : "(empty)";
-      const [propH, propM] = med.suggestedTime.split(":").map(Number);
-
+      const timeParts = (med.suggestedTime || "08:00").split(":");
+      const propH = parseInt(timeParts[0], 10) || 8;
+      const propM = parseInt(timeParts[1], 10) || 0;
       const proposedLabel = med.dosage ? `${med.name} - ${med.dosage}` : med.name;
       const isDifferent = !cacheEntry || cacheEntry.label !== proposedLabel;
-
       if (isDifferent) {
-        const changeId = await savePendingChange({
+        const changeDoc = {
           prescriptionId,
           compartment: i,
           currentLabel,
@@ -2533,20 +2514,17 @@ Rules:
           proposedMinute: propM,
           extractedMed: med,
           reloadConfirmed: false,
-        });
-        pendingChanges.push({ id: changeId, compartment: i, currentLabel, proposedLabel, confidence: med.confidence });
+          status: "pending" as const,
+          createdAt: new Date().toISOString(),
+        };
+        const changeId = await savePendingChange(changeDoc);
+        pendingChanges.push({ id: changeId, ...changeDoc, confidence: med.confidence });
       }
     }
 
     broadcastSSE("rx_upload_done", { prescriptionId, extractedMeds, pendingChanges });
-    logEventLocally("rx", `Prescription '${fileName}' uploaded — ${extractedMeds.length} medicines extracted, ${pendingChanges.length} changes pending`, "info");
-
-    return res.json({
-      success: true,
-      prescriptionId,
-      extractedMeds,
-      pendingChanges,
-    });
+    logEventLocally("rx", `Prescription uploaded -- ${extractedMeds.length} medicines extracted, ${pendingChanges.length} changes pending`, "info");
+    return res.json({ success: true, prescriptionId, extractedMeds, pendingChanges, ocrText });
 
   } catch (err: any) {
     console.error("[RX] Upload error:", err.message);
@@ -2554,7 +2532,7 @@ Rules:
   }
 });
 
-// ─── GET /api/rx/prescriptions ────────────────────────────────────────────────
+// ─── GET /api/rx/prescriptions ──────────────────────────────────────────────────────────────
 app.get("/api/rx/prescriptions", async (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 20, 50);
   const prescriptions = await getPrescriptions(limit);
@@ -2858,58 +2836,44 @@ app.post("/api/voice-assistant/audio", async (req, res) => {
   req.on("end", async () => {
     try {
       const audioBuffer = Buffer.concat(chunks);
-      if (audioBuffer.length === 0) {
-        return res.status(400).json({ error: "Empty audio payload" });
+      if (audioBuffer.length === 0) return res.status(400).json({ error: "Empty audio payload" });
+
+      if (!(await isOllamaReady())) {
+        return res.status(503).json({ error: "Local AI (Ollama) not running." });
       }
 
-      const base64Audio = audioBuffer.toString("base64");
+      // -- Step 1: faster-whisper STT
+      console.log("[VOICE] Transcribing audio with faster-whisper sidecar...");
+      const transcript = await transcribeAudio(audioBuffer);
+      console.log(`[VOICE] Transcript: "${transcript.slice(0, 80)}"`);
 
+      // -- Step 2: Build patient-grounded prompt
       let patientContext = "";
       try {
         const snapshot = await buildPatientSnapshot();
-        patientContext = `Current Patient Context:\n${JSON.stringify(snapshot, null, 2)}\n`;
-      } catch (err: any) {
-        console.warn("[VOICE] Failed to load patient snapshot for grounding context:", err.message);
+        patientContext = `Current Patient Context:
+${JSON.stringify(snapshot, null, 2)}
+`;
+      } catch (ctxErr: any) {
+        console.warn("[VOICE] Failed to load patient snapshot:", ctxErr.message);
       }
 
-      dotenv.config({ override: true });
-      const currentApiKey = getCleanApiKey();
-      const activeAi = currentApiKey
-        ? new GoogleGenAI({ apiKey: currentApiKey, httpOptions: { headers: { "User-Agent": "eldercare-dashboard-v2" } } })
-        : null;
+      const voicePrompt = `You are Mitra, a kind and reassuring geriatric care voice assistant speaking to Somsubhro (age 82).
+Answer concisely in 1-2 sentences. Use simple, friendly language suitable for speech synthesis.
 
-      if (!activeAi) {
-        return res.status(500).json({ error: "Gemini AI not initialized" });
-      }
+${patientContext}
 
-      const audioPart = {
-        inlineData: {
-          mimeType: "audio/wav",
-          data: base64Audio,
-        },
-      };
+Patient said: "${transcript}"
 
-      console.log("[VOICE] Sending audio request to Gemini...");
-      const response = await activeAi.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: [
-          audioPart,
-          {
-            text: `You are Mitra, a kind, reassuring geriatric care voice assistant speaking to Somsubhro (82).
-            Answer Arthur's question politely and concisely (maximum 1-2 sentences). Speak in a simple, friendly manner suitable for speech synthesis.
-            
-            ${patientContext}
-            
-            Question: [Analyze the attached audio and respond to it directly]`,
-          },
-        ],
-      });
+Your reply:`;
 
-      const reply = (response.text || "").trim();
-      console.log(`[VOICE] Gemini reply: "${reply}"`);
+      // -- Step 3: Ollama text reply
+      console.log("[VOICE] Generating reply with Ollama text model...");
+      const { text: reply, model: usedModel } = await generateWithText(voicePrompt);
+      console.log(`[VOICE] Reply via ${usedModel}: "${reply}"`);
 
       broadcastSSE("voice_assistant_query", {
-        query: "[User spoke audio]",
+        query: transcript,
         reply,
         timestamp: new Date().toISOString()
       });
@@ -2922,15 +2886,11 @@ app.post("/api/voice-assistant/audio", async (req, res) => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Startup — Firebase first, then Vite/Express
-// ─────────────────────────────────────────────────────────────────────────────
-
 async function setupViteIntegration() {
   if (process.env.NODE_ENV !== "production") {
     console.log("[INFO] Dev mode — Vite middleware active");
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, fs: { strict: false } },
       appType: "spa",
     });
     app.use(vite.middlewares);

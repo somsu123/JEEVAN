@@ -1,5 +1,179 @@
 [
   {
+    "type": "scan",
+    "message": "Prescription report scanned: 0 medicines extracted",
+    "severity": "info",
+    "timestamp": 1790941100
+  },
+  {
+    "type": "scan",
+    "message": "Prescription report scanned: 0 medicines extracted",
+    "severity": "info",
+    "timestamp": 1790940813
+  },
+  {
+    "type": "scan",
+    "message": "Prescription report scanned: 12 medicines extracted",
+    "severity": "info",
+    "timestamp": 1790938042
+  },
+  {
+    "type": "scan",
+    "message": "Prescription report scanned: 0 medicines extracted",
+    "severity": "info",
+    "timestamp": 1790937319
+  },
+  {
+    "type": "rx",
+    "message": "Prescription uploaded -- 0 medicines extracted, 0 changes pending",
+    "severity": "info",
+    "timestamp": 1790937296
+  },
+  {
+    "type": "scan",
+    "message": "Prescription report scanned: 3 medicines extracted",
+    "severity": "info",
+    "timestamp": 1790937277
+  },
+  {
+    "type": "rx",
+    "message": "Prescription uploaded -- 5 medicines extracted, 4 changes pending",
+    "severity": "info",
+    "timestamp": 1790937225
+  },
+  {
+    "type": "rx",
+    "message": "Prescription uploaded -- 1 medicines extracted, 1 changes pending",
+    "severity": "info",
+    "timestamp": 1790937212
+  },
+  {
+    "type": "scan",
+    "message": "Prescription report scanned: 1 medicines extracted",
+    "severity": "info",
+    "timestamp": 1790937197
+  },
+  {
+    "type": "rx",
+    "message": "Prescription uploaded -- 1 medicines extracted, 1 changes pending",
+    "severity": "info",
+    "timestamp": 1790890606
+  },
+  {
+    "type": "rx",
+    "message": "Prescription uploaded -- 1 medicines extracted, 1 changes pending",
+    "severity": "info",
+    "timestamp": 1790890575
+  },
+  {
+    "type": "rx",
+    "message": "Prescription uploaded -- 2 medicines extracted, 2 changes pending",
+    "severity": "info",
+    "timestamp": 1790890454
+  },
+  {
+    "type": "scan",
+    "message": "Prescription report scanned: 1 medicines extracted",
+    "severity": "info",
+    "timestamp": 1790890441
+  },
+  {
+    "type": "rx",
+    "message": "Prescription uploaded -- 1 medicines extracted, 1 changes pending",
+    "severity": "info",
+    "timestamp": 1790890432
+  },
+  {
+    "type": "rx",
+    "message": "Prescription uploaded -- 7 medicines extracted, 4 changes pending",
+    "severity": "info",
+    "timestamp": 1790889232
+  },
+  {
+    "type": "scan",
+    "message": "Prescription report scanned: 5 medicines extracted",
+    "severity": "info",
+    "timestamp": 1790888832
+  },
+  {
+    "type": "rx",
+    "message": "Prescription uploaded -- 4 medicines extracted, 4 changes pending",
+    "severity": "info",
+    "timestamp": 1790888811
+  },
+  {
+    "type": "scan",
+    "message": "Prescription report scanned: 5 medicines extracted",
+    "severity": "info",
+    "timestamp": 1790888328
+  },
+  {
+    "type": "rx",
+    "message": "Prescription uploaded -- 5 medicines extracted, 4 changes pending",
+    "severity": "info",
+    "timestamp": 1790888308
+  },
+  {
+    "type": "scan",
+    "message": "Prescription report scanned: 1 medicines extracted",
+    "severity": "info",
+    "timestamp": 1790887962
+  },
+  {
+    "type": "rx",
+    "message": "Prescription uploaded -- 1 medicines extracted, 1 changes pending",
+    "severity": "info",
+    "timestamp": 1790887941
+  },
+  {
+    "type": "rx",
+    "message": "Prescription uploaded -- 0 medicines extracted, 0 changes pending",
+    "severity": "info",
+    "timestamp": 1790885651
+  },
+  {
+    "type": "rx",
+    "message": "Prescription uploaded -- 0 medicines extracted, 0 changes pending",
+    "severity": "info",
+    "timestamp": 1790885233
+  },
+  {
+    "type": "rx",
+    "message": "Prescription uploaded -- 0 medicines extracted, 0 changes pending",
+    "severity": "info",
+    "timestamp": 1790885021
+  },
+  {
+    "type": "scan",
+    "message": "Prescription report scanned successfully",
+    "severity": "info",
+    "timestamp": 1790884987
+  },
+  {
+    "type": "rx",
+    "message": "Prescription uploaded -- 0 medicines extracted, 0 changes pending",
+    "severity": "info",
+    "timestamp": 1790884969
+  },
+  {
+    "type": "scan",
+    "message": "Prescription report scanned successfully",
+    "severity": "info",
+    "timestamp": 1790884887
+  },
+  {
+    "type": "rx",
+    "message": "Prescription 'rx_sample.jpg' uploaded — 2 medicines extracted, 2 changes pending",
+    "severity": "info",
+    "timestamp": 1790880034
+  },
+  {
+    "type": "rx",
+    "message": "Prescription 'test_prescription.png' uploaded — 0 medicines extracted, 0 changes pending",
+    "severity": "info",
+    "timestamp": 1790880020
+  },
+  {
     "type": "rx",
     "message": "Schedule confirmed — compartment 1: \"Paracetamol - 500 mg\"",
     "severity": "info",

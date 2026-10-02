@@ -1,21 +1,21 @@
 # ElderCare Dashboard v2
 
-**Unified 360° elderly care IoT monitoring dashboard** built with React 19 + TypeScript + Tailwind CSS v4 + Gemini AI.
+**Unified 360° elderly care IoT monitoring dashboard** built with React 19 + TypeScript + Tailwind CSS v4 + Local AI (Ollama + Whisper).
 
-Extends `D:\ai_care` (React/Gemini) and connects to `D:\Elder--Care` (Flask/MongoDB/ESP32 backend).
+Connects to `D:\JEEVAN\backend` (Flask/MongoDB/ESP32 backend).
 
 ---
 
 ## Architecture
 
 ```
-D:\Elder--Care\dashboard-v2\
+dashboard-v2/
 ├── server.ts            ← Node/Express bridge (port 5050)
 │   ├── /api/vitals      → Proxies Flask /api/state
 │   ├── /api/fall-event  → Receives Pi/bracelet fall events
 │   ├── /api/medicine-*  → Proxies Flask /api/medicine + /api/schedule
-│   ├── /api/voice-chat  → Gemini AI voice assistant (MITRA)
-│   ├── /api/scan-report → Gemini Vision report analysis
+│   ├── /api/voice-chat  → Local AI voice assistant (MITRA via Ollama)
+│   ├── /api/scan-report → Local Ollama Vision report analysis
 │   └── /api/events-stream → SSE real-time push to frontend
 │
 ├── src/
@@ -23,12 +23,12 @@ D:\Elder--Care\dashboard-v2\
 │   ├── types.ts         ← All interfaces
 │   └── components/
 │       ├── Sidebar.tsx       ← 6-item navigation
-│       ├── Overview.tsx      ← Report analytics (from ai_care)
+│       ├── Overview.tsx      ← Report analytics
 │       ├── LiveVitals.tsx    ← BPM sparkline + 4 vital cards
 │       ├── FallAlerts.tsx    ← Event timeline + confidence meters
 │       ├── MedicineBox.tsx   ← Slot cards + countdown timers
 │       ├── VoiceAssistant.tsx← MITRA chat UI
-│       └── ReportScanner.tsx ← Gemini scan (from ai_care)
+│       └── ReportScanner.tsx ← Local AI scan
 │
 └── pi-fall-detector/
     ├── fall_detector.py  ← MediaPipe Pose fall detection (run on Pi)
@@ -41,15 +41,14 @@ D:\Elder--Care\dashboard-v2\
 
 ### 1. Start existing ElderCare backend
 ```bash
-# In D:\Elder--Care\
 py -3.11 backend\app.py          # Flask on port 5000
 ```
 
 ### 2. Set up dashboard-v2
 ```bash
-cd D:\Elder--Care\dashboard-v2
+cd dashboard-v2
 
-# Copy .env.example to .env and fill in your Gemini API key
+# Copy .env.example to .env
 copy .env.example .env
 
 npm install
@@ -79,8 +78,8 @@ BACKEND_URL=http://<your-pc-ip>:5050 python pi-fall-detector/fall_detector.py
 | Fall Detection (Camera) | ✅ | Pi MediaPipe → /api/fall-event |
 | Fall Detection (Bracelet) | ✅ | braclet_bpm.ino → /api/fall-event |
 | Medicine Reminder Box | ✅ | medicine_box.ino → Flask → Node |
-| AI Voice Assistant (MITRA) | ✅ | Gemini 2.5 Flash |
-| Clinical Report Scanner | ✅ | Gemini 2.5 Flash Vision |
+| AI Voice Assistant (MITRA) | ✅ | faster-whisper + Ollama |
+| Clinical Report Scanner | ✅ | TF.js + Ollama Vision |
 | SSE Real-time Push | ✅ | /api/events-stream |
 | Emergency SOS | ✅ | Global state + fall count badge |
 
@@ -89,7 +88,8 @@ BACKEND_URL=http://<your-pc-ip>:5050 python pi-fall-detector/fall_detector.py
 ## Environment Variables
 
 ```env
-GEMINI_API_KEY=your_key_here
+LOCAL_AI_ONLY=true
+OLLAMA_URL=http://localhost:11434
 FLASK_BACKEND_URL=http://localhost:5000
 PORT=5050
 ```

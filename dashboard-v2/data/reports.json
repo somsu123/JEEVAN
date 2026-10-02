@@ -1,5 +1,311 @@
 [
   {
+    "fileName": "Liver Function Test (LFT) Panel.png",
+    "summary": "## AI Clinical Summary\nThis liver function test (LFT) panel for Aarav Mehra shows that all measured parameters are within their respective normal reference ranges. The report indicates no evidence of hepatic inflammation, cholestasis, or liver dysfunction.\n\n## Full OCR Test Report\n* **Total Bilirubin**: 0.8 mg/dL (NORMAL) — *Within normal range.*\n* **Direct Bilirubin**: 0.2 mg/dL (NORMAL) — *Within normal range.*\n* **Indirect Bilirubin**: 0.6 mg/dL (NORMAL) — *Within normal range.*\n* **Alanine Aminotransferase (ALT / SGPT)**: 32 U/L (NORMAL) — *Within normal range for a male.*\n* **Aspartate Aminotransferase (AST / SGOT)**: 29 U/L (NORMAL) — *Within normal range for a male.*\n* **Alkaline Phosphatase (ALP)**: 94 U/L (NORMAL) — *Within normal range.*\n* **Gamma-Glutamyl Transferase (GGT)**: 28 U/L (NORMAL) — *Within normal range for a male.*\n* **Total Protein**: 7.2 g/dL (NORMAL) — *Within normal range.*\n* **Albumin**: 4.5 g/dL (NORMAL) — *Within normal range.*\n* **Globulin**: 2.7 g/dL (NORMAL) — *Within normal range.*\n* **A/G Ratio**: 1.67 (NORMAL) — *Within normal range.*\n* **Lactate Dehydrogenase (LDH)**: 210 U/L (NORMAL) — *Within normal range.*\n\n## Action Items\n* Share these results with the physician who ordered the test to discuss them in the context of your overall health and any symptoms you may be experiencing.\n\n## Medical Disclaimer\nAlways consult your physician.\n",
+    "scanDate": "17:08:20 -- Oct 2, 2026",
+    "medicines": [],
+    "overview": "This liver function test (LFT) panel for Aarav Mehra shows that all measured parameters are within their respective normal reference ranges. The report indicates no evidence of hepatic inflammation, cholestasis, or liver dysfunction.",
+    "createdAt": 1790941100
+  },
+  {
+    "fileName": "Liver Function Test (LFT) Panel.png",
+    "summary": "## AI Clinical Summary\nThis liver function test (LFT) panel for Aarav Mehra indicates that all tested parameters are within their respective normal reference ranges. The report concludes there is no evidence of hepatic inflammation, cholestasis, or liver dysfunction.\n\n## Full OCR Test Report\n* **Total Bilirubin**: 0.8 mg/dL (NORMAL) — *Within normal range.*\n* **Direct Bilirubin**: 0.2 mg/dL (NORMAL) — *Within normal range.*\n* **Indirect Bilirubin**: 0.6 mg/dL (NORMAL) — *Within normal range.*\n* **Alanine Aminotransferase (ALT / SGPT)**: 32 U/L (NORMAL) — *Within normal range for a male (<45).*\n* **Aspartate Aminotransferase (AST / SGOT)**: 29 U/L (NORMAL) — *Within normal range for a male (<40).*\n* **Alkaline Phosphatase (ALP)**: 94 U/L (NORMAL) — *Within normal range.*\n* **Gamma-Glutamyl Transferase (GGT)**: 28 U/L (NORMAL) — *Within normal range for a male (<55).*\n* **Total Protein**: 7.2 g/dL (NORMAL) — *Within normal range.*\n* **Albumin**: 4.5 g/dL (NORMAL) — *Within normal range.*\n* **Globulin**: 2.7 g/dL (NORMAL) — *Within normal range.*\n* **A/G Ratio**: 1.67 (NORMAL) — *Within normal range.*\n* **Lactate Dehydrogenase (LDH)**: 210 U/L (NORMAL) — *Within normal range.*\n\n## Action Items\n* Share these results with your healthcare provider for final clinical correlation.\n* Continue with your current health management plan unless advised otherwise by your doctor.\n\n## Medical Disclaimer\nAlways consult your physician.\n",
+    "scanDate": "17:03:33 -- Oct 2, 2026",
+    "medicines": [],
+    "overview": "This liver function test (LFT) panel for Aarav Mehra indicates that all tested parameters are within their respective normal reference ranges. The report concludes there is no evidence of hepatic inflammation, cholestasis, or liver dysfunction.",
+    "createdAt": 1790940813
+  },
+  {
+    "fileName": "Liver Function Test (LFT) Panel.png",
+    "summary": "## Document Overview\nThis liver function test (LFT) report belongs to Aarav Mehra. All measured parameters fall within their respective reference ranges, indicating normal liver function with no evidence of inflammation or dysfunction.\n\n## Action Items\n* Review dosage instructions before taking medication.\n* Ensure medicines are loaded into corresponding smart box slots.\n\n## Medical Disclaimer\nAlways consult your prescribing physician before modifying dosage.\n",
+    "scanDate": "16:17:22 -- Oct 2, 2026",
+    "medicines": [
+      {
+        "name": "Total Bilirubin",
+        "times": [
+          "08:00"
+        ]
+      },
+      {
+        "name": "Direct Bilirubin",
+        "times": [
+          "08:00"
+        ]
+      },
+      {
+        "name": "Indirect Bilirubin",
+        "times": [
+          "08:00"
+        ]
+      },
+      {
+        "name": "Alanine Aminotransferase (ALT / SGPT)",
+        "times": [
+          "08:00"
+        ]
+      },
+      {
+        "name": "Aspartate Aminotransferase (AST / SGOT)",
+        "times": [
+          "08:00"
+        ]
+      },
+      {
+        "name": "Alkaline Phosphatase (ALP)",
+        "times": [
+          "08:00"
+        ]
+      },
+      {
+        "name": "Gamma-Glutamyl Transferase (GGT)",
+        "times": [
+          "08:00"
+        ]
+      },
+      {
+        "name": "Total Protein",
+        "times": [
+          "08:00"
+        ]
+      },
+      {
+        "name": "Albumin",
+        "times": [
+          "08:00"
+        ]
+      },
+      {
+        "name": "Globulin",
+        "times": [
+          "08:00"
+        ]
+      },
+      {
+        "name": "A/G Ratio",
+        "times": [
+          "08:00"
+        ]
+      },
+      {
+        "name": "Lactate Dehydrogenase (LDH)",
+        "times": [
+          "08:00"
+        ]
+      }
+    ],
+    "overview": "This liver function test (LFT) report belongs to Aarav Mehra. All measured parameters fall within their respective reference ranges, indicating normal liver function with no evidence of inflammation or dysfunction.",
+    "createdAt": 1790938042
+  },
+  {
+    "fileName": "Liver Function Test (LFT) Panel.png",
+    "summary": "## Prescribed Medications\n* No medications identified in this document.\n\n## Summary\nDocument scan complete. No medications identified.\n\n## Action Items\n* Continue regular monitoring.\n\n## Medical Disclaimer\nAlways consult your prescribing physician before modifying dosage.\n",
+    "scanDate": "16:05:19 -- Oct 2, 2026",
+    "medicines": [],
+    "overview": "Document scan complete. No medications identified.",
+    "createdAt": 1790937319
+  },
+  {
+    "fileName": "Cardio_Prescription_Arthur.png",
+    "summary": "## Prescribed Medications\n* **Lisinopril** (10mg) at 08:00 -- *for blood pressure control*\n* **Atorvastatin** (20mg) at 21:00 -- *with water for cholesterol*\n* **Aspirin** (75mg) at 08:00 -- *as antiplatelet therapy*\n\n## Summary\nThe patient is prescribed Lisinopril, Atorvastatin and Aspirin for hypertension, hyperlipidemia and antiplatelet therapy respectively.\n\n## Action Items\n* Review dosage instructions before taking medication.\n* Ensure medicines are loaded into corresponding smart box slots.\n\n## Medical Disclaimer\nAlways consult your prescribing physician before modifying dosage.\n",
+    "scanDate": "16:04:37 -- Oct 2, 2026",
+    "medicines": [
+      {
+        "name": "Lisinopril",
+        "dosage": "10mg",
+        "times": [
+          "08:00"
+        ],
+        "purpose": "for blood pressure control"
+      },
+      {
+        "name": "Atorvastatin",
+        "dosage": "20mg",
+        "times": [
+          "21:00"
+        ],
+        "purpose": "with water for cholesterol"
+      },
+      {
+        "name": "Aspirin",
+        "dosage": "75mg",
+        "times": [
+          "08:00"
+        ],
+        "purpose": "as antiplatelet therapy"
+      }
+    ],
+    "overview": "The patient is prescribed Lisinopril, Atorvastatin and Aspirin for hypertension, hyperlipidemia and antiplatelet therapy respectively.",
+    "createdAt": 1790937277
+  },
+  {
+    "fileName": "demo presciption.jpeg",
+    "summary": "## Prescribed Medications\n* **Amoxirillin** (500mg) at 08:00, 13:00, 20:00 -- *3X a day*\n\n## Summary\nIdentified and extracted 1 prescribed medication(s).\n\n## Action Items\n* Review dosage instructions before taking medication.\n* Ensure medicines are loaded into corresponding smart box slots.\n\n## Medical Disclaimer\nAlways consult your prescribing physician before modifying dosage.\n",
+    "scanDate": "16:03:17 -- Oct 2, 2026",
+    "medicines": [
+      {
+        "name": "Amoxirillin",
+        "dosage": "500mg",
+        "times": [
+          "08:00",
+          "13:00",
+          "20:00"
+        ],
+        "purpose": "3X a day"
+      }
+    ],
+    "overview": "Identified and extracted 1 prescribed medication(s).",
+    "createdAt": 1790937197
+  },
+  {
+    "fileName": "demo presciption.jpeg",
+    "summary": "## Prescribed Medications\n* **Amoxil** (50 mg) at 08:00 -- *1 cap. 3x a day for 7 days*\n\n## Summary\nIdentified and extracted 1 prescribed medication(s).\n\n## Action Items\n* Review dosage instructions before taking medication.\n* Ensure medicines are loaded into corresponding smart box slots.\n\n## Medical Disclaimer\nAlways consult your prescribing physician before modifying dosage.\n",
+    "scanDate": "03:04:01 -- Oct 2, 2026",
+    "medicines": [
+      {
+        "name": "Amoxil",
+        "dosage": "50 mg",
+        "times": [
+          "08:00"
+        ],
+        "purpose": "1 cap. 3x a day for 7 days"
+      }
+    ],
+    "overview": "Identified and extracted 1 prescribed medication(s).",
+    "createdAt": 1790890441
+  },
+  {
+    "fileName": "1.webp",
+    "summary": "## Prescribed Medications\n* **Rozad** (1 OD AC) at 07:00\n* **Ambulax** (1 BD) at 08:00\n* **Petril Plus/Petril** (1 OD HS) at 21:00\n* **Placida** (500mg) at 18:00\n* **Exopet/Nexpro** (Metformin 500mg, Lisinopril 2.5 mg) at 18:00\n\n## Summary\nIdentified and extracted 5 prescribed medication(s).\n\n## Action Items\n* Review dosage instructions before taking medication.\n* Ensure medicines are loaded into corresponding smart box slots.\n\n## Medical Disclaimer\nAlways consult your prescribing physician before modifying dosage.\n",
+    "scanDate": "02:37:12 -- Oct 2, 2026",
+    "medicines": [
+      {
+        "name": "Rozad",
+        "dosage": "1 OD AC",
+        "times": [
+          "07:00"
+        ]
+      },
+      {
+        "name": "Ambulax",
+        "dosage": "1 BD",
+        "times": [
+          "08:00"
+        ]
+      },
+      {
+        "name": "Petril Plus/Petril",
+        "dosage": "1 OD HS",
+        "times": [
+          "21:00"
+        ]
+      },
+      {
+        "name": "Placida",
+        "dosage": "500mg",
+        "times": [
+          "18:00"
+        ]
+      },
+      {
+        "name": "Exopet/Nexpro",
+        "dosage": "Metformin 500mg, Lisinopril 2.5 mg",
+        "times": [
+          "18:00"
+        ]
+      }
+    ],
+    "overview": "Identified and extracted 5 prescribed medication(s).",
+    "createdAt": 1790888832
+  },
+  {
+    "fileName": "1.webp",
+    "summary": "## Prescribed Medications\n* **Rozad** (1 OD AC) at 07:00\n* **Ambulax** (1 BD) at 08:00\n* **Petril Plus/Petril** (1 OD HS) at 21:00\n* **Placida** (1 OD HS) at 21:00\n* **Exopet/Nexpro** (Metformin 500mg, Lisinopril 40 mg) at 18:00\n\n## Summary\nIdentified and extracted 5 prescribed medication(s).\n\n## Action Items\n* Review dosage instructions before taking medication.\n* Ensure medicines are loaded into corresponding smart box slots.\n\n## Medical Disclaimer\nAlways consult your prescribing physician before modifying dosage.\n",
+    "scanDate": "02:28:47 -- Oct 2, 2026",
+    "medicines": [
+      {
+        "name": "Rozad",
+        "dosage": "1 OD AC",
+        "times": [
+          "07:00"
+        ]
+      },
+      {
+        "name": "Ambulax",
+        "dosage": "1 BD",
+        "times": [
+          "08:00"
+        ]
+      },
+      {
+        "name": "Petril Plus/Petril",
+        "dosage": "1 OD HS",
+        "times": [
+          "21:00"
+        ]
+      },
+      {
+        "name": "Placida",
+        "dosage": "1 OD HS",
+        "times": [
+          "21:00"
+        ]
+      },
+      {
+        "name": "Exopet/Nexpro",
+        "dosage": "Metformin 500mg, Lisinopril 40 mg",
+        "times": [
+          "18:00"
+        ]
+      }
+    ],
+    "overview": "Identified and extracted 5 prescribed medication(s).",
+    "createdAt": 1790888328
+  },
+  {
+    "fileName": "1.webp",
+    "summary": "## Prescribed Medications\n* **Paracetamol** (500mg) at 08:00 -- *instructions or indication if noted*\n\n## Summary\nIdentified and extracted 1 prescribed medication(s).\n\n## Action Items\n* Review dosage instructions before taking medication.\n* Ensure medicines are loaded into corresponding smart box slots.\n\n## Medical Disclaimer\nAlways consult your prescribing physician before modifying dosage.\n",
+    "scanDate": "02:22:42 -- Oct 2, 2026",
+    "medicines": [
+      {
+        "name": "Paracetamol",
+        "dosage": "500mg",
+        "times": [
+          "08:00"
+        ],
+        "purpose": "instructions or indication if noted"
+      }
+    ],
+    "overview": "Identified and extracted 1 prescribed medication(s).",
+    "createdAt": 1790887962
+  },
+  {
+    "fileName": "1.webp",
+    "summary": "## Document Overview\nDocument analysis complete.\n\n## Key Metrics & Readings\n* No critical metrics recorded.\n\n## Prescribed Medications\n* **Metformin** (500 mg) at 08:00 -- *Control blood sugar*\n\n## Action Items & Lifestyle Recommendations\n* Follow up\n\n## Questions to Ask your Doctor\n* What is the cause of hypertension?\n* How can I manage my blood pressure at home?\n\n## Medical Disclaimer\nAlways consult your physician.",
+    "scanDate": "01:33:07 -- Oct 2, 2026",
+    "overview": "Document analysis complete.",
+    "metrics": [],
+    "actions": [
+      "Follow up"
+    ],
+    "doctorQuestions": [
+      "What is the cause of hypertension?",
+      "How can I manage my blood pressure at home?"
+    ],
+    "disclaimer": "Always consult your physician.",
+    "createdAt": 1790884987
+  },
+  {
+    "fileName": "test_sample.png",
+    "summary": "## Document Overview\nDocument analysis complete.\n\n## Key Metrics & Readings\n* No critical metrics recorded.\n\n## Prescribed Medications\n* No medications extracted.\n\n## Action Items & Lifestyle Recommendations\n* Continue current daily routine as advised.\n\n## Questions to Ask your Doctor\n* Ask if any medications require routine lab tests.\n\n## Medical Disclaimer\nAlways consult your physician.",
+    "scanDate": "01:31:27 -- Oct 2, 2026",
+    "overview": "Document analysis complete.",
+    "metrics": [],
+    "actions": [],
+    "doctorQuestions": [],
+    "disclaimer": "Always consult your physician.",
+    "createdAt": 1790884887
+  },
+  {
     "fileName": "ce2ca0f38002e2f6e4392e8173cd2551.jpg",
     "summary": "## Document Overview\nThis report summarizes your recent visit where you experienced giddiness and restlessness. The doctor diagnosed you with low blood sugar (hypoglycemia) and provided immediate treatment to help you feel better, along with advice for recovery.\n\n## Key Metrics & Readings\n* **Random Blood Sugar (RBS)**: 10 mg/dL (CONCERNING) — *Your blood sugar was very low, which explains why you felt dizzy and restless. Immediate treatment was given to raise your sugar levels, which is crucial for your energy and overall well-being.*\n* **Blood Pressure (BP)**: 110/70 mmHg (NORMAL) — *Your blood pressure is within a healthy range, which is good for your heart and overall circulation.*\n* **Pulse Rate (PR)**: 60 bpm (NORMAL) — *Your heart rate is steady and normal, showing your heart is working efficiently.*\n\n## Prescribed Medications\n* No medications extracted from prescription.\n\n## Action Items & Lifestyle Recommendations\n* Ensure you drink enough fluids throughout the day to stay well-hydrated.\n* Take Oral Rehydration Solution (ORS) as advised to help replenish your body's fluids and electrolytes.\n\n## Questions to Ask your Doctor\n* What specific factors might have caused my blood sugar to drop so low?\n* What steps can I take in my diet and daily routine to prevent my blood sugar from getting too low again?\n* Should I consider monitoring my blood sugar at home, and if so, how often?\n* Are there any particular foods or drinks I should avoid to maintain stable blood sugar levels?\n\n## Medical Disclaimer\nPlease remember that this overview is based on the provided report. It's always best to discuss any health concerns and treatment plans directly with your physician for personalized advice and care.",
     "scanDate": "01:05:11 — Aug 15, 2026",

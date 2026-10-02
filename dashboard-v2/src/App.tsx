@@ -38,30 +38,7 @@ const makeDefaultVitals = (): VitalState => ({
 
 const DEFAULT_SLOTS: MedicineSlot[] = [];
 
-const DEFAULT_SCAN_HISTORY: ScanResult[] = [
-  {
-    fileName: 'Cardio_EKG_Doctor_Note.png',
-    timestamp: '14:30 - May 24, 2026',
-    summary: `### Cardiology Consultation Note
-* **Heart Rhythm**: Stable Sinus Rhythm at **72 BPM** with isolated Premature Ventricular Contractions (PVCs) resolving during extended resting. No active ischemia.
-
-### Medication Changes & Precautions
-1. **Lisinopril Dosage**: Take **10mg once daily** in the morning hours to support cardiovascular health.
-2. **Orthostatic Precaution**: Avoid swift standing. If momentary dizziness occurs, sit down immediately to prevent risk of falls.`,
-  },
-  {
-    fileName: 'Arthur_Blood_Lab_Result.png',
-    timestamp: '09:15 - May 22, 2026',
-    summary: `### Primary Diagnostics Summary
-* **Hemoglobin test**: **11.2 g/dL** (Mild Anemia present. Typical range is 13.8–17.2 g/dL. Clinical suggestion: monitor iron intake and check B12 levels).
-* **Kidney Profile (BUN/Creatinine)**: Blood Urea Nitrogen (BUN) measured at **28 mg/dL** (Mildly elevated, suggesting slight dehydration or normal age-related decline in filtration. GFR estimated at **58 mL/min/1.73m²**, representing stable Stage 3a Chronic Kidney Disease).
-* **Glucose levels**: Fasting blood sugar stands at **98 mg/dL** (Perfect, healthy metabolic regulation).
-
-### Prescribed Care & Daily Actions
-1. **Fluid Optimization**: Keep daily clear fluid/water intake at 1.8 liters to aid kidney filtration and reduce BUN levels.
-2. **Lab Scheduling**: Routine re-evaluation of blood panel ordered in 3 months to monitor Hemoglobin stability.`,
-  },
-];
+const DEFAULT_SCAN_HISTORY: ScanResult[] = [];
 
 export default function App() {
   const [currentView, setCurrentView] = useState<ViewType>('overview');

@@ -13,7 +13,7 @@
  *  HOW IT WORKS:
  *   • Press BOOT button (GPIO 0) → LED blinks → speak your question
  *   • ESP32-S3 records audio via INMP441 → streams raw PCM to Node server
- *   • Node server sends audio to Gemini API → gets text response
+ *   • Node server processes audio with local Whisper + Ollama → gets text response
  *   • Node server sends response text back via WebSocket
  *   • ESP32-S3 sends text to Google TTS REST → downloads MP3 → plays on speaker
  *   • OLED shows status: Idle / Listening / Thinking / Speaking
@@ -313,7 +313,7 @@ String sendAudioAndGetReply(size_t sampleCount) {
   HTTPClient http;
   http.begin(url);
   http.addHeader("Content-Type", "audio/wav");
-  http.setTimeout(20000);   // 20s — Gemini might take a moment
+  http.setTimeout(20000);   // 20s — Local AI might take a moment
 
   // Combine header + PCM data
   uint8_t* wavBuf = (uint8_t*)malloc(wavSize);
@@ -596,7 +596,7 @@ void loop() {
         return;
       }
 
-      // ── 2. Send to server and get Gemini reply
+      // ── 2. Send to server and get Local AI reply
       currentState = VS_THINKING;
       oledState(VS_THINKING);
       String reply = sendAudioAndGetReply(samples);

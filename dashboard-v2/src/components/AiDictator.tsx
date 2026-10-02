@@ -84,7 +84,7 @@ export default function AiDictator({ open, onClose }: AiDictatorProps) {
     setIsSpeaking(false);
   }, []);
 
-  // ── Trigger Gemini clinical summary ──────────────────────────────────────
+  // ── Trigger Local AI clinical summary ───────────────────────────────────
   const triggerDictation = async () => {
     setPhase('loading');
     setError('');
@@ -186,7 +186,7 @@ export default function AiDictator({ open, onClose }: AiDictatorProps) {
             <div>
               <h2 className="text-sm font-black text-white tracking-wide">AI DICTATOR MODE</h2>
               <p className="text-[10px] text-slate-400 font-mono mt-0.5">
-                Powered by Gemini · Patient: Somsubhro, 82
+                Powered by Local AI · Patient: Somsubhro, 82
               </p>
             </div>
           </div>
@@ -288,7 +288,7 @@ export default function AiDictator({ open, onClose }: AiDictatorProps) {
               </div>
               <div className="text-center">
                 <p className="text-sm font-bold text-violet-300 font-mono">COMPILING PATIENT DATA...</p>
-                <p className="text-xs text-slate-500 mt-1">Fetching MongoDB records · Generating clinical summary with Gemini</p>
+                <p className="text-xs text-slate-500 mt-1">Fetching MongoDB records · Generating clinical summary with Local AI</p>
               </div>
             </div>
           )}

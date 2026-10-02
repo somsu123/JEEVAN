@@ -10,8 +10,9 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "@google/genai": "^2.4.0",
+    "@napi-rs/canvas": "^1.0.10",
     "@tailwindcss/vite": "^4.1.14",
+    "@tensorflow/tfjs": "^4.22.0",
     "@types/nodemailer": "^8.0.0",
     "@types/twilio": "^3.19.2",
     "@vitejs/plugin-react": "^5.0.4",
@@ -22,8 +23,10 @@
     "mongodb": "^7.5.0",
     "motion": "^12.23.24",
     "nodemailer": "^8.0.9",
+    "pdfjs-dist": "^6.3.289",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
+    "sharp": "^0.35.5",
     "twilio": "^5.7.0",
     "vite": "^6.2.3"
   },

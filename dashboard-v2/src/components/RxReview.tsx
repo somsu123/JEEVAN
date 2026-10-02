@@ -34,15 +34,35 @@ function ConfidenceBadge({ conf }: { conf: 'high' | 'low' }) {
   );
 }
 
+function getMimeType(file: File): string {
+  if (file.type) return file.type;
+  const ext = file.name.split('.').pop()?.toLowerCase();
+  switch (ext) {
+    case 'png': return 'image/png';
+    case 'webp': return 'image/webp';
+    case 'gif': return 'image/gif';
+    case 'bmp': return 'image/bmp';
+    case 'tif':
+    case 'tiff': return 'image/tiff';
+    case 'pdf': return 'application/pdf';
+    default: return 'image/jpeg';
+  }
+}
+
 // ─── Drop zone ────────────────────────────────────────────────────────────────
 function UploadDropZone({ onFile, uploading }: { onFile: (f: File) => void; uploading: boolean }) {
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault(); setDragging(false);
+    e.preventDefault();
+    setDragging(false);
     const file = e.dataTransfer.files[0];
-    if (file && (file.type.startsWith('image/') || file.type === 'application/pdf')) onFile(file);
+    if (!file) return;
+    const isAccepted = file.type.startsWith('image/') ||
+      file.type === 'application/pdf' ||
+      /\.(jpe?g|png|webp|gif|bmp|tiff?|heic|pdf)$/i.test(file.name);
+    if (isAccepted) onFile(file);
   };
 
   return (
@@ -55,14 +75,19 @@ function UploadDropZone({ onFile, uploading }: { onFile: (f: File) => void; uplo
         dragging ? 'border-amber-400/70 bg-amber-500/5 scale-[1.01]' : 'border-slate-700 hover:border-amber-500/50 bg-slate-900/40'
       } ${uploading ? 'pointer-events-none opacity-60' : ''}`}
     >
-      <input ref={inputRef} type="file" accept="image/*,application/pdf" className="hidden"
-        onChange={e => { const f = e.target.files?.[0]; if (f) onFile(f); }} />
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*,application/pdf,.jpg,.jpeg,.png,.webp,.gif,.bmp,.tif,.tiff,.heic,.pdf"
+        className="hidden"
+        onChange={e => { const f = e.target.files?.[0]; if (f) onFile(f); }}
+      />
       {uploading ? (
         <>
           <Loader2 className="h-10 w-10 text-amber-400 animate-spin" />
           <div className="text-center">
             <p className="text-sm font-bold text-white">Processing prescription…</p>
-            <p className="text-xs text-slate-400 mt-1">Gemini is extracting medicines</p>
+            <p className="text-xs text-slate-400 mt-1">Reading document with local AI</p>
           </div>
         </>
       ) : (
@@ -72,10 +97,10 @@ function UploadDropZone({ onFile, uploading }: { onFile: (f: File) => void; uplo
           </div>
           <div className="text-center">
             <p className="text-sm font-bold text-slate-100">Drop prescription here</p>
-            <p className="text-xs text-slate-400 mt-1">or click to browse · PDF, JPG, PNG, HEIC, WebP</p>
+            <p className="text-xs text-slate-400 mt-1">or click to browse · JPG, JPEG, PNG, WebP, PDF, BMP</p>
           </div>
-          <p className="text-[10px] text-slate-600 font-mono">
-            AI extracts medicines · you review + confirm before anything reaches the box
+          <p className="text-[10px] text-slate-500 font-mono">
+            Direct on-device OCR · No hardcoded drugs · 100% private
           </p>
         </>
       )}
@@ -403,7 +428,7 @@ export default function RxReview() {
       const res = await fetch('/api/rx/upload', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fileData: base64, mimeType: file.type || 'image/jpeg', fileName: file.name }),
+        body: JSON.stringify({ fileData: base64, mimeType: getMimeType(file), fileName: file.name }),
       });
       const data = await res.json();
       if (!res.ok) { if (data.ocrText) setRawOcrText(data.ocrText); throw new Error(data.error || 'Upload failed'); }
@@ -490,6 +515,10 @@ export default function RxReview() {
               <Upload className="h-3.5 w-3.5" /> Upload Prescription
             </h2>
             <UploadDropZone onFile={handleFile} uploading={uploading} />
+            <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between text-[11px] font-mono text-slate-400">
+              <span>Supported formats:</span>
+              <span className="text-amber-400/90 font-semibold">JPG · JPEG · PNG · WebP · PDF · BMP</span>
+            </div>
             {uploadError && (
               <div className="flex items-start gap-2 p-3 rounded-xl bg-red-500/10 border border-red-500/30">
                 <AlertTriangle className="h-4 w-4 text-red-400 shrink-0 mt-0.5" />

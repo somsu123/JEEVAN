@@ -102,5 +102,194 @@
     "dosage": "2 teaspoonfuls",
     "purpose": "To help make your urine less acidic and relieve urinary discomfort (for 7 days).",
     "addedAt": 1780220637576
+  },
+  {
+    "name": "Metformin",
+    "dosage": "500 mg",
+    "times": [
+      "08:00"
+    ],
+    "purpose": "Control blood sugar",
+    "addedAt": 1790884987830
+  },
+  {
+    "name": "Paracetamol",
+    "dosage": "500mg",
+    "times": [
+      "08:00"
+    ],
+    "purpose": "instructions or indication if noted",
+    "addedAt": 1790887962641
+  },
+  {
+    "name": "Rozad",
+    "dosage": "1 OD AC",
+    "times": [
+      "07:00"
+    ],
+    "addedAt": 1790888832607
+  },
+  {
+    "name": "Ambulax",
+    "dosage": "1 BD",
+    "times": [
+      "08:00"
+    ],
+    "addedAt": 1790888832607
+  },
+  {
+    "name": "Petril Plus/Petril",
+    "dosage": "1 OD HS",
+    "times": [
+      "21:00"
+    ],
+    "addedAt": 1790888832607
+  },
+  {
+    "name": "Placida",
+    "dosage": "500mg",
+    "times": [
+      "18:00"
+    ],
+    "addedAt": 1790888832607
+  },
+  {
+    "name": "Exopet/Nexpro",
+    "dosage": "Metformin 500mg, Lisinopril 2.5 mg",
+    "times": [
+      "18:00"
+    ],
+    "addedAt": 1790888832607
+  },
+  {
+    "name": "Amoxil",
+    "dosage": "50 mg",
+    "times": [
+      "08:00"
+    ],
+    "purpose": "1 cap. 3x a day for 7 days",
+    "addedAt": 1790890441977
+  },
+  {
+    "name": "Amoxirillin",
+    "dosage": "500mg",
+    "times": [
+      "08:00",
+      "13:00",
+      "20:00"
+    ],
+    "purpose": "3X a day",
+    "addedAt": 1790937197513
+  },
+  {
+    "name": "Lisinopril",
+    "dosage": "10mg",
+    "times": [
+      "08:00"
+    ],
+    "purpose": "for blood pressure control",
+    "addedAt": 1790937277360
+  },
+  {
+    "name": "Atorvastatin",
+    "dosage": "20mg",
+    "times": [
+      "21:00"
+    ],
+    "purpose": "with water for cholesterol",
+    "addedAt": 1790937277360
+  },
+  {
+    "name": "Aspirin",
+    "dosage": "75mg",
+    "times": [
+      "08:00"
+    ],
+    "purpose": "as antiplatelet therapy",
+    "addedAt": 1790937277360
+  },
+  {
+    "name": "Total Bilirubin",
+    "times": [
+      "08:00"
+    ],
+    "addedAt": 1790938042087
+  },
+  {
+    "name": "Direct Bilirubin",
+    "times": [
+      "08:00"
+    ],
+    "addedAt": 1790938042087
+  },
+  {
+    "name": "Indirect Bilirubin",
+    "times": [
+      "08:00"
+    ],
+    "addedAt": 1790938042087
+  },
+  {
+    "name": "Alanine Aminotransferase (ALT / SGPT)",
+    "times": [
+      "08:00"
+    ],
+    "addedAt": 1790938042087
+  },
+  {
+    "name": "Aspartate Aminotransferase (AST / SGOT)",
+    "times": [
+      "08:00"
+    ],
+    "addedAt": 1790938042087
+  },
+  {
+    "name": "Alkaline Phosphatase (ALP)",
+    "times": [
+      "08:00"
+    ],
+    "addedAt": 1790938042087
+  },
+  {
+    "name": "Gamma-Glutamyl Transferase (GGT)",
+    "times": [
+      "08:00"
+    ],
+    "addedAt": 1790938042087
+  },
+  {
+    "name": "Total Protein",
+    "times": [
+      "08:00"
+    ],
+    "addedAt": 1790938042087
+  },
+  {
+    "name": "Albumin",
+    "times": [
+      "08:00"
+    ],
+    "addedAt": 1790938042087
+  },
+  {
+    "name": "Globulin",
+    "times": [
+      "08:00"
+    ],
+    "addedAt": 1790938042087
+  },
+  {
+    "name": "A/G Ratio",
+    "times": [
+      "08:00"
+    ],
+    "addedAt": 1790938042087
+  },
+  {
+    "name": "Lactate Dehydrogenase (LDH)",
+    "times": [
+      "08:00"
+    ],
+    "addedAt": 1790938042087
   }
 ]
