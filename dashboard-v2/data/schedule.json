@@ -1,10 +1,29 @@
 [
   {
-    "time": "08:00",
-    "medicine": "Aspirin",
-    "dosage": "81mg",
+    "boxNumber": 2,
+    "medicine": "Amoxirillin",
+    "dosage": "500mg",
+    "time": "05:04",
+    "taken": true,
+    "takenAt": "06:34:14",
+    "_id": "6ac0548ed82925891f2b44c2"
+  },
+  {
+    "boxNumber": 3,
+    "medicine": "T. Placida",
+    "dosage": "",
+    "time": "05:24",
+    "taken": true,
+    "takenAt": "06:34:08",
+    "_id": "6ac0548ed82925891f2b44c3"
+  },
+  {
     "boxNumber": 1,
-    "taken": false,
-    "missed": false
+    "medicine": "Amoxirillin",
+    "dosage": "500mg",
+    "time": "05:48",
+    "taken": true,
+    "takenAt": "06:33:56",
+    "_id": "6ac0548ed82925891f2b44c4"
   }
 ]

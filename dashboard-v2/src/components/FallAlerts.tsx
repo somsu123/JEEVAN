@@ -52,7 +52,10 @@ function severityConfig(type: FallEvent['type']) {
   }
 }
 
-function ConfidenceMeter({ value }: { value: number }) {
+function ConfidenceMeter({ value }: { value: number | null }) {
+  if (value == null || !Number.isFinite(value)) {
+    return <span className="text-[10px] text-slate-500 font-mono">Unavailable</span>;
+  }
   const pct = Math.round(value * 100);
   const color = value >= 0.85 ? '#f43f5e' : value >= 0.65 ? '#f59e0b' : '#eab308';
   return (

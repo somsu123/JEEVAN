@@ -50,8 +50,8 @@ function SignalBars({ signal }) {
 }
 
 export default function SensorStatus({ sensorStatus }) {
-  const { fingerDetected, signal, irValue, redValue, uptime } = sensorStatus;
-  const signalInfo = getSignalLevel(signal);
+  const { fingerDetected, signal, irValue, redValue, uptime, sensorError } = sensorStatus;
+  const signalInfo = getSignalLevel(fingerDetected ? signal : 'unknown');
 
   return (
     <div className="glass-card p-6" id="sensor-status">
@@ -61,6 +61,12 @@ export default function SensorStatus({ sensorStatus }) {
       </div>
 
       <div className="space-y-4">
+        {sensorError && (
+          <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-300">
+            Sensor unavailable. Vitals are not current.
+          </div>
+        )}
+
         {/* Finger Detection */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -88,7 +94,7 @@ export default function SensorStatus({ sensorStatus }) {
           </div>
           <div className="flex items-center gap-3">
             <span className="text-xs text-slate-400">{signalInfo.label}</span>
-            <SignalBars signal={signal} />
+            <SignalBars signal={fingerDetected ? signal : 'unknown'} />
           </div>
         </div>
 
@@ -101,7 +107,7 @@ export default function SensorStatus({ sensorStatus }) {
             <span className="text-sm text-slate-300">IR</span>
           </div>
           <span className="text-xs text-slate-400 tabular-nums" style={{ fontFamily: 'var(--font-mono)' }}>
-            {irValue > 0 ? irValue.toLocaleString() : '—'}
+            {fingerDetected && irValue > 0 ? irValue.toLocaleString() : '—'}
           </span>
         </div>
 
@@ -114,7 +120,7 @@ export default function SensorStatus({ sensorStatus }) {
             <span className="text-sm text-slate-300">Red</span>
           </div>
           <span className="text-xs text-slate-400 tabular-nums" style={{ fontFamily: 'var(--font-mono)' }}>
-            {redValue > 0 ? redValue.toLocaleString() : '—'}
+            {fingerDetected && redValue > 0 ? redValue.toLocaleString() : '—'}
           </span>
         </div>
 
@@ -125,7 +131,7 @@ export default function SensorStatus({ sensorStatus }) {
             <span className="text-sm text-slate-300">Device Uptime</span>
           </div>
           <span className="text-xs text-slate-400 tabular-nums" style={{ fontFamily: 'var(--font-mono)' }}>
-            {formatUptime(uptime)}
+            {uptime > 0 ? formatUptime(uptime) : '--'}
           </span>
         </div>
       </div>

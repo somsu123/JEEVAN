@@ -1,256 +1,315 @@
+/*
+  JEEVAN Wearable Fall Detector - ESP32 Firmware
+  Corrected Logic & Edge-Case Guardrails
+*/
+
 #include <Wire.h>
 #include <math.h>
 #include <WiFi.h>
-#include <WiFiClientSecure.h>
-#include <UniversalTelegramBot.h>
+#include <HTTPClient.h>
 #include <HardwareSerial.h>
 #include <TinyGPSPlus.h>
 
-// ---- Fill these in ----
-#define WIFI_SSID   "ElderCare"
+#define USE_BACKEND   1
+#define USE_TELEGRAM  0
+
+#define WIFI_SSID    "ElderCare"
 #define WIFI_PASS    "ami bolbona"
-#define BOT_TOKEN   "YOUR_BOT_TOKEN"
-#define CHAT_ID     "YOUR_CHAT_ID"
+#define BACKEND_URL  "http://192.168.1.50:5000/api/fall"
 
-WiFiClientSecure secured_client;
-UniversalTelegramBot bot(BOT_TOKEN, secured_client);
+#define SDA_PIN      21
+#define SCL_PIN      22
+#define MPU_ADDR     0x68
+#define BUZZER_PIN   25
+#define BUTTON_PIN   27
 
-// ---- Pins ----
-#define SDA_PIN 6
-#define SCL_PIN 7
-#define MPU_ADDR 0x68
-#define BUZZER_PIN 4
-#define BUTTON_PIN 2
-#define GPS_RX_PIN 17
-#define GPS_TX_PIN 16
+// Reassigned to GPIO4/GPIO2 for safety across all ESP32 variants
+#define GPS_RX_PIN   4   
+#define GPS_TX_PIN   2   
 
-HardwareSerial GPSSerial(1);
+HardwareSerial GPSSerial(2);
 TinyGPSPlus gps;
 
-// ---- Detection thresholds ----
-#define FREEFALL_G 0.75
-#define IMPACT_G 3.00
-#define TILT_ANGLE 35.0
-#define STILL_MOTION_DPS 15.0
-#define STILL_TIME_MS 5000
-#define SAMPLE_INTERVAL 20
+#define FREEFALL_G         0.75
+#define IMPACT_G           3.00
+#define TILT_ANGLE         35.0
+#define STILL_MOTION_DPS   25.0  // Relaxed slightly to handle minor body tremors
+#define STILL_TIME_MS      5000
+#define SAMPLE_INTERVAL    20
+#define IMPACT_TIMEOUT_MS  15000
+#define CANCEL_WINDOW_MS   10000
+#define SOS_COOLDOWN_MS    5000
+
+#define ACCEL_LSB_PER_G    4096.0
+#define GYRO_LSB_PER_DPS   131.0
 
 enum State { NORMAL, FREE_FALL, IMPACT, FALL_CONFIRMED };
 State state = NORMAL;
 
 unsigned long freeFallStart = 0, impactStart = 0, stillStart = 0, lastSample = 0;
+unsigned long confirmStart = 0, lastSOS = 0, lastWifiTry = 0, lastGpsUpdate = 0;
 float refPitch = 0, refRoll = 0;
 float gyroBiasX = 0, gyroBiasY = 0, gyroBiasZ = 0;
 bool alertSent = false;
 double lastLat = 0, lastLng = 0;
-bool haveFix = false;
 
-void setup()
-{
+void setup() {
   Serial.begin(115200);
-  Wire.begin(SDA_PIN, SCL_PIN);
   pinMode(BUZZER_PIN, OUTPUT);
+  digitalWrite(BUZZER_PIN, LOW);
   pinMode(BUTTON_PIN, INPUT_PULLUP);
 
-  // Wake up MPU6050
-  Wire.beginTransmission(MPU_ADDR);
-  Wire.write(0x6B);
-  Wire.write(0);
-  Wire.endTransmission();
-
+  Wire.begin(SDA_PIN, SCL_PIN);
+  Wire.setClock(400000);
+  initMPU();
+  delay(100);
+  
   calibrateGyro();
   captureReference();
 
   GPSSerial.begin(9600, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
 
+  WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
-  Serial.print("Connecting to WiFi");
-  while (WiFi.status() != WL_CONNECTED) { delay(500); Serial.print("."); }
-  Serial.println(" connected!");
-  secured_client.setInsecure();
-
-  Serial.println("Ready.");
 }
 
-void loop()
-{
-  // Read GPS continuously
-  while (GPSSerial.available())
-  {
+void loop() {
+  unsigned long now = millis();
+
+  while (GPSSerial.available()) {
     gps.encode(GPSSerial.read());
   }
-  if (gps.location.isValid())
-  {
+
+  if (gps.location.isValid() && gps.location.isUpdated()) {
     lastLat = gps.location.lat();
     lastLng = gps.location.lng();
-    haveFix = true;
+    lastGpsUpdate = now;
   }
 
-  // Manual SOS button
-  if (digitalRead(BUTTON_PIN) == LOW)
-  {
-    delay(50); // simple debounce
-    if (digitalRead(BUTTON_PIN) == LOW)
-    {
+  // WiFi Reconnection non-blocking check
+  if (WiFi.status() != WL_CONNECTED && now - lastWifiTry > 10000) {
+    lastWifiTry = now;
+    WiFi.disconnect();
+    WiFi.begin(WIFI_SSID, WIFI_PASS);
+  }
+
+  // Button handler
+  if (buttonPressed()) {
+    if (state == FALL_CONFIRMED && !alertSent) {
+      Serial.println("Fall alert cancelled by user");
+      resetToNormal();
+    } else if (now - lastSOS > SOS_COOLDOWN_MS) {
+      lastSOS = now;
       soundBuzzer(true);
-      sendAlert("MANUAL DISTRESS BUTTON");
-      delay(2000);
+      sendAlert("sos", "MANUAL DISTRESS BUTTON");
+      delay(1500);
       soundBuzzer(false);
     }
   }
 
-  // Sample MPU at a fixed rate
-  unsigned long now = millis();
-  if (now - lastSample >= SAMPLE_INTERVAL)
-  {
+  if (now - lastSample >= SAMPLE_INTERVAL) {
     lastSample = now;
     runDetection(now);
   }
 }
 
-void runDetection(unsigned long now)
-{
+void runDetection(unsigned long now) {
   float ax, ay, az, gx, gy, gz;
-  readMPU(ax, ay, az, gx, gy, gz);
+  if (!readMPU(ax, ay, az, gx, gy, gz)) return;
 
   float accel = sqrt(ax * ax + ay * ay + az * az);
   float pitch = atan2(ax, sqrt(ay * ay + az * az)) * 180.0 / PI;
   float roll  = atan2(ay, sqrt(ax * ax + az * az)) * 180.0 / PI;
   float motionDps = fabs(gx) + fabs(gy) + fabs(gz);
 
-  switch (state)
-  {
+  switch (state) {
     case NORMAL:
-      if (accel < FREEFALL_G)
-      {
+      if (accel < FREEFALL_G) {
         state = FREE_FALL;
         freeFallStart = now;
-        Serial.println("-> FREE_FALL");
       }
       break;
 
     case FREE_FALL:
-      if (accel > IMPACT_G)
-      {
+      if (accel > IMPACT_G) {
         state = IMPACT;
         impactStart = now;
         stillStart = 0;
-        Serial.println("-> IMPACT");
-      }
-      else if (now - freeFallStart > 700)
-      {
-        state = NORMAL; // no impact followed, false alarm
+      } else if (now - freeFallStart > 700) {
+        state = NORMAL;
       }
       break;
 
     case IMPACT:
-      if (now - impactStart < 400) return; // let tumbling settle first
+      if (now - impactStart < 150) return; // Reduced settling wait time
 
-      if (fabs(pitch - refPitch) > TILT_ANGLE || fabs(roll - refRoll) > TILT_ANGLE)
-      {
-        if (motionDps < STILL_MOTION_DPS)
-        {
-          if (stillStart == 0) stillStart = now;
-          if (now - stillStart > STILL_TIME_MS)
-          {
-            state = FALL_CONFIRMED;
-            Serial.println("### FALL DETECTED ###");
-          }
-        }
-        else
-        {
-          stillStart = 0; // moved again, reset the wait
-        }
+      if (now - impactStart > IMPACT_TIMEOUT_MS) {
+        state = NORMAL;
+        break;
       }
-      else
-      {
-        state = NORMAL; // orientation didn't really change, false alarm
+
+      if (fabs(pitch - refPitch) > TILT_ANGLE || fabs(roll - refRoll) > TILT_ANGLE) {
+        if (motionDps < STILL_MOTION_DPS) {
+          if (stillStart == 0) stillStart = now;
+          if (now - stillStart > STILL_TIME_MS) {
+            state = FALL_CONFIRMED;
+            confirmStart = now;
+            alertSent = false;
+            soundBuzzer(true);
+          }
+        } else {
+          stillStart = 0;
+        }
+      } else {
+        state = NORMAL;
       }
       break;
 
     case FALL_CONFIRMED:
-      if (!alertSent)
-      {
-        soundBuzzer(true);
-        sendAlert("FALL DETECTED");
-        alertSent = true;
-      }
-      if (motionDps > 60.0) // person moved - recovered
-      {
-        state = NORMAL;
-        alertSent = false;
-        soundBuzzer(false);
+      if (!alertSent) {
+        if (motionDps > 60.0) {
+          resetToNormal();
+        } else if (now - confirmStart > CANCEL_WINDOW_MS) {
+          sendAlert("fall", "FALL DETECTED");
+          alertSent = true;
+          soundBuzzer(false); // Turn off continuous buzzer after sending alert
+        }
+      } else if (motionDps > 60.0) {
+        resetToNormal();
       }
       break;
   }
 }
 
-void readMPU(float &ax, float &ay, float &az, float &gx, float &gy, float &gz)
-{
+void resetToNormal() {
+  state = NORMAL;
+  alertSent = false;
+  stillStart = 0;
+  soundBuzzer(false);
+}
+
+void writeMPU(uint8_t reg, uint8_t val) {
+  Wire.beginTransmission(MPU_ADDR);
+  Wire.write(reg);
+  Wire.write(val);
+  Wire.endTransmission();
+}
+
+void initMPU() {
+  writeMPU(0x6B, 0x00); // Wake up
+  writeMPU(0x1A, 0x03); // DLPF ~44Hz
+  writeMPU(0x1B, 0x00); // Gyro +/-250 dps
+  writeMPU(0x1C, 0x10); // Accel +/-8g
+}
+
+bool readMPU(float &ax, float &ay, float &az, float &gx, float &gy, float &gz) {
   Wire.beginTransmission(MPU_ADDR);
   Wire.write(0x3B);
-  Wire.endTransmission(false);
-  Wire.requestFrom(MPU_ADDR, 14);
+  if (Wire.endTransmission(false) != 0) return false;
+  if (Wire.requestFrom(MPU_ADDR, 14) != 14) return false;
 
   int16_t rawAx = Wire.read() << 8 | Wire.read();
   int16_t rawAy = Wire.read() << 8 | Wire.read();
   int16_t rawAz = Wire.read() << 8 | Wire.read();
-  Wire.read(); Wire.read(); // skip temperature
+  Wire.read(); Wire.read();
   int16_t rawGx = Wire.read() << 8 | Wire.read();
   int16_t rawGy = Wire.read() << 8 | Wire.read();
   int16_t rawGz = Wire.read() << 8 | Wire.read();
 
-  ax = rawAx / 16384.0;
-  ay = rawAy / 16384.0;
-  az = rawAz / 16384.0;
-  gx = (rawGx - gyroBiasX) / 131.0;
-  gy = (rawGy - gyroBiasY) / 131.0;
-  gz = (rawGz - gyroBiasZ) / 131.0;
+  ax = rawAx / ACCEL_LSB_PER_G;
+  ay = rawAy / ACCEL_LSB_PER_G;
+  az = rawAz / ACCEL_LSB_PER_G;
+  gx = (rawGx - gyroBiasX) / GYRO_LSB_PER_DPS;
+  gy = (rawGy - gyroBiasY) / GYRO_LSB_PER_DPS;
+  gz = (rawGz - gyroBiasZ) / GYRO_LSB_PER_DPS;
+  return true;
 }
 
-void calibrateGyro()
-{
+void calibrateGyro() {
   long sx = 0, sy = 0, sz = 0;
-  for (int i = 0; i < 200; i++)
-  {
+  int n = 0;
+  for (int i = 0; i < 200; i++) {
     Wire.beginTransmission(MPU_ADDR);
     Wire.write(0x43);
-    Wire.endTransmission(false);
-    Wire.requestFrom(MPU_ADDR, 6);
-    sx += Wire.read() << 8 | Wire.read();
-    sy += Wire.read() << 8 | Wire.read();
-    sz += Wire.read() << 8 | Wire.read();
+    if (Wire.endTransmission(false) != 0) continue;
+    if (Wire.requestFrom(MPU_ADDR, 6) != 6) continue;
+    sx += (int16_t)(Wire.read() << 8 | Wire.read());
+    sy += (int16_t)(Wire.read() << 8 | Wire.read());
+    sz += (int16_t)(Wire.read() << 8 | Wire.read());
+    n++;
     delay(5);
   }
-  gyroBiasX = sx / 200.0;
-  gyroBiasY = sy / 200.0;
-  gyroBiasZ = sz / 200.0;
+  if (n > 0) {
+    gyroBiasX = sx / (float)n;
+    gyroBiasY = sy / (float)n;
+    gyroBiasZ = sz / (float)n;
+  }
 }
 
-void captureReference()
-{
-  float ax, ay, az, gx, gy, gz;
-  readMPU(ax, ay, az, gx, gy, gz);
-  refPitch = atan2(ax, sqrt(ay * ay + az * az)) * 180.0 / PI;
-  refRoll  = atan2(ay, sqrt(ax * ax + az * az)) * 180.0 / PI;
+void captureReference() {
+  float sumP = 0, sumR = 0;
+  int count = 0;
+  for (int i = 0; i < 50; i++) {
+    float ax, ay, az, gx, gy, gz;
+    if (readMPU(ax, ay, az, gx, gy, gz)) {
+      sumP += atan2(ax, sqrt(ay * ay + az * az)) * 180.0 / PI;
+      sumR += atan2(ay, sqrt(ax * ax + az * az)) * 180.0 / PI;
+      count++;
+    }
+    delay(20);
+  }
+  if (count > 0) {
+    refPitch = sumP / count;
+    refRoll = sumR / count;
+  }
 }
 
-void soundBuzzer(bool on)
-{
+bool buttonPressed() {
+  static bool lastStable = HIGH;
+  static bool lastRead = HIGH;
+  static unsigned long changeTime = 0;
+
+  bool r = digitalRead(BUTTON_PIN);
+  if (r != lastRead) { lastRead = r; changeTime = millis(); }
+  if (millis() - changeTime > 50 && r != lastStable) {
+    lastStable = r;
+    if (lastStable == LOW) return true;
+  }
+  return false;
+}
+
+void soundBuzzer(bool on) {
   digitalWrite(BUZZER_PIN, on ? HIGH : LOW);
 }
 
-void sendAlert(const char* reason)
-{
-  String msg = "ALERT: " + String(reason) + "\n";
-  if (haveFix)
-  {
-    msg += "Location: https://maps.google.com/?q=" + String(lastLat, 6) + "," + String(lastLng, 6);
+void sendAlert(const char* type, const char* reason) {
+  bool haveFix = (millis() - lastGpsUpdate < 10000);
+
+  String mapsUrl = haveFix
+    ? "https://maps.google.com/?q=" + String(lastLat, 6) + "," + String(lastLng, 6)
+    : "";
+
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi disconnected - Alert failed!");
+    return;
   }
-  else
+
+#if USE_BACKEND
   {
-    msg += "Location: no GPS fix available.";
+    String json = "{\"type\":\"" + String(type) + "\","
+                  "\"reason\":\"" + String(reason) + "\","
+                  "\"has_fix\":" + String(haveFix ? "true" : "false");
+    if (haveFix)
+      json += ",\"lat\":" + String(lastLat, 6) + ",\"lng\":" + String(lastLng, 6) +
+              ",\"maps_url\":\"" + mapsUrl + "\"";
+    json += "}";
+
+    HTTPClient http;
+    http.begin(BACKEND_URL);
+    http.addHeader("Content-Type", "application/json");
+    http.setTimeout(5000);
+    int code = http.POST(json);
+    http.end();
   }
-  bot.sendMessage(CHAT_ID, msg, "");
-  Serial.println("Alert sent: " + msg);
+#endif
 }

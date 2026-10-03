@@ -2,13 +2,14 @@
  * ============================================================
  *  bpmStore.js — In-Memory Vitals Ring Buffer
  * ============================================================
- *  Stores the last MAX_SIZE readings (default 300 = 5 min @ 1/s).
+ *  Stores at most MAX_SIZE readings (300 packets = 75 s at 4 Hz).
  *  Tracks: bpm, spo2, irValue, redValue, fingerDetected, signal,
  *          uptime, timestamp.
  * ============================================================
  */
 
 const MAX_SIZE = 300;
+const DEFAULT_STALE_TTL_MS = 6000; // Tolerates network jitter while remaining snappy.
 
 class BpmStore {
   constructor() {
@@ -16,6 +17,7 @@ class BpmStore {
     this.buffer       = [];
     this.espConnected = false;
     this.lastReceived = null;
+    this.connectedAt  = null;
   }
 
   /**
@@ -31,6 +33,13 @@ class BpmStore {
   }
 
   /** Get the most recent entry, or null. */
+  getLatestValid() {
+    for (let i = this.buffer.length - 1; i >= 0; i--) {
+      if (this.buffer[i].fingerDetected && this.buffer[i].bpm > 0) return this.buffer[i];
+    }
+    return null;
+  }
+
   getLatest() {
     return this.buffer.length > 0
       ? this.buffer[this.buffer.length - 1]
@@ -52,6 +61,13 @@ class BpmStore {
    * @returns {{ bpm: object, spo2: object }}
    */
   getStats() {
+    if (!this.espConnected) {
+      return {
+        bpm:  { min: 0, max: 0, avg: 0, count: 0 },
+        spo2: { min: 0, max: 0, avg: 0, count: 0 },
+      };
+    }
+
     const validEntries = this.buffer.filter(e => e.fingerDetected && e.bpm > 0);
 
     if (validEntries.length === 0) {
@@ -88,20 +104,44 @@ class BpmStore {
 
   /** Set ESP32 connection status */
   setEspConnected(status) {
-    this.espConnected = status;
+    this.espConnected = Boolean(status);
+    if (this.espConnected) {
+      this.connectedAt = Date.now();
+    } else {
+      this.connectedAt = null;
+      // Retain this.lastReceived and this.buffer across transient reconnects
+    }
+  }
+
+  /** Check packet freshness, including a connection that has sent no first packet. */
+  isStale(now = Date.now(), ttlMs = DEFAULT_STALE_TTL_MS) {
+    if (!this.espConnected) return false;
+    const freshnessBase = this.lastReceived ?? this.connectedAt;
+    return freshnessBase !== null && now - freshnessBase >= ttlMs;
+  }
+
+  /** Clear a connected device's readings once packet freshness expires. */
+  clearIfStale(now = Date.now(), ttlMs = DEFAULT_STALE_TTL_MS) {
+    if (!this.isStale(now, ttlMs)) return false;
+    this.lastReceived = null;
+    return true;
   }
 
   /** Get connection / status summary */
   getStatus() {
-    const latest = this.getLatest();
+    const isFresh = this.lastReceived !== null && (Date.now() - this.lastReceived < DEFAULT_STALE_TTL_MS);
+    const latest = isFresh ? this.getLatest() : null;
+    const latestValid = isFresh ? this.getLatestValid() : null;
+    const fingerDetected = Boolean(isFresh && latest?.fingerDetected);
+
     return {
-      espConnected:    this.espConnected,
-      fingerDetected:  latest?.fingerDetected ?? false,
-      signal:          latest?.signal ?? 'unknown',
+      espConnected:    this.espConnected || isFresh,
+      fingerDetected:  fingerDetected,
+      signal:          (isFresh && latest?.signal) ? latest.signal : 'unknown',
       lastReceived:    this.lastReceived,
       totalReadings:   this.buffer.length,
-      latestBpm:       latest?.bpm  ?? null,
-      latestSpo2:      latest?.spo2 ?? null,
+      latestBpm:       fingerDetected ? (latestValid?.bpm || latest?.bpm || null) : null,
+      latestSpo2:      fingerDetected ? (latestValid?.spo2 || latest?.spo2 || null) : null,
     };
   }
 }

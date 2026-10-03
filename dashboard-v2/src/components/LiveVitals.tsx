@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Heart,
   Activity,
@@ -14,10 +14,15 @@ interface LiveVitalsProps {
   vitals: VitalState;
   hardwareOnline: boolean;
   espConnected?: boolean;
+  hideHeader?: boolean;
+  isHomeView?: boolean;
 }
 
 // ─── Status color utilities ───────────────────────────────────────────────────
-function spo2Status(spo2: number) {
+function spo2Status(spo2: number, fingerPresent: boolean = false) {
+  if (!fingerPresent || !spo2 || spo2 <= 0) {
+    return { label: 'Standby', color: 'text-slate-500', bg: 'bg-slate-800/50', border: 'border-slate-700/50' };
+  }
   if (spo2 < 90) return { label: 'CRITICAL LOW', color: 'text-rose-400', bg: 'bg-rose-500/10', border: 'border-rose-500/20' };
   if (spo2 < 94) return { label: 'LOW', color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/20' };
   return { label: 'Normal', color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20' };
@@ -43,6 +48,7 @@ const movementIcons: Record<string, React.ElementType> = {
   'Gentle Walk': Footprints,
   'Seated Activity': User,
   'Sleeping': Activity,
+  'Unknown': Activity,
 };
 
 // ─── ECG Sparkline Component ──────────────────────────────────────────────────
@@ -178,7 +184,7 @@ function SpO2Gauge({ value, status }: { value: number; status: { label: string; 
         />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-3xl font-headline font-bold text-slate-100">
+        <span className={`text-3xl font-headline font-bold ${value > 0 ? 'text-slate-100' : 'text-slate-600'}`}>
           {value > 0 ? value : '--'}<span className="text-base text-slate-400">%</span>
         </span>
         <span className={`text-[10px] font-medium mt-0.5 ${status.color}`}>{status.label}</span>
@@ -187,18 +193,31 @@ function SpO2Gauge({ value, status }: { value: number; status: { label: string; 
   );
 }
 
-export default function LiveVitals({ vitals, hardwareOnline, espConnected = false }: LiveVitalsProps) {
-  const spo2St = spo2Status(vitals.oxygenSpO2);
-  const sigBadge = signalBadge(vitals.signalQuality);
+export default function LiveVitals({ vitals, hardwareOnline, espConnected = false, hideHeader = false, isHomeView = false }: LiveVitalsProps) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const packetAgeMs = vitals.lastPacketAt == null ? Infinity : Math.max(0, now - vitals.lastPacketAt);
+  const vitalsFresh = espConnected && vitals.lastPacketAt != null && packetAgeMs <= 8000;
+  const fingerPresent = vitalsFresh && vitals.fingerPresent;
+  const spo2St = spo2Status(vitals.oxygenSpO2, fingerPresent);
+  const sigBadge = signalBadge(vitalsFresh ? vitals.signalQuality : 'unknown');
   const MovementIcon = movementIcons[vitals.movementState] || Activity;
 
   // Derive sensor state clearly
-  const sensorOffline = !espConnected && !hardwareOnline;
-  const fingerPresent = espConnected && vitals.fingerPresent;
   const bpmHistory = vitals.heartRateHistory || [];
-  const bpmValues = bpmHistory.map((h: any) => h.value).filter((v: number) => v > 0);
+  const bpmValues = vitalsFresh && fingerPresent
+    ? bpmHistory.map((h: any) => h.value).filter((v: number) => v > 0)
+    : [];
   const minBpm = bpmValues.length > 0 ? Math.min(...bpmValues) : '--';
   const maxBpm = bpmValues.length > 0 ? Math.max(...bpmValues) : '--';
+  const hasSedentaryData = typeof vitals.bloodLevelSeconds === 'number' && Number.isFinite(vitals.bloodLevelSeconds);
+  const sedentaryPercent = hasSedentaryData
+    ? Math.min(100, ((vitals.bloodLevelSeconds as number) / 60) * 100)
+    : 0;
 
   return (
     <div className="flex flex-col gap-6 relative">
@@ -206,44 +225,46 @@ export default function LiveVitals({ vitals, hardwareOnline, espConnected = fals
       <div className="orb-emerald -top-40 -right-40" />
 
       {/* ── Header ── */}
+      {!hideHeader && (
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
           <h1 className="text-2xl font-headline font-bold text-slate-100 tracking-tight">
             Live Vitals Monitor
           </h1>
-          <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/20 px-3 py-1 rounded-full">
-            <div className="w-2 h-2 rounded-full bg-red-500 pulse-red-dot" />
-            <span className="text-xs font-bold text-red-400 uppercase tracking-wider font-label">Live</span>
+          <div className={`flex items-center gap-2 px-3 py-1 rounded-full border ${vitalsFresh ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-slate-700/30 border-slate-600/30'}`}>
+            <div className={`w-2 h-2 rounded-full ${vitalsFresh ? 'bg-emerald-500 pulse-emerald' : 'bg-slate-500'}`} />
+            <span className={`text-xs font-bold uppercase tracking-wider font-label ${vitalsFresh ? 'text-emerald-400' : 'text-slate-400'}`}>{vitalsFresh ? 'Live' : 'Stale'}</span>
           </div>
         </div>
         <div className="flex items-center gap-3">
           {/* Signal Quality */}
           <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-mono ${sigBadge.bg} ${sigBadge.border} ${sigBadge.color}`}>
-            <Radio className="w-3.5 h-3.5 animate-pulse" />
+            <Radio className={`w-3.5 h-3.5 ${vitalsFresh ? 'animate-pulse' : ''}`} />
             <span>{sigBadge.label}</span>
           </div>
 
           {/* Hardware Connection */}
           <div className="flex items-center gap-2 bg-slate-800/60 px-3 py-1.5 rounded-lg border border-slate-700/50">
             <div className={`w-2 h-2 rounded-full ${
-              espConnected
+              vitalsFresh
                 ? 'bg-emerald-500 pulse-emerald'
                 : hardwareOnline
-                  ? 'bg-amber-400'
+                  ? 'bg-slate-500'
                   : 'bg-rose-600'
             }`} />
             <span className={`text-xs font-medium ${
-              espConnected ? 'text-emerald-300' : hardwareOnline ? 'text-amber-300' : 'text-rose-400'
+              vitalsFresh ? 'text-emerald-300' : hardwareOnline ? 'text-slate-400' : 'text-rose-400'
             }`}>
-              {espConnected ? 'ESP32 Connected' : hardwareOnline ? 'ESP32 Standby' : 'Sensor Offline'}
+              {vitalsFresh ? 'ESP32 Connected' : hardwareOnline ? 'Waiting for vitals' : 'Sensor Offline'}
             </span>
           </div>
 
           <div className="font-mono text-slate-400 text-xs px-3 py-1.5 bg-slate-800/50 rounded-lg border border-slate-700/50">
-            {vitals.lastUpdated}
+            {vitalsFresh ? vitals.lastUpdated : '--'}
           </div>
         </div>
       </header>
+      )}
 
       {/* ── Bento Grid Layout ── */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1">
@@ -258,10 +279,15 @@ export default function LiveVitals({ vitals, hardwareOnline, espConnected = fals
               <h2 className="text-lg font-headline font-semibold text-slate-200">Heart Rate (BPM)</h2>
             </div>
             {/* Three-state finger/sensor status badge */}
-            {sensorOffline ? (
+            {!vitalsFresh ? (
+              <div className="flex items-center gap-1.5 bg-slate-700/30 px-3 py-1 rounded-full border border-slate-600/30">
+                <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
+                <span className="text-xs font-bold text-slate-400 font-mono tracking-wide">VITALS STALE</span>
+              </div>
+            ) : vitals.sensorError ? (
               <div className="flex items-center gap-1.5 bg-rose-500/10 px-3 py-1 rounded-full border border-rose-500/30">
                 <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
-                <span className="text-xs font-bold text-rose-400 font-mono tracking-wide">⚡ SENSOR OFFLINE</span>
+                <span className="text-xs font-bold text-rose-400 font-mono tracking-wide">SENSOR UNAVAILABLE</span>
               </div>
             ) : fingerPresent ? (
               <div className="flex items-center gap-2 bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/20">
@@ -280,8 +306,8 @@ export default function LiveVitals({ vitals, hardwareOnline, espConnected = fals
           <div className="flex-1 flex flex-col justify-center items-center z-10 py-3">
             <div className="flex items-baseline gap-2">
               <span className={`text-7xl lg:text-8xl font-headline font-bold tracking-tighter transition-colors duration-500 ${
-                sensorOffline
-                  ? 'text-rose-800'
+                !vitalsFresh
+                  ? 'text-slate-600'
                   : fingerPresent
                     ? 'text-emerald-500'
                     : 'text-slate-600'
@@ -293,14 +319,14 @@ export default function LiveVitals({ vitals, hardwareOnline, espConnected = fals
               }`}>BPM</span>
             </div>
             {/* Subtle status line under BPM */}
-            {!sensorOffline && !fingerPresent && (
+            {vitalsFresh && !fingerPresent && (
               <p className="text-xs text-amber-500/70 font-mono mt-2 animate-pulse">
                 Place finger on MAX30102 sensor
               </p>
             )}
-            {sensorOffline && (
-              <p className="text-xs text-rose-500/70 font-mono mt-2">
-                Reconnect ESP32 to resume monitoring
+            {!vitalsFresh && (
+              <p className="text-xs text-slate-500 font-mono mt-2">
+                Waiting for a current sensor packet
               </p>
             )}
             {fingerPresent && typeof vitals.heartRate === 'number' && vitals.heartRate > 0 && (
@@ -366,41 +392,51 @@ export default function LiveVitals({ vitals, hardwareOnline, espConnected = fals
           </div>
 
           {/* Movement Card */}
-          <div className="glass-card rounded-2xl p-5 flex flex-col">
-            <div className="flex items-center gap-2 mb-4">
-              <MovementIcon className="h-4 w-4 text-indigo-400" />
-              <h2 className="text-sm font-headline font-semibold text-slate-300">Activity Status</h2>
-            </div>
-            <div className="flex-1 flex flex-col items-center justify-center">
-              <div className="w-12 h-12 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center mb-2">
-                <MovementIcon className="h-6 w-6 text-indigo-400" />
-              </div>
-              <div className="text-lg font-headline font-semibold text-slate-200">{vitals.movementState}</div>
-              <div className="text-[10px] text-slate-500 mt-1 font-label">Motion Accelerometer</div>
-            </div>
-          </div>
-
-          {/* Room Presence Card */}
-          <div className="glass-card rounded-2xl p-5 flex flex-col">
-            <div className="flex items-center gap-2 mb-4">
-              <User className="h-4 w-4 text-teal-400" />
-              <h2 className="text-sm font-headline font-semibold text-slate-300">Room Presence</h2>
-            </div>
-            <div className="flex-1 flex flex-col items-center justify-center">
-              <div className="relative mb-2">
-                <div className="w-12 h-12 rounded-full bg-slate-800/80 flex items-center justify-center border border-slate-700">
-                  <User className="h-6 w-6 text-slate-300" />
+          {!isHomeView && (
+            <>
+              <div className="glass-card rounded-2xl p-5 flex flex-col">
+                <div className="flex items-center gap-2 mb-4">
+                  <MovementIcon className="h-4 w-4 text-indigo-400" />
+                  <h2 className="text-sm font-headline font-semibold text-slate-300">Activity Status</h2>
                 </div>
-                <div className={`absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full border-2 border-slate-900 ${
-                  vitals.roomPresence ? 'bg-emerald-500' : 'bg-slate-600'
-                }`} />
+                <div className="flex-1 flex flex-col items-center justify-center">
+                  <div className="w-12 h-12 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center mb-2">
+                    <MovementIcon className="h-6 w-6 text-indigo-400" />
+                  </div>
+                  <div className={`text-lg font-headline font-semibold ${vitals.movementState === 'Unknown' ? 'text-slate-500' : 'text-slate-200'}`}>
+                    {vitals.movementState === 'Unknown' ? '--' : vitals.movementState}
+                  </div>
+                  <div className="text-[10px] text-slate-500 mt-1 font-label">
+                    {vitals.movementState === 'Unknown' ? 'No movement telemetry' : 'Motion Accelerometer'}
+                  </div>
+                </div>
               </div>
-              <span className="text-lg font-headline font-semibold text-slate-200">
-                {vitals.roomPresence ? 'Patient Present' : 'No Presence'}
-              </span>
-              <p className="text-[10px] text-slate-500 font-label mt-1">Ultrasonic HC-SR04</p>
-            </div>
-          </div>
+
+              {/* Room Presence Card */}
+              <div className="glass-card rounded-2xl p-5 flex flex-col">
+                <div className="flex items-center gap-2 mb-4">
+                  <User className="h-4 w-4 text-teal-400" />
+                  <h2 className="text-sm font-headline font-semibold text-slate-300">Room Presence</h2>
+                </div>
+                <div className="flex-1 flex flex-col items-center justify-center">
+                  <div className="relative mb-2">
+                    <div className="w-12 h-12 rounded-full bg-slate-800/80 flex items-center justify-center border border-slate-700">
+                      <User className="h-6 w-6 text-slate-300" />
+                    </div>
+                    <div className={`absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full border-2 border-slate-900 ${
+                      vitals.roomPresence === null ? 'bg-slate-600' : vitals.roomPresence ? 'bg-emerald-500' : 'bg-slate-600'
+                    }`} />
+                  </div>
+                  <span className="text-lg font-headline font-semibold text-slate-200">
+                    {vitals.roomPresence === null ? 'Unavailable' : vitals.roomPresence ? 'Patient Present' : 'No Presence'}
+                  </span>
+                  <p className="text-[10px] text-slate-500 font-label mt-1">
+                    {vitals.roomPresence === null ? 'No presence telemetry' : 'Ultrasonic HC-SR04'}
+                  </p>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -409,16 +445,18 @@ export default function LiveVitals({ vitals, hardwareOnline, espConnected = fals
         <div className="flex justify-between items-end mb-2">
           <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider font-label">Sedentary Time Tracker</span>
           <span className="text-xs font-mono text-slate-500">
-            {vitals.movementState === 'Resting' ? 'Resting' : 'Active'} for <span className="text-amber-400 font-bold">{vitals.bloodLevelSeconds} min</span>
+            {hasSedentaryData
+              ? <>{vitals.movementState === 'Resting' ? 'Resting' : 'Active'} for <span className="text-amber-400 font-bold">{Math.round((vitals.bloodLevelSeconds as number) / 60)} min</span></>
+              : 'Activity duration unavailable'}
           </span>
         </div>
         <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
           <div
-            className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-full shadow-[0_0_10px_rgba(16,185,129,0.4)] transition-all duration-500"
-            style={{ width: `${Math.min(100, (vitals.bloodLevelSeconds / 60) * 100)}%` }}
+            className={`h-full rounded-full transition-all duration-500 ${hasSedentaryData ? 'bg-gradient-to-r from-emerald-500 to-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.4)]' : 'bg-slate-700'}`}
+            style={{ width: `${sedentaryPercent}%` }}
           />
         </div>
-        {vitals.bloodLevelSeconds > 45 && (
+        {hasSedentaryData && (vitals.bloodLevelSeconds ?? 0) > 2700 && (
           <p className="text-[10px] text-amber-400 mt-1.5 font-mono">⚠ Consider encouraging gentle movement to improve circulation.</p>
         )}
       </div>

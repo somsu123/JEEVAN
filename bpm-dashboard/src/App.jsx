@@ -24,6 +24,7 @@ export default function App() {
     history,
     isConnected,
     espConnected,
+    isFresh,
     sensorStatus,
     lastUpdate,
     stats,
@@ -107,7 +108,7 @@ export default function App() {
 
           {/* Right column — Dual-metric chart */}
           <div className="lg:col-span-8 animate-fade-in animate-fade-in-delay-2">
-            <BpmChart history={history} />
+            <BpmChart history={history} isFresh={isFresh} />
           </div>
         </div>
       </main>

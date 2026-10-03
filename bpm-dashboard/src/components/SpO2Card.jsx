@@ -123,7 +123,7 @@ export default function SpO2Card({ spo2, fingerDetected, stats }) {
       </div>
 
       {/* Stats bar */}
-      {stats && stats.count > 0 && (
+      {fingerDetected && stats && stats.count > 0 && (
         <div className="flex items-center gap-6 pt-4 border-t border-white/[0.06]">
           <div className="flex flex-col">
             <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">Min</span>

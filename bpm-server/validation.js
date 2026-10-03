@@ -1,64 +1,69 @@
 /**
- * ============================================================
- *  validation.js — BPM + SpO₂ Payload Validation
- * ============================================================
- *  Validates and sanitises incoming JSON from the ESP32.
- *  Accepts: bpm, spo2, irValue, redValue, fingerDetected,
- *           signal, uptime
- * ============================================================
- */
-
-/**
- * Validate a vitals payload from the ESP32.
- * @param {object} data - Parsed JSON object
- * @returns {{ valid: boolean, cleaned: object|null, error: string|null }}
+ * Validate and normalize one ESP32 vitals packet.
+ *
+ * Broadcast schema (`bpm:data`):
+ * { type, bpm, spo2, irValue, redValue, fingerDetected, signal, uptime,
+ *   perfusionPct, sensorError, timestamp }
+ * `timestamp` is assigned by the server when the packet is accepted.
  */
 function validateBpmPayload(data) {
-  // Must be an object
-  if (!data || typeof data !== 'object') {
-    return { valid: false, cleaned: null, error: 'Payload is not an object' };
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    return { valid: false, cleaned: null, error: 'Payload must be an object' };
+  }
+  if (data.type !== 'vitals') {
+    return { valid: false, cleaned: null, error: 'type must be "vitals"' };
   }
 
-  const { bpm, spo2, irValue, fingerDetected } = data;
-
-  // ── Required fields ──────────────────────────────────────
-  if (typeof bpm !== 'number' || isNaN(bpm)) {
-    return { valid: false, cleaned: null, error: 'bpm must be a number' };
+  const numericFields = ['bpm', 'spo2', 'irValue', 'redValue', 'uptime', 'perfusionPct'];
+  for (const field of numericFields) {
+    if (typeof data[field] !== 'number' || !Number.isFinite(data[field])) {
+      return { valid: false, cleaned: null, error: `${field} must be a finite number` };
+    }
   }
-  if (typeof irValue !== 'number' || isNaN(irValue)) {
-    return { valid: false, cleaned: null, error: 'irValue must be a number' };
-  }
-  if (typeof fingerDetected !== 'boolean') {
+  if (typeof data.fingerDetected !== 'boolean') {
     return { valid: false, cleaned: null, error: 'fingerDetected must be a boolean' };
   }
-
-  // ── Range checks ─────────────────────────────────────────
-  if (bpm < 0 || bpm > 300) {
-    return { valid: false, cleaned: null, error: `bpm out of range: ${bpm}` };
+  if (typeof data.sensorError !== 'boolean') {
+    return { valid: false, cleaned: null, error: 'sensorError must be a boolean' };
   }
-  if (irValue < 0) {
-    return { valid: false, cleaned: null, error: `irValue out of range: ${irValue}` };
+  if (typeof data.signal !== 'string' || data.signal.length > 24) {
+    return { valid: false, cleaned: null, error: 'signal must be a string of at most 24 characters' };
   }
 
-  // ── SpO₂ — optional, default 0 when finger absent/invalid ─
-  let spo2Cleaned = 0;
-  if (typeof spo2 === 'number' && !isNaN(spo2) && spo2 >= 70 && spo2 <= 100) {
-    spo2Cleaned = Math.round(spo2);
-  }
-
-  // ── Build cleaned object ──────────────────────────────────
-  const cleaned = {
-    bpm:            Math.round(bpm),
-    spo2:           spo2Cleaned,
-    irValue:        Math.round(irValue),
-    redValue:       typeof data.redValue === 'number' ? Math.round(data.redValue) : 0,
-    fingerDetected: fingerDetected,
-    signal:         typeof data.signal === 'string' ? data.signal : 'unknown',
-    uptime:         typeof data.uptime === 'number'  ? Math.round(data.uptime) : 0,
-    timestamp:      Date.now(),
+  const ranges = {
+    bpm: [0, 300],
+    spo2: [0, 100], // zero means unavailable; valid sensor readings are 70-100
+    irValue: [0, 0x7fffff],
+    redValue: [0, 0x7fffff],
+    uptime: [0, Number.MAX_SAFE_INTEGER],
+    perfusionPct: [0, 1000],
   };
+  for (const [field, [min, max]] of Object.entries(ranges)) {
+    if (data[field] < min || data[field] > max) {
+      return { valid: false, cleaned: null, error: `${field} out of range` };
+    }
+  }
+  if (data.spo2 !== 0 && data.spo2 < 70) {
+    return { valid: false, cleaned: null, error: 'spo2 must be zero or between 70 and 100' };
+  }
 
-  return { valid: true, cleaned, error: null };
+  return {
+    valid: true,
+    cleaned: {
+      type: 'vitals',
+      bpm: Math.round(data.bpm),
+      spo2: Math.round(data.spo2),
+      irValue: Math.round(data.irValue),
+      redValue: Math.round(data.redValue),
+      fingerDetected: data.fingerDetected,
+      signal: data.signal,
+      uptime: Math.round(data.uptime),
+      perfusionPct: Math.round(data.perfusionPct * 100) / 100,
+      sensorError: data.sensorError,
+      timestamp: Date.now(),
+    },
+    error: null,
+  };
 }
 
 module.exports = { validateBpmPayload };

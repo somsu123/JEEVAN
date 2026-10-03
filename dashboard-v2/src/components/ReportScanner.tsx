@@ -47,11 +47,11 @@ interface RxExtractedMed {
   dosage: string | null;
   frequency_raw: string;
   timings: RxMedTimings;
-  source_line: number;
-  confidence: number;
+  source_line: number | null;
+  confidence: number | null;
   confidence_reason: string;
   illegible_fields: string[];
-  suggestedTime: string;
+  suggestedTime: string | null;
   name: string;
   frequency: string;
   purpose?: string;
@@ -68,24 +68,6 @@ interface RxScanOutput {
   actions?: string[];
   disclaimer?: string;
 }
-
-const SAMPLE_REPORTS = [
-  {
-    name: "Cardio_Prescription_Arthur.png",
-    type: "Cardiology Prescription",
-    mimeType: "image/png",
-    base64: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
-    promptText: "PRESCRIPTION DETAILS:\nPatient: Arthur Campbell, Age: 78\nDiagnosis: Hypertension & Hyperlipidemia\nRx:\n1. Lisinopril 10mg - Take 1 tablet OD (Once daily in the morning at 08:00) for blood pressure control.\n2. Atorvastatin 20mg - Take 1 tablet HS (Bedtime at 21:00) with water for cholesterol.\n3. Aspirin 75mg - Take 1 tablet OD (Morning with food at 08:00) as antiplatelet therapy.\nSpecial Instructions: Monitor blood pressure weekly.",
-  },
-  {
-    name: "Diabetic_Care_Prescription.png",
-    type: "Endocrinology / Diabetes",
-    mimeType: "image/png",
-    base64: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
-    promptText: "PRESCRIPTION DETAILS:\nPatient: Arthur Campbell, Age: 78\nDiagnosis: Type 2 Diabetes Mellitus\nRx:\n1. Metformin 500mg - Take 1 tablet BD (Twice daily at 08:00 and 20:00 with meals) for glucose control.\n2. Glimepiride 1mg - Take 1 tablet OD (Morning before breakfast at 08:00).\n3. Vitamin D3 60,000 IU - Take 1 capsule weekly with milk.\nSpecial Instructions: Check fasting blood glucose regularly.",
-  }
-];
-
 
 function MetricCard({ metric, index }: { metric: any; index: number }) {
   const grad = GRAD_COLORS[index % GRAD_COLORS.length];
@@ -126,7 +108,10 @@ function MetricCard({ metric, index }: { metric: any; index: number }) {
   );
 }
 
-function ConfidenceBar({ value }: { value: number }) {
+function ConfidenceBar({ value }: { value: number | null }) {
+  if (value == null || !Number.isFinite(value)) {
+    return <span className="text-[10px] text-slate-500 font-mono">Unavailable</span>;
+  }
   const pct = Math.round(value * 100);
   const color = value >= 0.8 ? 'bg-emerald-500' : value >= 0.6 ? 'bg-amber-400' : 'bg-red-400';
   const textColor = value >= 0.8 ? 'text-emerald-400' : value >= 0.6 ? 'text-amber-400' : 'text-red-400';
@@ -169,8 +154,8 @@ const GRAD_COLORS = [
 function MedCard({ med, index }: { med: RxExtractedMed; index: number }) {
   const [expanded, setExpanded] = useState(false);
   const grad = GRAD_COLORS[index % GRAD_COLORS.length];
-  const isLowConf = med.confidence < 0.6;
-  const hasMidConf = med.confidence >= 0.6 && med.confidence < 0.8;
+  const isLowConf = med.confidence != null && med.confidence < 0.6;
+  const hasMidConf = med.confidence != null && med.confidence >= 0.6 && med.confidence < 0.8;
   const timings = med.timings || {};
 
   return (
@@ -204,7 +189,7 @@ function MedCard({ med, index }: { med: RxExtractedMed; index: number }) {
                 <AlertCircle className="h-2.5 w-2.5" /> CHECK
               </span>
             )}
-            {!isLowConf && !hasMidConf && (
+            {med.confidence != null && !isLowConf && !hasMidConf && (
               <span className="flex items-center gap-1 text-[9px] font-bold font-mono bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 px-2 py-0.5 rounded-full">
                 <CheckCircle className="h-2.5 w-2.5" /> CLEAR
               </span>
@@ -285,9 +270,8 @@ function MedCard({ med, index }: { med: RxExtractedMed; index: number }) {
               </div>
             )}
             <div className="flex items-center gap-2 text-[9px] font-mono text-slate-500">
-              <span>Line {med.source_line}</span>
-              <span>·</span>
-              <span className="capitalize">{med.form}</span>
+              {med.source_line != null && <><span>Line {med.source_line}</span><span>·</span></>}
+              {med.form && <span className="capitalize">{med.form}</span>}
               {med.suggestedTime && <><span>·</span><span>⏰ {med.suggestedTime}</span></>}
             </div>
           </div>
@@ -316,11 +300,12 @@ function UncertainItems({ items }: { items: string[] }) {
 function QualityBadge({ quality }: { quality?: string }) {
   const map: Record<string, { color: string; label: string }> = {
     legible: { color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30', label: '✓ Legible' },
+    unknown: { color: 'text-slate-400 bg-slate-500/10 border-slate-500/30', label: 'Unavailable' },
     moderate: { color: 'text-amber-400 bg-amber-500/10 border-amber-500/30', label: '~ Moderate' },
     difficult: { color: 'text-red-400 bg-red-500/10 border-red-500/30', label: '✗ Difficult' },
     mixed: { color: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/30', label: '≈ Mixed' },
   };
-  const q = map[quality || 'legible'] || map['legible'];
+  const q = map[quality || 'unknown'] || map['unknown'];
   return (
     <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold font-mono border ${q.color}`}>
       Handwriting: {q.label}
@@ -456,7 +441,7 @@ export default function ReportScanner({ onAddScanResult, scannedHistory }: Repor
     setSelectedFile(null); setFilePreview(null); setErrorMessage(null);
   };
 
-  const hasStructuredData = activeRxData && (activeRxData.medicines?.length > 0 || activeRxData.metrics?.length > 0 || activeRxData.uncertain_items?.length);
+  const hasStructuredData = Boolean(activeRxData && ((activeRxData.medicines?.length ?? 0) > 0 || (activeRxData.metrics?.length ?? 0) > 0 || activeRxData.uncertain_items?.length));
 
   return (
     <div className="flex flex-col gap-6 relative">
@@ -582,16 +567,16 @@ export default function ReportScanner({ onAddScanResult, scannedHistory }: Repor
                     <p className="text-[10px] text-slate-500 font-mono mt-0.5">Medicines extracted</p>
                   </div>
                   <div className="bg-slate-900/60 rounded-xl border border-slate-800 p-3 text-center">
-                    <p className="text-2xl font-bold text-emerald-400 font-headline">{activeRxData!.medicines?.filter(m => m.confidence >= 0.8).length || activeRxData!.metrics?.filter(m => m.status === 'NORMAL').length || 0}</p>
+                    <p className="text-2xl font-bold text-emerald-400 font-headline">{activeRxData!.medicines?.filter(m => (m.confidence ?? 0) >= 0.8).length || activeRxData!.metrics?.filter(m => m.status === 'NORMAL').length || 0}</p>
                     <p className="text-[10px] text-slate-500 font-mono mt-0.5">High confidence</p>
                   </div>
                   <div className="bg-slate-900/60 rounded-xl border border-slate-800 p-3 text-center">
-                    <p className="text-2xl font-bold text-amber-400 font-headline">{(activeRxData!.medicines?.filter(m => m.confidence < 0.8).length || activeRxData!.metrics?.filter(m => m.status !== 'NORMAL').length || 0) + (activeRxData!.uncertain_items?.length || 0)}</p>
+                    <p className="text-2xl font-bold text-amber-400 font-headline">{(activeRxData!.medicines?.filter(m => (m.confidence ?? 0) < 0.8).length || activeRxData!.metrics?.filter(m => m.status !== 'NORMAL').length || 0) + (activeRxData!.uncertain_items?.length || 0)}</p>
                     <p className="text-[10px] text-slate-500 font-mono mt-0.5">Need review</p>
                   </div>
                 </div>
 
-                {(activeRxData!.medicines || []).some(m => m.confidence < 0.6) && (
+                {(activeRxData!.medicines || []).some(m => (m.confidence ?? 0) < 0.6) && (
                   <div className="flex items-start gap-3 p-3 rounded-xl bg-red-500/10 border border-red-500/30">
                     <AlertTriangle className="h-4 w-4 text-red-400 shrink-0 mt-0.5" />
                     <div>

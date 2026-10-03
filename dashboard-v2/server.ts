@@ -20,26 +20,78 @@ import {
   pdfFirstPageToPng,
 } from "./tfPreprocess.js";
 import { transcribeAudio } from "./whisperBridge.js";
-import nodemailer from "nodemailer";
 import twilio from "twilio";
 import { createServer as createViteServer } from "vite";
 import { MongoClient, Db, ObjectId } from "mongodb";
 
 dotenv.config();
 
-const RX_EXTRACTION_PROMPT = `You are a clinical AI assistant.
-Examine this document carefully. Extract ONLY the medicines/drugs prescribed.
+process.on("uncaughtException", (err) => {
+  console.error("[CRITICAL] Uncaught exception:", err);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("[CRITICAL] Unhandled promise rejection:", reason);
+});
 
-Return ONLY a valid JSON array.
-Each item must follow this exact schema:
-[{"name": string, "dosage": string|null, "frequency": string|null, "suggestedTime": "HH:MM", "confidence": "high"|"low"}]
+const RX_EXTRACTION_PROMPT = `You are a clinical AI assistant.
+Examine this medical prescription document carefully.
+1. Extract the Prescription Number / Rx Number / Rx ID (e.g. "Rx #12345", "RX-9082", or Prescription ID) if visible on the document.
+2. Extract all prescribed medicines/drugs.
+
+Return a valid JSON object matching this schema:
+{
+  "prescriptionNumber": "string or null",
+  "medicines": [
+    {
+      "name": "exact medicine name as written (never empty)",
+      "dosage": "strength and unit (e.g. 500mg), or null",
+      "frequency": "dosing instructions (e.g. 3x daily), or null",
+      "suggestedTime": "HH:MM from frequency (morning=08:00, noon=13:00, evening=18:00, night=21:00)",
+      "confidence": "high" or "low"
+    }
+  ]
+}
+
 Rules:
+- prescriptionNumber: extract any Rx #, Rx ID, Script #, or Prescription Number printed on the paper. If not found, return null.
 - name: exact medicine name as written (never empty)
 - dosage: strength and unit if readable (e.g. "10mg"), null if unclear
 - frequency: dosing instructions if readable (e.g. "once daily", "3X a day"), null if unclear
-- suggestedTime: HH:MM from frequency (morning=08:00, noon=13:00, evening=18:00, night=21:00)
+- suggestedTime: HH:MM 24-hour format
 - confidence: "high" if readable, "low" if ambiguous
-- Return [] if no medicines identified`;
+- Return "medicines": [] if no medicines identified`;
+
+function extractRxNumber(parsed: any, ocrText?: string): string | null {
+  if (parsed && typeof parsed === "object") {
+    const candidate = parsed.prescriptionNumber || parsed.rxNumber || parsed.rxNo || parsed.rxId || parsed.prescriptionId || parsed.prescriptionNo;
+    if (candidate && typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+  if (ocrText && typeof ocrText === "string") {
+    const patterns = [
+      /(?:rx\s*(?:#|no\.?|number|num)?|prescription\s*(?:#|no\.?|id|number)?)\s*[:#.\-]?\s*([a-z0-9\-_/]{3,25})/i,
+      /(?:presc(?:ription)?\s*(?:id|num|number|#))\s*[:#.\-]?\s*([a-z0-9\-_/]{3,25})/i,
+      /(?:rx\s*id|rxid)\s*[:#.\-]?\s*([a-z0-9\-_/]{3,25})/i,
+      /\bRx\s*#?\s*([0-9]{3,10})\b/i,
+    ];
+    for (const pat of patterns) {
+      const match = ocrText.match(pat);
+      if (match && match[1]) {
+        return match[1].trim();
+      }
+    }
+  }
+  return null;
+}
+
+function getMedsFingerprint(meds: any[]): string {
+  if (!Array.isArray(meds)) return "";
+  return meds
+    .map(m => `${String(m?.name || "").toLowerCase().trim()}|${String(m?.dosage || "").toLowerCase().trim()}`)
+    .sort()
+    .join(";;");
+}
 
 const SCAN_EXTRACTION_PROMPT = `You are a clinical AI assistant.
 Examine this clinical document (e.g. blood test, pathology report, discharge summary) carefully.
@@ -123,6 +175,12 @@ const FLASK_URL = process.env.FLASK_BACKEND_URL || "http://localhost:5000";
 
 app.use(express.json({ limit: "15mb" }));
 app.use(express.urlencoded({ extended: true, limit: "15mb" }));
+app.use((err: any, _req: any, res: any, next: any) => {
+  if (err instanceof SyntaxError && "body" in err) {
+    return res.status(400).json({ error: "Invalid JSON payload" });
+  }
+  next(err);
+});
 
 
 
@@ -167,7 +225,7 @@ interface FallEventRecord {
   type: string;
   source: string;
   location: string;
-  confidence: number;
+  confidence: number | null;
   status: "active" | "resolved";
   resolvedAt?: string;
 }
@@ -277,46 +335,94 @@ app.get("/api/events-stream", (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// LIVE VITALS — proxied from Flask /api/state (existing Elder--Care backend)
+// LIVE VITALS — MAX30102 values from bpm-server; optional activity fields from Flask.
 // ─────────────────────────────────────────────────────────────────────────────
+let cachedFlaskState: any = {};
+let lastFlaskFetchMs = 0;
+let flaskFetchInFlight = false;
+
+async function getFlaskStateAsync(): Promise<any> {
+  const now = Date.now();
+  if (now - lastFlaskFetchMs < 2000 && Object.keys(cachedFlaskState).length > 0) {
+    return cachedFlaskState;
+  }
+  if (flaskFetchInFlight) {
+    return cachedFlaskState;
+  }
+  flaskFetchInFlight = true;
+  try {
+    const res = await fetch(`${FLASK_URL}/api/state`, { signal: AbortSignal.timeout(1000) });
+    if (res.ok) {
+      cachedFlaskState = await res.json();
+      lastFlaskFetchMs = Date.now();
+    }
+  } catch {
+    // Keep cached state
+  } finally {
+    flaskFetchInFlight = false;
+  }
+  return cachedFlaskState;
+}
+
 app.get("/api/vitals", async (_req, res) => {
   try {
-    // Check bpm-server (port 3001) first for real-time ESP32 MAX30102 vitals
-    let bpmData: any = null;
-    try {
-      const bpmRes = await fetch("http://localhost:3001/api/bpm/history?n=1");
-      if (bpmRes.ok) {
-        const json = await bpmRes.json();
-        if (json.history && json.history.length > 0) {
-          bpmData = json.history[json.history.length - 1];
-        }
-      }
-    } catch { }
+    const [statusResponse, historyResponse, state] = await Promise.all([
+      fetch("http://localhost:3001/api/bpm/status", { signal: AbortSignal.timeout(1500) }),
+      fetch("http://localhost:3001/api/bpm/history?n=60", { signal: AbortSignal.timeout(1000) }).catch(() => null),
+      getFlaskStateAsync(),
+    ]);
+    if (!statusResponse.ok) throw new Error(`bpm-server returned ${statusResponse.status}`);
 
-    const state = await flaskGet("/api/state").catch(() => ({}));
-    const isLive = bpmData && (Date.now() - (bpmData.timestamp || 0) < 10000);
+    const status = await statusResponse.json();
+    const historyPayload = historyResponse?.ok ? await historyResponse.json() : { history: [] };
+    const history = Array.isArray(historyPayload.history) ? historyPayload.history.slice(-60) : [];
+    const lastPacketAt = Number(status.lastReceived);
+    const packetAgeMs = Date.now() - lastPacketAt;
+    const packetFresh = Boolean(
+      status.espConnected && Number.isFinite(lastPacketAt) &&
+      packetAgeMs >= -5000 && packetAgeMs <= 8000
+    );
+    const fingerPresent = packetFresh && Boolean(status.fingerDetected);
+    const currentPacket = history.length ? history[history.length - 1] : null;
 
     return res.json({
-      heartRate: (bpmData && bpmData.fingerDetected && bpmData.bpm > 0) ? bpmData.bpm : (state.bpm || '--'),
-      oxygenSpO2: (bpmData && bpmData.fingerDetected && bpmData.spo2 > 0) ? bpmData.spo2 : (state.spo2 || 98),
-      systolicBP: state.systolic || 120,
-      diastolicBP: state.diastolic || 76,
-      movementState: state.movement_state || "Resting",
-      roomPresence: state.room_presence ?? true,
-      fingerPresent: bpmData ? bpmData.fingerDetected : (state.fingerPresent ?? false),
-      signalQuality: bpmData ? bpmData.signal : "unknown",
+      heartRate: fingerPresent && status.latestBpm > 0 ? status.latestBpm : "--",
+      oxygenSpO2: fingerPresent && status.latestSpo2 > 0 ? status.latestSpo2 : 0,
+      systolicBP: state.systolic || null,
+      diastolicBP: state.diastolic || null,
+      movementState: state.movement_state || "Unknown",
+      bloodLevelSeconds: state.blood_level_seconds != null && Number.isFinite(Number(state.blood_level_seconds))
+        ? Number(state.blood_level_seconds)
+        : null,
+      roomPresence: typeof state.room_presence === "boolean" ? state.room_presence : null,
+      fingerPresent,
+      signalQuality: packetFresh ? (status.signal || "unknown") : "unknown",
+      sensorError: packetFresh && Boolean(currentPacket?.sensorError),
+      heartRateHistory: history.map((entry: any) => ({
+        time: entry.timestamp,
+        value: entry.fingerDetected && entry.bpm > 0 ? entry.bpm : 0,
+      })),
+      spo2History: history
+        .filter((entry: any) => entry.fingerDetected && entry.spo2 > 0)
+        .map((entry: any) => ({ time: entry.timestamp, value: entry.spo2 })),
+      lastPacketAt: packetFresh ? lastPacketAt : (status.lastReceived || null),
+      lastUpdated: packetFresh ? new Date(lastPacketAt).toLocaleTimeString() : "--",
+      espConnected: packetFresh,
       isFall: state.is_fall || false,
       fallCount: state.fall_count || 0,
       fallsToday: state.falls_today || 0,
-      _liveESP32: !!isLive,
+      _liveESP32: packetFresh,
+      _offline: false,
     });
   } catch {
-    // Return defaults if offline
+    // The live vitals path never substitutes demo or cached BPM/SpO2 values.
     return res.json({
-      heartRate: '--', oxygenSpO2: 98,
-      systolicBP: 120, diastolicBP: 76,
-      movementState: "Resting", roomPresence: true,
-      fingerPresent: false,
+      heartRate: '--', oxygenSpO2: 0,
+      systolicBP: null, diastolicBP: null,
+      movementState: "Unknown", bloodLevelSeconds: null, roomPresence: null,
+      fingerPresent: false, espConnected: false, lastPacketAt: null,
+      heartRateHistory: [], spo2History: [], sensorError: false,
+      lastUpdated: "--",
       signalQuality: "unknown",
       isFall: false, fallCount: 0, fallsToday: 0,
       _offline: true,
@@ -536,80 +642,7 @@ function markDeviceFallFired(deviceId: string) {
 
 // ── Gmail alert for fall event ─────────────────────────────────────────────
 async function sendFallEmailAlert(event: FallEventRecord) {
-  const gmailUser = process.env.GMAIL_USER;
-  const gmailPass = process.env.GMAIL_APP_PASSWORD;
-  const careEmail = process.env.CAREGIVER_EMAIL || gmailUser;
-
-  if (!gmailUser || !gmailPass) {
-    console.warn("[MAIL] Gmail credentials not set — skipping fall email");
-    return;
-  }
-
-  const severityColor = event.type === "Critical Fall" ? "#dc2626"
-    : event.type === "Rapid Descent" ? "#f97316" : "#eab308";
-
-  const sourceLabel = event.source === "bracelet" ? "🔵 Wrist Bracelet"
-    : event.source === "camera" ? "📷 AI Camera"
-      : event.source === "both" ? "🔵 Bracelet + 📷 Camera" : event.source;
-
-  const transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: { user: gmailUser, pass: gmailPass },
-  });
-
-  await transporter.sendMail({
-    from: `"ElderCare Dashboard" <${gmailUser}>`,
-    to: careEmail,
-    subject: `🚨 ${event.type} Detected — Somsubhro`,
-    html: `
-      <div style="font-family:sans-serif;max-width:520px;margin:auto;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden">
-        <div style="background:${severityColor};padding:20px 24px">
-          <h2 style="color:#fff;margin:0;font-size:20px">🚨 ${event.type} Detected</h2>
-          <p style="color:rgba(255,255,255,0.85);margin:4px 0 0;font-size:13px">ElderCare AI Monitoring System</p>
-        </div>
-        <div style="padding:24px">
-          <p style="color:#1e293b;font-size:15px;margin:0 0 16px">
-            A fall event has been detected for <strong>Somsubhro</strong>.
-            Please check on them immediately.
-          </p>
-          <table style="width:100%;border-collapse:collapse;border-radius:8px;overflow:hidden">
-            <tr style="background:#f8fafc">
-              <td style="padding:10px 14px;color:#64748b;font-size:13px;width:40%">Event Type</td>
-              <td style="padding:10px 14px;font-weight:bold;color:${severityColor};font-size:14px">${event.type}</td>
-            </tr>
-            <tr>
-              <td style="padding:10px 14px;color:#64748b;font-size:13px">Detected By</td>
-              <td style="padding:10px 14px;font-weight:600;color:#0f172a;font-size:13px">${sourceLabel}</td>
-            </tr>
-            <tr style="background:#f8fafc">
-              <td style="padding:10px 14px;color:#64748b;font-size:13px">Location</td>
-              <td style="padding:10px 14px;font-weight:600;color:#0f172a;font-size:13px">${event.location}</td>
-            </tr>
-            <tr>
-              <td style="padding:10px 14px;color:#64748b;font-size:13px">Confidence</td>
-              <td style="padding:10px 14px;font-weight:600;color:#0f172a;font-size:13px">${Math.round(event.confidence * 100)}%</td>
-            </tr>
-            <tr style="background:#f8fafc">
-              <td style="padding:10px 14px;color:#64748b;font-size:13px">Time</td>
-              <td style="padding:10px 14px;font-weight:600;color:#0f172a;font-size:13px">${event.timestamp}</td>
-            </tr>
-          </table>
-          <div style="margin-top:20px;padding:14px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px">
-            <p style="margin:0;color:#991b1b;font-size:13px;font-weight:600">
-              ⚠️ Immediate Action Required
-            </p>
-            <p style="margin:6px 0 0;color:#b91c1c;font-size:12px">
-              Call Arthur or dispatch a caregiver immediately.
-              If no response in 2 minutes, contact emergency services (112).
-            </p>
-          </div>
-          <p style="color:#94a3b8;font-size:11px;margin-top:20px">Sent automatically by ElderCare Dashboard v2 · Do not reply</p>
-        </div>
-      </div>
-    `,
-  });
-
-  console.log(`[MAIL] Fall alert sent to ${careEmail} — ${event.type} @ ${event.timestamp}`);
+  // Removed
 }
 
 // ── SMS alert for fall event via Twilio ────────────────────────────────────
@@ -633,10 +666,10 @@ async function sendFallSmsAlert(event: FallEventRecord) {
   const body =
     `🚨 ELDERCARE ALERT\n` +
     `${event.type.toUpperCase()} detected!\n` +
-    `Patient: Somsubhro\n` +
+    `Patient: Care recipient\n` +
     `Source: ${sourceLabel}\n` +
     `Location: ${event.location}\n` +
-    `Confidence: ${Math.round(event.confidence * 100)}%\n` +
+    `Confidence: ${event.confidence == null ? "unavailable" : `${Math.round(event.confidence * 100)}%`}\n` +
     `Time: ${event.timestamp}\n` +
     `Please respond immediately or call 112.`;
 
@@ -700,9 +733,12 @@ app.post("/api/fall-event", async (req, res) => {
     markDeviceFallFired(deviceId);
 
     const now = new Date();
-    let type = "Stumble Warning";
-    if ((body.confidence || 0) >= 0.85) type = "Critical Fall";
-    else if ((body.confidence || 0) >= 0.65) type = "Rapid Descent";
+    const confidence = body.confidence != null && Number.isFinite(Number(body.confidence))
+      ? Number(body.confidence)
+      : null;
+    let type = "Fall Detected";
+    if (confidence != null && confidence >= 0.85) type = "Critical Fall";
+    else if (confidence != null && confidence >= 0.65) type = "Rapid Descent";
 
     const event: FallEventRecord = {
       id: `fall-${Date.now()}`,
@@ -713,8 +749,8 @@ app.post("/api/fall-event", async (req, res) => {
         now.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
       type,
       source,
-      location: body.location || "Living Room",
-      confidence: parseFloat(body.confidence) || 0.5,
+      location: typeof body.location === "string" && body.location.trim() ? body.location : "Unknown location",
+      confidence,
       status: "active",
     };
 
@@ -1091,8 +1127,8 @@ Respond ONLY with a valid JSON object matching this exact format:
 
     // -- Step 6b: Extract structured Rx fields from raw parsed (new schema)
     const rawParsedScan = (parsed && typeof parsed === "object") ? parsed as Record<string, any> : {};
-    const hwQuality: string = rawParsedScan.handwriting_quality || "legible";
-    const langDetected: string = rawParsedScan.language_detected || "en";
+    const hwQuality: string = rawParsedScan.handwriting_quality || "unknown";
+    const langDetected: string = rawParsedScan.language_detected || "unknown";
     const uncertainItemsList: string[] = Array.isArray(rawParsedScan.uncertain_items) ? rawParsedScan.uncertain_items : [];
 
     // Enrich medicines with structured fields from the new schema
@@ -1110,11 +1146,11 @@ Respond ONLY with a valid JSON object matching this exact format:
           morning: null, afternoon: null, night: null,
           before_food: null, after_food: null, duration_days: null,
         },
-        source_line: rawMed?.source_line || i + 1,
-        confidence: typeof rawMed?.confidence === "number" ? rawMed.confidence : 0.85,
-        confidence_reason: rawMed?.confidence_reason || "Extracted from document",
+        source_line: typeof rawMed?.source_line === "number" ? rawMed.source_line : null,
+        confidence: typeof rawMed?.confidence === "number" ? rawMed.confidence : null,
+        confidence_reason: rawMed?.confidence_reason || "",
         illegible_fields: Array.isArray(rawMed?.illegible_fields) ? rawMed.illegible_fields : [],
-        suggestedTime: m.times?.[0] || rawMed?.suggestedTime || "08:00",
+        suggestedTime: m.times?.[0] || rawMed?.suggestedTime || null,
         frequency: rawMed?.frequency_raw || m.frequency || "",
       };
     });
@@ -1231,6 +1267,7 @@ const medboxStatus: MedboxStatusRecord = {
 
 let remoteOpenFlag = false;
 let medboxLidOpen = false;
+let pendingCompartmentAssign: { compartment: number; label: string; time: string; timestamp: number } | null = null;
 
 // Mark offline if no heartbeat for 30 s
 setInterval(() => {
@@ -1262,55 +1299,7 @@ async function getNextDoseTime(): Promise<string> {
 
 // ── Gmail / Nodemailer ────────────────────────────────────────────────────────
 async function sendMissedDoseAlert(medicine: string, time: string, dosage: string) {
-  const gmailUser = process.env.GMAIL_USER;
-  const gmailPass = process.env.GMAIL_APP_PASSWORD;
-  const careEmail = process.env.CAREGIVER_EMAIL || gmailUser;
-
-  if (!gmailUser || !gmailPass) {
-    console.warn("[MAIL] GMAIL_USER / GMAIL_APP_PASSWORD not set — skipping email alert");
-    return;
-  }
-
-  const transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: { user: gmailUser, pass: gmailPass },
-  });
-
-  await transporter.sendMail({
-    from: `"ElderCare Dashboard" <${gmailUser}>`,
-    to: careEmail,
-    subject: `⚠️ Missed Dose Alert — Somsubhro`,
-    html: `
-      <div style="font-family:sans-serif;max-width:480px;margin:auto;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden">
-        <div style="background:#ef4444;padding:20px 24px">
-          <h2 style="color:#fff;margin:0">⚠️ Missed Dose Alert</h2>
-        </div>
-        <div style="padding:24px">
-          <p style="color:#1e293b;font-size:16px">
-            <strong>Somsubhro</strong> missed their scheduled dose.
-          </p>
-          <table style="width:100%;border-collapse:collapse;margin:16px 0">
-            <tr style="background:#f8fafc">
-              <td style="padding:8px 12px;color:#64748b;font-size:13px">Medicine</td>
-              <td style="padding:8px 12px;font-weight:bold;color:#0f172a">${medicine}</td>
-            </tr>
-            <tr>
-              <td style="padding:8px 12px;color:#64748b;font-size:13px">Dosage</td>
-              <td style="padding:8px 12px;font-weight:bold;color:#0f172a">${dosage}</td>
-            </tr>
-            <tr style="background:#f8fafc">
-              <td style="padding:8px 12px;color:#64748b;font-size:13px">Scheduled at</td>
-              <td style="padding:8px 12px;font-weight:bold;color:#0f172a">${time}</td>
-            </tr>
-          </table>
-          <p style="color:#475569;font-size:14px">Please check in with Arthur or contact the attending caregiver immediately.</p>
-          <p style="color:#94a3b8;font-size:11px;margin-top:24px">Sent automatically by ElderCare Dashboard v2.</p>
-        </div>
-      </div>
-    `,
-  });
-
-  console.log(`[MAIL] Missed-dose alert sent to ${careEmail} — ${medicine} @ ${time}`);
+  // Removed
 }
 
 // ── GET /api/medication/schedule ──────────────────────────────────────────────
@@ -1417,14 +1406,41 @@ app.post("/api/hardware/heartbeat", (req, res) => {
   // Broadcast telemetry updates to the React UI via SSE
   broadcastSSE("medbox_heartbeat", medboxStatus);
 
-  // Send remote lid-open request active status
-  const response = { remoteOpen: remoteOpenFlag };
+  // Send remote lid-open request active status & assignedSlot if pending, plus real-time clock sync
+  const now = new Date();
+  const response: any = {
+    remoteOpen: remoteOpenFlag,
+    epoch: Math.floor(now.getTime() / 1000),
+    time: now.toLocaleTimeString('en-IN', { hour12: false, timeZone: 'Asia/Kolkata' }),
+    gmtOffset: 19800,
+  };
   if (remoteOpenFlag) {
     console.log(`[HEARTBEAT] Served remote lid-open request to medbox. Resetting flag.`);
     remoteOpenFlag = false;
   }
+  if (pendingCompartmentAssign && (Date.now() - pendingCompartmentAssign.timestamp < 30_000)) {
+    response.remoteOpen = true;
+    response.assignedSlot = {
+      compartment: pendingCompartmentAssign.compartment,
+      label: pendingCompartmentAssign.label,
+      time: pendingCompartmentAssign.time,
+    };
+    console.log(`[HEARTBEAT] Served assignedSlot trigger to medbox for compartment ${pendingCompartmentAssign.compartment}`);
+    pendingCompartmentAssign = null;
+  }
 
   return res.json(response);
+});
+
+// ── GET /api/hardware/time (Instant RTC Clock Sync Endpoint for ESP32) ────────
+app.get("/api/hardware/time", (req, res) => {
+  const now = new Date();
+  return res.json({
+    epoch: Math.floor(now.getTime() / 1000),
+    time: now.toLocaleTimeString('en-IN', { hour12: false, timeZone: 'Asia/Kolkata' }),
+    iso: now.toISOString(),
+    gmtOffset: 19800
+  });
 });
 
 // ── POST /api/hardware/medbox-event (ESP32 pill intake confirmation) ──────────
@@ -1781,7 +1797,7 @@ function buildDictatorPrompt(snap: Awaited<ReturnType<typeof buildPatientSnapsho
 
   return `You are Mitra, a senior clinical AI assistant briefing a physician. Generate a professional, structured, doctor-oriented verbal summary of the following patient data. Be factual, concise, and use natural spoken English. Maximum 8 sentences. Do NOT use markdown, bullet points, or headers. Do NOT hallucinate — if data is missing, say so clearly.
 
-PATIENT: Somsubhro, Age 82. Cardiology & IoT Monitoring Program.
+PATIENT: Use only identity and history explicitly present in the stored records. Do not assume an age, diagnosis, or identity.
 
 HEART RATE (last 120 readings): ${bpmSummary}
 
@@ -1808,7 +1824,7 @@ app.post("/api/ai-dictator/trigger", async (_req, res) => {
     const { text: summary, model: usedModel } = await generateWithText(prompt);
     if (!summary) throw new Error("Ollama returned an empty summary.");
     console.log(`[DICTATOR] Summary via ${usedModel}: ${summary.slice(0, 120)}...`);
-    return res.json({ success: true, summary, patientName: "Somsubhro", analytics: snap.analytics });
+    return res.json({ success: true, summary, patientName: null, analytics: snap.analytics });
   } catch (err: any) {
     console.error("[DICTATOR] Summary generation failed:", err.message);
     return res.status(500).json({ error: `AI Dictator failed: ${err.message}` });
@@ -1830,7 +1846,7 @@ app.post("/api/ai-dictator/ask", async (req, res) => {
     const recentReportSummaries = reports.slice(0, 5).map((r: any) => `${r.fileName} (${r.scanDate || "?"}): ${(r.overview || r.summary || "").slice(0, 300)}`).join("\n");
     const recentEvents = events.slice(0, 10).map((e: any) => `[${e.type}] ${e.message}`).join("; ");
 
-    const qaPrompt = `You are Mitra, a clinical AI for ElderCare. A physician is asking about patient Somsubhro (Age 82).
+    const qaPrompt = `You are Mitra, a clinical AI for ElderCare. A physician is asking about the patient represented by the records below. Do not assume identity or age.
 Answer ONLY from the patient data below. If unavailable, say: "Information not available in patient records." 2-4 sentences, factual, professional.
 
 PATIENT DATA:
@@ -2029,7 +2045,7 @@ const ESP32_BASE_URL = (process.env.ESP32_BASE_URL || "").replace(/\/$/, "");
 
 // ─── Resilient in-memory fallback store for offline/local development ─────────
 const inMemoryPrescriptions: any[] = [];
-const inMemoryPendingChanges: any[] = [];
+let inMemoryPendingChanges: any[] = [];
 const inMemoryScheduleCache: any[] = [];
 
 // prescriptions — raw OCR + parsed result per upload
@@ -2054,25 +2070,78 @@ async function savePrescription(doc: object): Promise<string> {
 }
 
 async function getPrescriptions(limit = 20): Promise<any[]> {
+  let list: any[] = [];
   if (fireReady()) {
     try {
-      const docs = await mongoDb!.collection("prescriptions").find({}).sort({ uploadedAt: -1 }).limit(limit).toArray();
-      return docs.map((d: any) => {
+      const docs = await mongoDb!.collection("prescriptions").find({}).sort({ uploadedAt: -1 }).limit(limit * 3).toArray();
+      list = docs.map((d: any) => {
         const { _id, ...rest } = d;
-        return { id: _id.toString(), ...rest };
+        return { id: _id.toString(), ...rest, _rawId: _id };
       });
     } catch { }
   }
-  return inMemoryPrescriptions.slice(0, limit);
+  if (list.length === 0) {
+    list = inMemoryPrescriptions.map(p => ({ ...p }));
+  }
+
+  // Deduplication: ensure only 1 history record per prescription unless changed
+  const seen = new Map<string, any>();
+  const duplicateIdsToDelete: any[] = [];
+
+  for (const item of list) {
+    const rxNo = item.prescriptionNumber ? item.prescriptionNumber.toLowerCase().trim() : null;
+    const medFp = getMedsFingerprint(item.extractedMeds || []);
+    const key = rxNo ? `rx:${rxNo}` : `${(item.fileName || "unnamed").toLowerCase()}:${medFp}`;
+
+    if (!seen.has(key)) {
+      seen.set(key, item);
+    } else {
+      const existing = seen.get(key);
+      if (existing.status !== "applied" && item.status === "applied") {
+        if (existing._rawId) duplicateIdsToDelete.push(existing._rawId);
+        seen.set(key, item);
+      } else {
+        if (item._rawId) duplicateIdsToDelete.push(item._rawId);
+      }
+    }
+  }
+
+  if (fireReady() && duplicateIdsToDelete.length > 0) {
+    mongoDb!.collection("prescriptions").deleteMany({ _id: { $in: duplicateIdsToDelete } }).catch(() => { });
+  }
+
+  if (duplicateIdsToDelete.length > 0) {
+    const idSet = new Set(duplicateIdsToDelete.map(x => x.toString()));
+    for (let i = inMemoryPrescriptions.length - 1; i >= 0; i--) {
+      if (idSet.has(inMemoryPrescriptions[i].id)) {
+        inMemoryPrescriptions.splice(i, 1);
+      }
+    }
+  }
+
+  return Array.from(seen.values()).slice(0, limit).map(({ _rawId, ...rest }) => rest);
+}
+
+async function updatePrescription(id: string, fields: object): Promise<void> {
+  const p = inMemoryPrescriptions.find(x => x.id === id);
+  if (p) Object.assign(p, fields);
+  if (!fireReady()) return;
+  try {
+    const filter = ObjectId.isValid(id) ? { _id: new ObjectId(id) } : { _id: id as any };
+    await mongoDb!.collection("prescriptions").updateOne(filter, { $set: fields });
+  } catch (err: any) {
+    console.warn("[RX] updatePrescription failed:", err.message);
+  }
 }
 
 async function updatePrescriptionStatus(id: string, status: string): Promise<void> {
   const p = inMemoryPrescriptions.find(x => x.id === id);
   if (p) p.status = status;
-  if (!fireReady()) return;
+  if (!fireReady() || !id) return;
   try {
+    const filter = ObjectId.isValid(id) ? { _id: new ObjectId(id) } : { _id: id as any };
     await mongoDb!.collection("prescriptions").updateOne(
-      { _id: new ObjectId(id) },
+      filter,
       { $set: { status } }
     );
   } catch { }
@@ -2118,19 +2187,21 @@ async function getPendingChanges(statusFilter?: string): Promise<any[]> {
 async function updatePendingChange(id: string, fields: object): Promise<void> {
   const pc = inMemoryPendingChanges.find(x => x.id === id);
   if (pc) Object.assign(pc, fields);
-  if (!fireReady()) return;
+  if (!fireReady() || !id) return;
   try {
+    const filter = ObjectId.isValid(id) ? { _id: new ObjectId(id) } : { _id: id as any };
     await mongoDb!.collection("pending_changes").updateOne(
-      { _id: new ObjectId(id) },
+      filter,
       { $set: fields }
     );
   } catch { }
 }
 
 async function getPendingChangeById(id: string): Promise<any | null> {
-  if (fireReady()) {
+  if (fireReady() && id) {
     try {
-      const doc = await mongoDb!.collection("pending_changes").findOne({ _id: new ObjectId(id) });
+      const filter = ObjectId.isValid(id) ? { _id: new ObjectId(id) } : { _id: id as any };
+      const doc = await mongoDb!.collection("pending_changes").findOne(filter);
       if (doc) {
         const { _id, ...rest } = doc;
         return { id: _id.toString(), ...rest };
@@ -2328,28 +2399,6 @@ app.get("/api/dose-events", async (req, res) => {
   return res.json({ events });
 });
 
-// ─── GET /api/vitals — proxy live BPM + SpO2 vitals from bpm-server (port 3001) ──
-app.get("/api/vitals", async (_req, res) => {
-  try {
-    const r = await fetch("http://localhost:3001/api/bpm/status", { signal: AbortSignal.timeout(2000) });
-    if (r.ok) {
-      const data = await r.json();
-      const last = data.lastReading || {};
-      return res.json({
-        heartRate: last.bpm || 0,
-        oxygenSpO2: last.spo2 || 0,
-        fingerPresent: Boolean(last.fingerDetected),
-        signalQuality: last.signal || "none",
-        movementState: "Resting",
-        roomPresence: true,
-        espConnected: Boolean(data.espConnected),
-        lastUpdated: new Date().toLocaleTimeString(),
-      });
-    }
-  } catch { }
-  return res.json({ _offline: true });
-});
-
 // ─── GET /api/bpm/history — proxy BPM/SpO2 history from bpm-server (port 3001) ──
 app.get("/api/bpm/history", async (req, res) => {
   try {
@@ -2390,6 +2439,7 @@ app.post("/api/rx/upload", async (req, res) => {
     let extractedMeds: any[] = [];
     let ocrText = "";
     let usedModel = "";
+    let parsedResult: any = null;
 
     if (promptText && (!fileData || fileData.length < 500)) {
       console.log("[RX] Extracting medicines from text prompt via Ollama LLM...");
@@ -2424,8 +2474,8 @@ Rules:
       ocrText = resText.text;
       usedModel = resText.model;
       try {
-        const parsed = JSON.parse(ocrText);
-        extractedMeds = sanitizeRxMeds(parsed);
+        parsedResult = JSON.parse(ocrText);
+        extractedMeds = sanitizeRxMeds(parsedResult);
       } catch {
         extractedMeds = sanitizeRxMeds(ocrText);
       }
@@ -2468,9 +2518,13 @@ Rules:
         const { raw, parsed, model: mdl } = await extractWithVision(processedBase64, RX_EXTRACTION_PROMPT);
         ocrText = raw;
         usedModel = mdl;
+        parsedResult = parsed;
         extractedMeds = sanitizeRxMeds(parsed);
         if (extractedMeds.length === 0 && raw) {
-          try { extractedMeds = sanitizeRxMeds(JSON.parse(raw)); } catch { }
+          try {
+            parsedResult = JSON.parse(raw);
+            extractedMeds = sanitizeRxMeds(parsedResult);
+          } catch { }
         }
       } catch (ollamaErr: any) {
         console.error("[RX] Ollama extraction error:", ollamaErr.message);
@@ -2483,16 +2537,64 @@ Rules:
 
     console.log(`[RX] Extracted ${extractedMeds.length} medicines via ${usedModel}`);
 
-    // -- Step 2: Store prescription to MongoDB (UNCHANGED)
-    const prescriptionId = await savePrescription({
-      fileName: fileName || "unnamed",
-      ocrText,
-      extractedMeds,
-      llmModel: usedModel || "ollama-vision",
-      status: "pending_review",
+    const rxNumber = extractRxNumber(parsedResult, ocrText);
+    if (rxNumber) {
+      console.log(`[RX] Detected prescription number: ${rxNumber}`);
+    }
+
+    const newFingerprint = getMedsFingerprint(extractedMeds);
+
+    // -- Step 2: Check for existing prescription to avoid duplicate history records
+    const existingList = await getPrescriptions(100);
+    const existingMatch = existingList.find(p => {
+      if (rxNumber && p.prescriptionNumber && p.prescriptionNumber.toLowerCase().trim() === rxNumber.toLowerCase().trim()) {
+        return true;
+      }
+      const pFingerprint = getMedsFingerprint(p.extractedMeds || []);
+      const sameMeds = pFingerprint.length > 0 && pFingerprint === newFingerprint;
+      const sameFile = fileName && p.fileName && p.fileName.toLowerCase().trim() === fileName.toLowerCase().trim();
+      return sameMeds || (sameFile && sameMeds);
     });
 
-    // -- Step 3: Diff vs. ESP32 schedule cache
+    let prescriptionId: string;
+    let isDuplicateUnchanged = false;
+
+    if (existingMatch) {
+      const existingFingerprint = getMedsFingerprint(existingMatch.extractedMeds || []);
+      const isSpecificChange = existingFingerprint !== newFingerprint;
+
+      if (!isSpecificChange) {
+        // Prescription is UNCHANGED — avoid creating duplicate history record!
+        prescriptionId = existingMatch.id;
+        isDuplicateUnchanged = true;
+        console.log(`[RX] Prescription "${existingMatch.fileName}" (Rx #${rxNumber || existingMatch.prescriptionNumber || 'N/A'}) already exists and is unchanged. Preserving single history record.`);
+      } else {
+        // A specific change is seen — update existing prescription record
+        prescriptionId = existingMatch.id;
+        await updatePrescription(existingMatch.id, {
+          fileName: fileName || existingMatch.fileName,
+          ocrText,
+          extractedMeds,
+          prescriptionNumber: rxNumber || existingMatch.prescriptionNumber || null,
+          status: "pending_review",
+          uploadedAt: new Date().toISOString()
+        });
+        console.log(`[RX] Specific change detected in prescription "${existingMatch.fileName}". Updated record ${prescriptionId}.`);
+      }
+    } else {
+      // New prescription — save to MongoDB
+      prescriptionId = await savePrescription({
+        fileName: fileName || "unnamed",
+        ocrText,
+        extractedMeds,
+        prescriptionNumber: rxNumber,
+        llmModel: usedModel || "ollama-vision",
+        status: "pending_review",
+      });
+      console.log(`[RX] Saved new prescription record: ${prescriptionId} (Rx #${rxNumber || 'none'})`);
+    }
+
+    // -- Step 3: Diff vs. ESP32 schedule cache & create reviewable slot changes
     const cacheEntries = await readScheduleCache();
     const pendingChanges: any[] = [];
     for (let i = 0; i < Math.min(extractedMeds.length, 4); i++) {
@@ -2503,28 +2605,34 @@ Rules:
       const propH = parseInt(timeParts[0], 10) || 8;
       const propM = parseInt(timeParts[1], 10) || 0;
       const proposedLabel = med.dosage ? `${med.name} - ${med.dosage}` : med.name;
-      const isDifferent = !cacheEntry || cacheEntry.label !== proposedLabel;
-      if (isDifferent) {
-        const changeDoc = {
-          prescriptionId,
-          compartment: i,
-          currentLabel,
-          proposedLabel,
-          proposedHour: propH,
-          proposedMinute: propM,
-          extractedMed: med,
-          reloadConfirmed: false,
-          status: "pending" as const,
-          createdAt: new Date().toISOString(),
-        };
-        const changeId = await savePendingChange(changeDoc);
-        pendingChanges.push({ id: changeId, ...changeDoc, confidence: med.confidence });
-      }
+
+      const changeDoc = {
+        prescriptionId,
+        compartment: i,
+        currentLabel,
+        proposedLabel,
+        proposedHour: propH,
+        proposedMinute: propM,
+        extractedMed: med,
+        reloadConfirmed: false,
+        status: "pending" as const,
+        createdAt: new Date().toISOString(),
+      };
+      const changeId = await savePendingChange(changeDoc);
+      pendingChanges.push({ id: changeId, ...changeDoc, confidence: med.confidence });
     }
 
-    broadcastSSE("rx_upload_done", { prescriptionId, extractedMeds, pendingChanges });
+    broadcastSSE("rx_upload_done", { prescriptionId, extractedMeds, pendingChanges, isDuplicateUnchanged: false, prescriptionNumber: rxNumber });
     logEventLocally("rx", `Prescription uploaded -- ${extractedMeds.length} medicines extracted, ${pendingChanges.length} changes pending`, "info");
-    return res.json({ success: true, prescriptionId, extractedMeds, pendingChanges, ocrText });
+    return res.json({
+      success: true,
+      prescriptionId,
+      prescriptionNumber: rxNumber || existingMatch?.prescriptionNumber || null,
+      extractedMeds,
+      pendingChanges,
+      isDuplicateUnchanged: false,
+      ocrText
+    });
 
   } catch (err: any) {
     console.error("[RX] Upload error:", err.message);
@@ -2545,18 +2653,79 @@ app.get("/api/rx/pending", async (_req, res) => {
   return res.json({ pending, count: pending.length });
 });
 
+// ─── POST /api/rx/reassign-override ──────────────────────────────────────────
+// Caregiver explicitly requests slot assignment/reassignment when schedule was unchanged
+app.post("/api/rx/reassign-override", async (req, res) => {
+  try {
+    const { prescriptionId, meds } = req.body as { prescriptionId?: string; meds: any[] };
+    if (!Array.isArray(meds) || meds.length === 0) {
+      return res.status(400).json({ error: "No medicines provided for override" });
+    }
+
+    const cacheEntries = await readScheduleCache();
+    const createdChanges: any[] = [];
+
+    for (let i = 0; i < Math.min(meds.length, 3); i++) {
+      const med = meds[i];
+      const cacheEntry = cacheEntries.find(c => c.compartment === i) || null;
+      const currentLabel = cacheEntry ? cacheEntry.label : "(empty)";
+      const timeParts = (med.suggestedTime || "08:00").split(":");
+      const propH = parseInt(timeParts[0], 10) || 8;
+      const propM = parseInt(timeParts[1], 10) || 0;
+      const proposedLabel = med.dosage ? `${med.name} - ${med.dosage}` : med.name;
+
+      const changeDoc = {
+        prescriptionId: prescriptionId || `rx-override-${Date.now()}`,
+        compartment: i,
+        currentLabel,
+        proposedLabel,
+        proposedHour: propH,
+        proposedMinute: propM,
+        extractedMed: med,
+        reloadConfirmed: false,
+        status: "pending" as const,
+        createdAt: new Date().toISOString(),
+      };
+
+      const changeId = await savePendingChange(changeDoc);
+      createdChanges.push({ id: changeId, ...changeDoc, confidence: med.confidence || "high" });
+    }
+
+    broadcastSSE("rx_pending_changes", { pendingChanges: createdChanges });
+    return res.json({ success: true, pendingChanges: createdChanges });
+  } catch (err: any) {
+    console.error("[RX OVERRIDE] Error:", err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── POST /api/rx/confirm/:changeId ──────────────────────────────────────────
 // THIS IS THE ONLY ENDPOINT IN THE ENTIRE CODEBASE THAT WRITES TO THE ESP32 SCHEDULE.
 // Requires reloadConfirmed=true in body (server-side validated — not just UI gating).
 app.post("/api/rx/confirm/:changeId", async (req, res) => {
   const { changeId } = req.params;
-  const { reloadConfirmed, confirmedBy, compartment, customHour, customMinute, customTime } = req.body as {
+  const {
+    reloadConfirmed,
+    confirmedBy,
+    compartment,
+    customHour,
+    customMinute,
+    customTime,
+    proposedLabel,
+    extractedMed,
+    prescriptionId,
+    currentLabel
+  } = req.body as {
     reloadConfirmed: boolean;
     confirmedBy?: string;
     compartment?: number;
     customHour?: number;
     customMinute?: number;
     customTime?: string; // e.g. "01:35"
+    proposedLabel?: string;
+    extractedMed?: any;
+    prescriptionId?: string;
+    currentLabel?: string;
   };
 
   // ── Hard guard: server-side reload confirmation check ─────────────────────
@@ -2566,10 +2735,42 @@ app.post("/api/rx/confirm/:changeId", async (req, res) => {
     });
   }
 
-  const change = await getPendingChangeById(changeId);
-  if (!change) return res.status(404).json({ error: "Pending change not found" });
-  if (change.status !== "pending") {
-    return res.status(409).json({ error: `Change is already ${change.status}` });
+  let change = await getPendingChangeById(changeId);
+
+  // If change not found in MongoDB / memory, check if this is an override or client-supplied change
+  if (!change) {
+    if (proposedLabel || (extractedMed && extractedMed.name) || (req.body as any).label) {
+      const label = proposedLabel || (req.body as any).label || (extractedMed?.dosage ? `${extractedMed.name} - ${extractedMed.dosage}` : extractedMed?.name);
+      const timeParts = (customTime || (extractedMed && extractedMed.suggestedTime) || "08:00").split(":");
+      const pHour = customHour !== undefined ? Number(customHour) : (parseInt(timeParts[0], 10) || 8);
+      const pMin = customMinute !== undefined ? Number(customMinute) : (parseInt(timeParts[1], 10) || 0);
+      const comp = compartment !== undefined ? Number(compartment) : 0;
+
+      change = {
+        id: changeId,
+        prescriptionId: prescriptionId || "override-reassign",
+        compartment: comp,
+        currentLabel: currentLabel || "(empty)",
+        proposedLabel: label,
+        proposedHour: pHour,
+        proposedMinute: pMin,
+        extractedMed: extractedMed || { name: label, dosage: "", frequency: "1x a day", confidence: "high" },
+        status: "pending",
+        reloadConfirmed: true,
+        createdAt: new Date().toISOString()
+      };
+      try {
+        await savePendingChange(change);
+      } catch (err: any) {
+        console.warn("[RX CONFIRM] Failed saving override pending change:", err.message);
+      }
+    } else {
+      return res.status(404).json({ error: "Pending change not found" });
+    }
+  }
+
+  if (change.status === "confirmed") {
+    return res.json({ success: true, message: "Change is already confirmed" });
   }
 
   // Parse custom time if provided
@@ -2691,6 +2892,39 @@ app.post("/api/rx/confirm/:changeId", async (req, res) => {
     console.warn("[RX CONFIRM] ESP32_BASE_URL not set — skipping physical push, updating cache only");
   }
 
+  // ── Step 3b: Open assigned lid and glow assigned compartment light on ESP32 ──
+  const formattedTime = `${String(targetHour).padStart(2, "0")}:${String(targetMinute).padStart(2, "0")}`;
+
+  pendingCompartmentAssign = {
+    compartment: comp,
+    label: change.proposedLabel,
+    time: formattedTime,
+    timestamp: Date.now()
+  };
+
+  if (ESP32_BASE_URL) {
+    try {
+      console.log(`[RX CONFIRM] 🔓 Triggering assigned lid open & LED glow for compartment ${comp}...`);
+      const assignRes = await fetch(`${ESP32_BASE_URL}/api/compartment/assign`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          compartment: comp,
+          label: change.proposedLabel,
+          time: formattedTime
+        }),
+        signal: AbortSignal.timeout(4000),
+      });
+      if (assignRes.ok) {
+        console.log(`[RX CONFIRM] ✅ Compartment ${comp} opened and LED glowing on ESP32 for reload.`);
+      }
+    } catch (assignErr: any) {
+      console.warn(`[RX CONFIRM] Direct ESP32 assign trigger failed (${assignErr.message}); queued for next heartbeat.`);
+    }
+  }
+
+  broadcastSSE("slot_assigned", { compartment: comp, label: change.proposedLabel, time: formattedTime });
+
   // ── Step 4: Update Firestore records ─────────────────────────────────────
   const confirmedAt = new Date().toISOString();
   await updatePendingChange(changeId, {
@@ -2786,6 +3020,41 @@ app.post("/api/rx/reject/:changeId", async (req, res) => {
   return res.json({ success: true });
 });
 
+// ─── DELETE /api/rx/pending/:changeId (Dismiss single card) ───────────────────
+app.delete("/api/rx/pending/:changeId", async (req, res) => {
+  const { changeId } = req.params;
+  inMemoryPendingChanges = inMemoryPendingChanges.filter(x => x.id !== changeId);
+  if (fireReady() && changeId) {
+    try {
+      const filter = ObjectId.isValid(changeId) ? { _id: new ObjectId(changeId) } : { _id: changeId as any };
+      await mongoDb!.collection("pending_changes").deleteOne(filter);
+    } catch {}
+  }
+  return res.json({ success: true });
+});
+
+// ─── POST /api/rx/pending/clear-completed (Clear all rejected/confirmed) ──────
+app.post("/api/rx/pending/clear-completed", async (_req, res) => {
+  inMemoryPendingChanges = inMemoryPendingChanges.filter(x => x.status === "pending");
+  if (fireReady()) {
+    try {
+      await mongoDb!.collection("pending_changes").deleteMany({ status: { $in: ["confirmed", "rejected"] } });
+    } catch {}
+  }
+  return res.json({ success: true });
+});
+
+// ─── DELETE /api/rx/pending (Clear all pending changes) ────────────────────────
+app.delete("/api/rx/pending", async (_req, res) => {
+  inMemoryPendingChanges = [];
+  if (fireReady()) {
+    try {
+      await mongoDb!.collection("pending_changes").deleteMany({});
+    } catch {}
+  }
+  return res.json({ success: true, message: "All pending changes cleared" });
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // VOICE ASSISTANT ENDPOINTS
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2858,7 +3127,7 @@ ${JSON.stringify(snapshot, null, 2)}
         console.warn("[VOICE] Failed to load patient snapshot:", ctxErr.message);
       }
 
-      const voicePrompt = `You are Mitra, a kind and reassuring geriatric care voice assistant speaking to Somsubhro (age 82).
+      const voicePrompt = `You are Mitra, a kind and reassuring care voice assistant speaking with the care recipient. Do not assume identity, age, or diagnoses unless present in the supplied records.
 Answer concisely in 1-2 sentences. Use simple, friendly language suitable for speech synthesis.
 
 ${patientContext}

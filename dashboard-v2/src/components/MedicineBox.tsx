@@ -586,7 +586,7 @@ export default function MedicineBox({
             <p className="text-sm font-mono">No slots configured. Add a slot to get started.</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {slots.map(slot => (
               <BoxCard
                 key={slot.id}
@@ -604,9 +604,9 @@ export default function MedicineBox({
       {/* ── Hardware info footer ────────────────────────────────────────────── */}
       <div className="bg-slate-900/30 border border-slate-800/50 rounded-2xl p-5 grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
         {[
-          { icon: User,        color: 'text-blue-400',   bg: 'bg-blue-500/10',   label: 'HC-SR04 Ultrasonic',  desc: 'Detects patient presence < 40 cm before dispensing.' },
-          { icon: Fingerprint, color: 'text-amber-400',  bg: 'bg-amber-500/10',  label: 'TTP223 Touch Sensor', desc: 'Physically verifies pill removal from the compartment.' },
-          { icon: Activity,    color: 'text-violet-400', bg: 'bg-violet-500/10', label: '3× SG90 Servos',       desc: 'Open/close compartments on schedule (0° closed, 90° open).' },
+          { icon: User,        color: 'text-blue-400',   bg: 'bg-blue-500/10',   label: 'HC-SR04 Ultrasonic',  desc: 'Detects patient presence < 300 cm before dispensing.' },
+          { icon: Fingerprint, color: 'text-amber-400',  bg: 'bg-amber-500/10',  label: 'Push Button / Touch', desc: 'Physically verifies pill removal from compartment.' },
+          { icon: Activity,    color: 'text-violet-400', bg: 'bg-violet-500/10', label: '1× SG90 Servo',        desc: 'Opens/closes compartment lid on schedule (0° closed, 90° open).' },
         ].map(({ icon: Icon, color, bg, label, desc }) => (
           <div key={label} className="flex items-start gap-3">
             <div className={`p-2 rounded-lg ${bg} shrink-0`}><Icon className={`h-4 w-4 ${color}`} /></div>

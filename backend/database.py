@@ -10,6 +10,7 @@ from pymongo import MongoClient
 from dotenv import load_dotenv
 
 # Load env variables from .env file
+load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 load_dotenv()
 
 MONGO_URI = os.getenv("MONGO_URI")
@@ -101,8 +102,15 @@ class DatabaseLayer:
             upsert=True
         )
 
+    _fall_stats_cache = {}
+    _fall_stats_cache_time = 0
+
     @staticmethod
     def get_fall_stats() -> dict:
+        now = time.time()
+        if now - DatabaseLayer._fall_stats_cache_time < 2.0 and DatabaseLayer._fall_stats_cache:
+            return DatabaseLayer._fall_stats_cache
+
         # Group consecutive fall frames into "incidents"
         # (frames within 10 seconds of each other = 1 incident)
         fall_frames = list(db.fall_logs.find(
@@ -126,13 +134,16 @@ class DatabaseLayer:
         # Latest fall frame
         latest_fall_log = db.fall_logs.find_one({"is_fall": True}, sort=[("timestamp", -1)])
 
-        return {
+        res = {
             "fall_count": total_falls,
             "falls_today": falls_today,
             "last_fall_time": last_fall_time,
             "torso_angle": latest_fall_log.get("torso_angle", 0) if latest_fall_log else 0,
             "fps": latest_fall_log.get("fps", 0) if latest_fall_log else 0.0,
         }
+        DatabaseLayer._fall_stats_cache = res
+        DatabaseLayer._fall_stats_cache_time = now
+        return res
 
     # ── Events ─────────────────────────────────────────────────────────────────
 

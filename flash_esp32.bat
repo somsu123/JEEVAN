@@ -4,7 +4,8 @@ color 0E
 
 set ESPTOOL=C:\Users\somsubhro\AppData\Local\Arduino15\packages\esp32\tools\esptool_py\5.3.1\esptool.exe
 set BIN_DIR=C:\Users\somsubhro\AppData\Local\Temp\bpm_build_out
-set PORT=COM7
+set PORT=%1
+if "%PORT%"=="" set PORT=COM11
 
 cls
 color 0A
@@ -51,7 +52,7 @@ if %ERRORLEVEL% == 0 (
   echo  ================================================================
   echo    SUCCESS! ESP32 flashed!
   echo    WiFi SSID : ElderCare
-  echo    Server    : ws://10.113.44.135:3001/ws/esp32
+  echo    Server    : ws://10.122.37.135:3001/ws/esp32
   echo    Baud rate : 115200  (open Serial Monitor to verify)
   echo  ================================================================
   echo.

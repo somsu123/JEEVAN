@@ -31,16 +31,18 @@ export interface VitalState {
   heartRateHistory: VitalReading[];
   spo2History?: VitalReading[];
   signalQuality?: string;
-  movementState: 'Resting' | 'Gentle Walk' | 'Seated Activity' | 'Sleeping';
-  bloodLevelSeconds: number;
+  movementState: 'Resting' | 'Gentle Walk' | 'Seated Activity' | 'Sleeping' | 'Unknown';
+  bloodLevelSeconds: number | null;
   oxygenSpO2: number;
-  roomPresence: boolean;
+  roomPresence: boolean | null;
   fingerPresent: boolean;
   lastUpdated: string;
+  lastPacketAt?: number | null;
+  sensorError?: boolean;
 }
 
 // ─── Fall Detection ──────────────────────────────────────────────────────────
-export type FallSeverity = 'Critical Fall' | 'Stumble Warning' | 'Rapid Descent';
+export type FallSeverity = 'Critical Fall' | 'Stumble Warning' | 'Rapid Descent' | 'Fall Detected';
 export type FallSource = 'camera' | 'bracelet' | 'manual';
 
 export interface FallEvent {
@@ -50,7 +52,7 @@ export interface FallEvent {
   type: FallSeverity;
   source: FallSource;
   location: string;
-  confidence: number;
+  confidence: number | null;
   status: 'active' | 'resolved';
   resolvedAt?: string;
 }
@@ -73,6 +75,7 @@ export interface MedicineSlot {
   scheduledTime: string; // "HH:MM" 24h
   taken: boolean;
   takenAt?: string;
+  missed?: boolean;
   presenceConfirmed: boolean;  // ultrasonic sensor
   touchVerified: boolean;       // touch sensor
   notes?: string;
@@ -162,5 +165,6 @@ export interface Prescription {
   extractedMeds: ExtractedMed[];
   llmModel: string;
   status: 'pending_review' | 'applied' | 'rejected';
+  prescriptionNumber?: string | null;
 }
 

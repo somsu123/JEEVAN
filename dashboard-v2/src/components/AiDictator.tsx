@@ -186,7 +186,7 @@ export default function AiDictator({ open, onClose }: AiDictatorProps) {
             <div>
               <h2 className="text-sm font-black text-white tracking-wide">AI DICTATOR MODE</h2>
               <p className="text-[10px] text-slate-400 font-mono mt-0.5">
-                Powered by Local AI · Patient: Somsubhro, 82
+                Powered by Local AI · Uses saved patient records
               </p>
             </div>
           </div>
@@ -251,7 +251,7 @@ export default function AiDictator({ open, onClose }: AiDictatorProps) {
               <div>
                 <h3 className="text-lg font-black text-white">Ready to Brief, Doctor</h3>
                 <p className="text-xs text-slate-400 mt-2 max-w-sm leading-relaxed">
-                  Mitra will compile Arthur's complete patient data from MongoDB — heart rate history, fall events, prescriptions, and lab reports — then deliver a professional clinical briefing spoken aloud.
+                  Mitra will compile available patient data from MongoDB — heart rate history, fall events, prescriptions, and lab reports — then deliver a clinical briefing spoken aloud.
                 </p>
               </div>
               {error && (

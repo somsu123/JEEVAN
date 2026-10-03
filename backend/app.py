@@ -255,5 +255,5 @@ engine.runAndWait()
 
 if __name__ == '__main__':
     # Listen on all interfaces so ESP32 can connect
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=5000, threaded=True)
 

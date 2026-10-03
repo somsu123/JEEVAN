@@ -86,22 +86,28 @@ function CustomLegend() {
   );
 }
 
-export default function BpmChart({ history }) {
+export default function BpmChart({ history, isFresh = false }) {
   // Map to 0 (not null) when no finger — keeps the line continuous.
   // Null would break the line into discrete segments (connectNulls=false).
-  const chartData = history.map((entry, idx) => ({
-    ...entry,
-    displayBpm:  entry.fingerDetected && entry.bpm  > 0 ? entry.bpm  : 0,
-    displaySpo2: entry.fingerDetected && entry.spo2 > 0 ? entry.spo2 : 0,
-    index: idx,
-  }));
+  let lastValidBpm = null;
+  let lastValidSpo2 = null;
+  const chartData = history.map((entry, idx) => {
+    if (entry.bpm > 0) lastValidBpm = entry.bpm;
+    if (entry.spo2 > 0) lastValidSpo2 = entry.spo2;
+    return {
+      ...entry,
+      displayBpm:  entry.bpm > 0 ? entry.bpm : (entry.fingerDetected ? lastValidBpm : null),
+      displaySpo2: entry.spo2 > 0 ? entry.spo2 : (entry.fingerDetected ? lastValidSpo2 : null),
+      index: idx,
+    };
+  });
 
   const hasBpmData  = chartData.some((d) => d.displayBpm  > 0);
   const hasSpo2Data = chartData.some((d) => d.displaySpo2 > 0);
   const hasAnyData  = chartData.length > 0;
 
   return (
-    <div className="glass-card p-6" id="bpm-chart">
+    <div className={`glass-card p-6 transition-opacity duration-300 ${isFresh ? '' : 'opacity-50 grayscale'}`} id="bpm-chart">
       {/* Header */}
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-3">
