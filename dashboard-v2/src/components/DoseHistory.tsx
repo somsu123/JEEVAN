@@ -7,8 +7,9 @@ import { DoseEvent } from '../types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function fmt12(hhmm: string): string {
+  if (!hhmm || !hhmm.includes(':')) return '08:00 AM';
   const [h, m] = hhmm.split(':').map(Number);
-  return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`;
+  return `${h % 12 || 12}:${String(m || 0).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`;
 }
 function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
@@ -17,31 +18,31 @@ function fmtTime(iso: string): string {
   return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
 }
 
-const COMP_NAMES  = ['Compartment 0', 'Compartment 1', 'Compartment 2', 'Compartment 3'];
-const COMP_COLORS = ['text-emerald-400', 'text-blue-400', 'text-violet-400', 'text-amber-400'];
-const COMP_BG     = ['bg-emerald-500/10', 'bg-blue-500/10', 'bg-violet-500/10', 'bg-amber-500/10'];
+const COMP_NAMES  = ['Compartment 1', 'Compartment 2', 'Compartment 3', 'Compartment 4'];
+const COMP_COLORS = ['text-emerald-700', 'text-blue-700', 'text-purple-700', 'text-amber-800'];
+const COMP_BG     = ['bg-emerald-50', 'bg-blue-50', 'bg-purple-50', 'bg-amber-50'];
 
 // ─── Adherence bar ────────────────────────────────────────────────────────────
 function AdherenceBar({ taken, missed }: { taken: number; missed: number }) {
   const total = taken + missed;
   const pct = total > 0 ? Math.round((taken / total) * 100) : 0;
-  const color = pct >= 85 ? 'bg-emerald-500' : pct >= 60 ? 'bg-amber-500' : 'bg-red-500';
-  const label = pct >= 85 ? 'Good' : pct >= 60 ? 'Moderate' : 'Poor';
-  const labelColor = pct >= 85 ? 'text-emerald-400' : pct >= 60 ? 'text-amber-400' : 'text-red-400';
+  const color = pct >= 85 ? 'bg-emerald-600' : pct >= 60 ? 'bg-amber-500' : 'bg-rose-500';
+  const label = pct >= 85 ? 'Optimal Adherence' : pct >= 60 ? 'Moderate' : 'Needs Attention';
+  const labelColor = pct >= 85 ? 'text-emerald-700' : pct >= 60 ? 'text-amber-800' : 'text-rose-700';
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between text-xs font-mono">
-        <span className="text-slate-400">Adherence</span>
+    <div className="space-y-3">
+      <div className="flex items-center justify-between text-xs">
+        <span className="text-slate-500 font-semibold uppercase tracking-wider">Overall Dose Compliance</span>
         <span className={`font-bold ${labelColor}`}>{pct}% · {label}</span>
       </div>
-      <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
+      <div className="h-3 rounded-full bg-slate-100 border border-slate-200/60 overflow-hidden">
         <div className={`h-full ${color} rounded-full transition-all duration-700`} style={{ width: `${pct}%` }} />
       </div>
-      <div className="flex justify-between text-[10px] font-mono text-slate-500">
-        <span className="text-emerald-400">{taken} taken</span>
-        <span className="text-red-400">{missed} missed</span>
-        <span>{total} total</span>
+      <div className="flex justify-between text-xs font-medium text-slate-500">
+        <span className="text-emerald-700 font-bold">{taken} taken</span>
+        <span className="text-rose-600 font-bold">{missed} missed</span>
+        <span>{total} total logged</span>
       </div>
     </div>
   );
@@ -70,19 +71,19 @@ function MiniBarChart({ events }: { events: DoseEvent[] }) {
   const maxVal = Math.max(...days.map(d => d.taken + d.missed), 1);
 
   return (
-    <div className="flex items-end gap-1 h-16">
+    <div className="flex items-end gap-2 h-24 pt-2">
       {days.map((d, i) => {
         const total = d.taken + d.missed;
         const takenH = total > 0 ? Math.round((d.taken / maxVal) * 64) : 0;
         const missedH = total > 0 ? Math.round((d.missed / maxVal) * 64) : 0;
         return (
-          <div key={i} className="flex-1 flex flex-col items-center gap-0.5 group relative" title={`${d.label}: ${d.taken} taken, ${d.missed} missed`}>
-            <div className="w-full flex flex-col justify-end" style={{ height: 56 }}>
-              {missedH > 0 && <div className="w-full rounded-t-sm bg-red-500/50" style={{ height: missedH }} />}
-              {takenH > 0 && <div className={`w-full rounded-sm ${d.missed === 0 ? 'rounded-t-sm' : ''} bg-emerald-500/60`} style={{ height: takenH }} />}
-              {total === 0 && <div className="w-full rounded-sm bg-slate-800" style={{ height: 4 }} />}
+          <div key={i} className="flex-1 flex flex-col items-center gap-1 group relative" title={`${d.label}: ${d.taken} taken, ${d.missed} missed`}>
+            <div className="w-full flex flex-col justify-end" style={{ height: 64 }}>
+              {missedH > 0 && <div className="w-full rounded-t-sm bg-rose-400" style={{ height: missedH }} />}
+              {takenH > 0 && <div className={`w-full rounded-sm ${d.missed === 0 ? 'rounded-t-sm' : ''} bg-emerald-500`} style={{ height: takenH }} />}
+              {total === 0 && <div className="w-full rounded-sm bg-slate-100" style={{ height: 4 }} />}
             </div>
-            <span className="text-[8px] font-mono text-slate-600 truncate w-full text-center">{d.label.slice(0, 3)}</span>
+            <span className="text-xs text-slate-500 truncate w-full text-center font-medium">{d.label.slice(0, 3)}</span>
           </div>
         );
       })}
@@ -95,34 +96,34 @@ function EventRow({ event }: { event: DoseEvent }) {
   const c = event.compartment % 4;
   const taken = event.status === 'taken';
   return (
-    <div className={`flex items-start gap-4 py-3 border-b border-slate-800/60 last:border-0 group`}>
+    <div className="flex items-start gap-4 py-4 border-b border-slate-100 last:border-0 group hover:bg-slate-50/60 transition px-2 rounded-2xl">
       {/* Status icon */}
-      <div className={`mt-0.5 shrink-0 p-1.5 rounded-lg ${taken ? 'bg-emerald-500/10' : 'bg-red-500/10'}`}>
+      <div className={`mt-0.5 shrink-0 p-2.5 rounded-2xl border ${taken ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-rose-50 text-rose-600 border-rose-200'}`}>
         {taken
-          ? <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-          : <XCircle className="h-4 w-4 text-red-400" />}
+          ? <CheckCircle2 className="h-5 w-5" />
+          : <XCircle className="h-5 w-5" />}
       </div>
       {/* Medicine info */}
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <p className="text-sm font-bold text-slate-200 leading-tight">{event.label}</p>
-          <span className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold ${COMP_BG[c]} ${COMP_COLORS[c]}`}>
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <p className="text-sm font-bold text-slate-800 leading-tight">{event.label}</p>
+          <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold border border-slate-200/80 ${COMP_BG[c]} ${COMP_COLORS[c]}`}>
             {COMP_NAMES[c]}
           </span>
         </div>
-        <div className="flex items-center gap-3 mt-0.5 text-[11px] font-mono text-slate-500">
-          <span className="flex items-center gap-1">
-            <Clock className="h-2.5 w-2.5" /> Scheduled {fmt12(event.scheduledTime)}
+        <div className="flex items-center gap-3 mt-1.5 text-xs text-slate-500">
+          <span className="flex items-center gap-1 font-medium">
+            <Clock className="h-3.5 w-3.5 text-slate-400" /> Scheduled {fmt12(event.scheduledTime)}
           </span>
           {taken && event.takenAt && (
-            <span className="text-emerald-500">Taken {fmtTime(event.takenAt)}</span>
+            <span className="text-emerald-700 font-semibold">Taken at {fmtTime(event.takenAt)}</span>
           )}
-          {!taken && <span className="text-red-500">Missed</span>}
+          {!taken && <span className="text-rose-600 font-semibold">Missed dose</span>}
         </div>
       </div>
       {/* Date */}
       <div className="text-right shrink-0">
-        <p className="text-[10px] font-mono text-slate-500">{fmtDate(event.loggedAt)}</p>
+        <p className="text-xs text-slate-400 font-medium">{fmtDate(event.loggedAt)}</p>
       </div>
     </div>
   );
@@ -194,64 +195,67 @@ export default function DoseHistory() {
       {/* Header */}
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-headline font-bold text-slate-100 tracking-tight flex items-center gap-3">
-            <BarChart3 className="h-6 w-6 text-emerald-400" /> Dose History
+          <h1 className="text-2xl font-headline font-bold text-slate-800 tracking-tight flex items-center gap-3">
+            <div className="p-2.5 rounded-2xl bg-blue-50 text-blue-600 border border-blue-100">
+              <BarChart3 className="h-6 w-6" />
+            </div>
+            Medication History &amp; Compliance Logs
           </h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Adherence log automatically built from ESP32 polling — {events.length} events recorded
+          <p className="text-sm text-slate-500 mt-1 font-medium">
+            Automated compliance logs captured from Smart MedBox — {events.length} events recorded
           </p>
         </div>
-        <button onClick={fetchEvents} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl glass-card hover:border-emerald-500/30 text-xs text-slate-400 hover:text-emerald-400 transition-all self-start">
-          <RefreshCw className="h-3.5 w-3.5" /> Refresh
+        <button onClick={fetchEvents} className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-white border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-all shadow-xs self-start cursor-pointer">
+          <RefreshCw className="h-4 w-4" /> Refresh
         </button>
       </header>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
 
         {/* ── LEFT: Summary cards + chart ── */}
-        <div className="space-y-4">
+        <div className="space-y-5">
 
           {/* Adherence summary */}
-          <div className="glass-card rounded-2xl p-5 space-y-4">
-            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest font-mono flex items-center gap-2">
-              <BarChart3 className="h-3.5 w-3.5" /> Overall Adherence
+          <div className="bg-white border border-slate-200 rounded-3xl p-6 space-y-4 shadow-xs">
+            <h2 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+              <BarChart3 className="h-4 w-4 text-blue-600" /> Overall Compliance
             </h2>
             <AdherenceBar taken={taken} missed={missed} />
           </div>
 
           {/* 14-day bar chart */}
-          <div className="glass-card rounded-2xl p-5 space-y-3">
-            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest font-mono">14-day Overview</h2>
+          <div className="bg-white border border-slate-200 rounded-3xl p-6 space-y-3 shadow-xs">
+            <h2 className="text-xs font-bold text-slate-500 uppercase tracking-wider">14-Day Compliance Trend</h2>
             <MiniBarChart events={events} />
-            <div className="flex items-center gap-4 text-[10px] font-mono text-slate-500">
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-emerald-500/60 inline-block" /> Taken</span>
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-red-500/50 inline-block" /> Missed</span>
+            <div className="flex items-center gap-5 text-xs text-slate-500 pt-3 border-t border-slate-100">
+              <span className="flex items-center gap-1.5 font-medium"><span className="w-3 h-3 rounded-sm bg-emerald-500 inline-block" /> Taken</span>
+              <span className="flex items-center gap-1.5 font-medium"><span className="w-3 h-3 rounded-sm bg-rose-400 inline-block" /> Missed</span>
             </div>
           </div>
 
           {/* Per-compartment stats */}
-          <div className="glass-card rounded-2xl p-5 space-y-3">
-            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest font-mono flex items-center gap-2">
-              <Package className="h-3.5 w-3.5" /> Per-Compartment
+          <div className="bg-white border border-slate-200 rounded-3xl p-6 space-y-3 shadow-xs">
+            <h2 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+              <Package className="h-4 w-4 text-blue-600" /> Per-Compartment Breakdown
             </h2>
             {[0, 1, 2, 3].map(comp => {
               const compEvents = events.filter(e => e.compartment === comp);
               const t = compEvents.filter(e => e.status === 'taken').length;
               const m = compEvents.filter(e => e.status === 'missed').length;
               const pct = t + m > 0 ? Math.round(t / (t + m) * 100) : 0;
-              const label = compEvents[0]?.label || '(empty)';
+              const label = compEvents[0]?.label || `Slot ${comp + 1}`;
               return (
-                <div key={comp} className="flex items-center gap-3">
-                  <div className={`p-1.5 rounded-lg ${COMP_BG[comp]} shrink-0`}>
-                    <Package className={`h-3.5 w-3.5 ${COMP_COLORS[comp]}`} />
+                <div key={comp} className="flex items-center gap-3.5 p-3 rounded-2xl bg-slate-50/70 border border-slate-200/80">
+                  <div className={`p-2.5 rounded-xl ${COMP_BG[comp]} border border-slate-200/60 shrink-0`}>
+                    <Package className={`h-4 w-4 ${COMP_COLORS[comp]}`} />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs font-bold text-slate-200 truncate">{label}</p>
-                    <div className="flex items-center gap-2 mt-1">
-                      <div className="flex-1 h-1.5 rounded-full bg-slate-800 overflow-hidden">
-                        <div className={`h-full ${pct >= 85 ? 'bg-emerald-500' : pct >= 60 ? 'bg-amber-500' : 'bg-red-500'} rounded-full`} style={{ width: `${pct}%` }} />
+                    <p className="text-xs font-bold text-slate-800 truncate">{label}</p>
+                    <div className="flex items-center gap-2.5 mt-1.5">
+                      <div className="flex-1 h-2 rounded-full bg-slate-200 overflow-hidden">
+                        <div className={`h-full ${pct >= 85 ? 'bg-emerald-500' : pct >= 60 ? 'bg-amber-500' : 'bg-rose-500'} rounded-full`} style={{ width: `${pct}%` }} />
                       </div>
-                      <span className="text-[10px] font-mono text-slate-400 shrink-0">{pct}%</span>
+                      <span className="text-xs font-bold text-slate-700 shrink-0">{pct}%</span>
                     </div>
                   </div>
                 </div>
@@ -265,69 +269,68 @@ export default function DoseHistory() {
 
           {/* Filters */}
           <div className="flex items-center gap-3 flex-wrap">
-            <Filter className="h-3.5 w-3.5 text-slate-500" />
+            <Filter className="h-4 w-4 text-slate-400" />
 
             {/* Compartment filter */}
             <div className="flex gap-1.5">
               {(['all', 0, 1, 2, 3] as const).map(comp => (
                 <button key={comp} onClick={() => setCompFilter(comp)}
-                  className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold transition-all ${
+                  className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all shadow-2xs cursor-pointer ${
                     compFilter === comp
-                      ? 'bg-slate-700 text-white border border-slate-600'
-                      : 'text-slate-500 hover:text-slate-300 border border-transparent'
+                      ? 'bg-blue-600 text-white shadow-xs font-bold'
+                      : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
                   }`}>
-                  {comp === 'all' ? 'All' : `C${comp}`}
+                  {comp === 'all' ? 'All Slots' : `Slot ${comp + 1}`}
                 </button>
               ))}
             </div>
 
-            <div className="h-4 w-px bg-slate-800" />
+            <div className="h-4 w-px bg-slate-200" />
 
             {/* Status filter */}
             <div className="flex gap-1.5">
               {(['all', 'taken', 'missed'] as const).map(s => (
                 <button key={s} onClick={() => setStatusFilter(s)}
-                  className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold capitalize transition-all ${
+                  className={`px-3.5 py-2 rounded-xl text-xs font-semibold capitalize transition-all shadow-2xs cursor-pointer ${
                     statusFilter === s
                       ? s === 'taken'
-                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-300 font-bold'
                         : s === 'missed'
-                          ? 'bg-red-500/20 text-red-300 border border-red-500/30'
-                          : 'bg-slate-700 text-white border border-slate-600'
-                      : 'text-slate-500 hover:text-slate-300 border border-transparent'
+                          ? 'bg-rose-50 text-rose-700 border border-rose-300 font-bold'
+                          : 'bg-blue-600 text-white font-bold'
+                      : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
                   }`}>
                   {s}
                 </button>
               ))}
             </div>
 
-            <span className="ml-auto text-[10px] font-mono text-slate-500">{filtered.length} events</span>
+            <span className="ml-auto text-xs font-semibold text-slate-500">{filtered.length} events</span>
           </div>
 
           {/* Timeline */}
-          <div className="glass-card rounded-2xl p-5">
+          <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-xs">
             {loading ? (
               <div className="flex items-center justify-center py-12">
-                <Loader2 className="h-6 w-6 text-slate-600 animate-spin" />
+                <Loader2 className="h-6 w-6 text-blue-600 animate-spin" />
               </div>
             ) : events.length === 0 ? (
-              <div className="text-center py-12 text-slate-500">
-                <Clock className="h-10 w-10 mx-auto mb-3 opacity-20" />
-                <p className="text-sm font-mono">No dose events recorded yet</p>
-                <p className="text-xs mt-1 text-slate-600">Events are logged automatically when the ESP32 polls.</p>
-                <p className="text-xs mt-1 text-slate-700">Make sure ESP32_BASE_URL is set in your .env file.</p>
+              <div className="text-center py-14 text-slate-400">
+                <Clock className="h-10 w-10 mx-auto mb-3 text-slate-300" />
+                <p className="text-sm font-semibold text-slate-700">No dose events recorded yet</p>
+                <p className="text-xs mt-1 text-slate-400">Events are logged automatically when the ESP32 MedBox records activity.</p>
               </div>
             ) : filtered.length === 0 ? (
-              <div className="text-center py-12 text-slate-500">
-                <Filter className="h-8 w-8 mx-auto mb-2 opacity-20" />
-                <p className="text-sm font-mono">No events match current filters</p>
+              <div className="text-center py-14 text-slate-400">
+                <Filter className="h-8 w-8 mx-auto mb-2 text-slate-300" />
+                <p className="text-sm font-semibold text-slate-700">No events match current filters</p>
               </div>
             ) : (
-              <div className="divide-y divide-slate-800/40">
+              <div className="divide-y divide-slate-100">
                 {grouped.map(group => (
                   <div key={group.date}>
-                    <div className="py-2 sticky top-0 bg-slate-900/80 backdrop-blur-sm z-10">
-                      <p className="text-[10px] font-mono text-slate-500 font-bold uppercase tracking-widest">{group.date}</p>
+                    <div className="py-3 sticky top-0 bg-white/95 backdrop-blur-sm z-10 border-b border-slate-100 mb-1">
+                      <p className="text-xs text-slate-600 font-bold uppercase tracking-wider">{group.date}</p>
                     </div>
                     {group.events.map(ev => <EventRow key={ev.id} event={ev} />)}
                   </div>

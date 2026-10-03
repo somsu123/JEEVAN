@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  FileText, Sparkles, Stethoscope
+  FileText, Sparkles, Stethoscope, ArrowRight, Upload
 } from 'lucide-react';
 import { ScanResult, VitalState } from '../types';
 import AiDictator from './AiDictator';
@@ -32,30 +32,29 @@ export default function Overview({ scannedHistory, onNavigate, activeAlert, vita
 
   return (
     <div className="flex flex-col gap-8 relative min-h-full" id="overview-dashboard">
-      <div className="absolute inset-0 bg-grid-pattern opacity-50 pointer-events-none" />
+      <div className="absolute inset-0 bg-grid-pattern opacity-30 pointer-events-none" />
       <div className="orb-emerald -top-32 -left-32" />
-      <div className="orb-rose top-1/4 right-0" />
+      <div className="orb-indigo top-1/3 right-0" />
       
       {/* ── Humanized Header ── */}
       <motion.header 
-        initial={{ opacity: 0, y: -20 }}
+        initial={{ opacity: 0, y: -12 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+        transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
         className="flex flex-col md:flex-row md:items-end justify-between gap-6 relative z-10"
       >
         <div className="space-y-2">
           <div className="flex items-center gap-3">
-            <span className="px-3 py-1 bg-white/5 border border-white/10 rounded-full text-xs font-label text-slate-300 backdrop-blur-md flex items-center gap-2">
-              <span className={`h-1.5 w-1.5 rounded-full ${espConnected ? 'bg-emerald-400 pulse-emerald' : 'bg-slate-500'}`} />
-              {espConnected ? 'Vitals streaming' : hardwareOnline ? 'Waiting for vitals' : 'Sensor offline'}
+            <span className="px-3.5 py-1.5 bg-white border border-slate-200 rounded-full text-xs font-semibold text-slate-700 shadow-2xs flex items-center gap-2">
+              <span className={`h-2.5 w-2.5 rounded-full ${espConnected ? 'bg-emerald-500 pulse-emerald' : 'bg-slate-400'}`} />
+              {espConnected ? 'Live telemetry active' : hardwareOnline ? 'Waiting for bracelet sensor' : 'Sensors on standby'}
             </span>
           </div>
-          <h1 className="text-4xl md:text-5xl font-headline font-bold text-white tracking-tight leading-tight">
-            <span className="text-slate-400">{greeting},</span><br />
-            Care Overview.
+          <h1 className="text-3xl md:text-4xl font-headline font-bold text-slate-800 tracking-tight leading-tight">
+            <span className="text-slate-500 font-normal">{greeting},</span> Patient & Caregiver.
           </h1>
-          <p className="text-slate-400 text-lg max-w-xl leading-relaxed">
-            Live readings appear here when recent sensor packets are available. Review uploaded medical reports below.
+          <p className="text-slate-600 text-base max-w-2xl leading-relaxed">
+            Real-time vital signs, automated fall prevention, and medical records summary below.
           </p>
         </div>
 
@@ -64,19 +63,19 @@ export default function Overview({ scannedHistory, onNavigate, activeAlert, vita
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
             onClick={() => setDictatorOpen(true)}
-            className="px-5 py-2.5 rounded-full font-label font-bold text-sm transition-all flex items-center gap-2 bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow-lg shadow-violet-500/25 border border-white/10"
+            className="px-5 py-3 rounded-2xl font-semibold text-sm transition-all flex items-center gap-2.5 bg-blue-600 hover:bg-blue-700 text-white shadow-sm hover:shadow-md cursor-pointer"
           >
             <Sparkles className="h-4 w-4" />
-            AI Assistant
+            AI Voice Assistant
           </motion.button>
         </div>
       </motion.header>
 
       {/* ── Live Vitals Integration ── */}
       <motion.div 
-        initial={{ opacity: 0, y: 20 }}
+        initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6, delay: 0.1 }}
+        transition={{ duration: 0.4, delay: 0.1 }}
         className="relative z-10"
       >
         {vitals && (
@@ -84,47 +83,60 @@ export default function Overview({ scannedHistory, onNavigate, activeAlert, vita
         )}
       </motion.div>
 
-      {/* ── Beautiful Insights Area ── */}
+      {/* ── Medical Journey & Document Insights ── */}
       <motion.div 
-        initial={{ opacity: 0, y: 20 }}
+        initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6, delay: 0.3 }}
-        className="glass-card rounded-3xl overflow-hidden relative z-10"
+        transition={{ duration: 0.4, delay: 0.15 }}
+        className="bg-white border border-slate-200 rounded-3xl shadow-xs overflow-hidden relative z-10"
       >
-        <div className="grid grid-cols-1 lg:grid-cols-5 h-[500px]">
+        <div className="grid grid-cols-1 lg:grid-cols-5 min-h-[460px]">
           {/* Documents Sidebar */}
-          <div className="lg:col-span-2 bg-slate-950/40 border-r border-white/5 p-6 flex flex-col h-full">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-lg font-headline text-white flex items-center gap-2">
-                <FileText className="h-5 w-5 text-emerald-400" /> Medical Journey
+          <div className="lg:col-span-2 bg-slate-50/70 border-r border-slate-200/80 p-6 flex flex-col h-full">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-base font-headline font-bold text-slate-800 flex items-center gap-2">
+                <FileText className="h-5 w-5 text-blue-600" /> Patient Medical Journey
               </h3>
+              <button 
+                onClick={() => onNavigate('report-scanner')}
+                className="text-xs text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1 cursor-pointer"
+              >
+                Scan New <ArrowRight className="h-3.5 w-3.5" />
+              </button>
             </div>
-            <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-3">
+            <div className="flex-1 overflow-y-auto custom-scrollbar pr-1 space-y-2.5">
               {scannedHistory.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-center space-y-4">
-                  <div className="p-4 rounded-full bg-slate-900 border border-slate-800">
-                    <Sparkles className="h-6 w-6 text-slate-500" />
+                <div className="h-full py-12 flex flex-col items-center justify-center text-center space-y-3">
+                  <div className="p-3.5 rounded-full bg-white border border-slate-200 shadow-2xs">
+                    <Upload className="h-5 w-5 text-slate-400" />
                   </div>
-                  <p className="text-slate-400">I haven't read any of your recent reports yet.</p>
-                  <button onClick={() => onNavigate('report-scanner')} className="px-4 py-2 bg-emerald-500/10 text-emerald-400 rounded-full font-label text-sm hover:bg-emerald-500/20 transition">
-                    Upload a document
+                  <p className="text-sm text-slate-600 max-w-[240px]">No medical records uploaded yet.</p>
+                  <button 
+                    onClick={() => onNavigate('report-scanner')} 
+                    className="px-4 py-2.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-xl font-medium text-xs hover:bg-blue-100 transition shadow-2xs cursor-pointer"
+                  >
+                    Upload Report Document
                   </button>
                 </div>
               ) : (
                 scannedHistory.map((report, idx) => (
                   <motion.button
-                    whileHover={{ scale: 1.01 }}
+                    whileHover={{ x: 2 }}
                     whileTap={{ scale: 0.99 }}
                     key={idx}
                     onClick={() => setSelectedReportIdx(idx)}
-                    className={`w-full text-left p-4 rounded-2xl transition-all duration-300 flex items-start gap-4 border ${selectedReportIdx === idx ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-white/5 border-transparent hover:bg-white/10'}`}
+                    className={`w-full text-left p-4 rounded-2xl transition-all flex items-start gap-3.5 border cursor-pointer ${
+                      selectedReportIdx === idx
+                        ? 'bg-blue-50/90 border-blue-300 text-blue-900 shadow-2xs'
+                        : 'bg-white border-slate-200/80 hover:border-slate-300 text-slate-700'
+                    }`}
                   >
-                    <div className={`p-2.5 rounded-xl shrink-0 ${selectedReportIdx === idx ? 'bg-emerald-500/20' : 'bg-slate-800'}`}>
-                      <FileText className={`h-4 w-4 ${selectedReportIdx === idx ? 'text-emerald-400' : 'text-slate-400'}`} />
+                    <div className={`p-2.5 rounded-xl shrink-0 ${selectedReportIdx === idx ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>
+                      <FileText className="h-4 w-4" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <h4 className={`font-headline truncate ${selectedReportIdx === idx ? 'text-emerald-300 font-semibold' : 'text-slate-200'}`}>{report.fileName}</h4>
-                      <p className="text-xs text-slate-500 mt-1">{report.timestamp}</p>
+                      <h4 className={`text-sm font-semibold truncate ${selectedReportIdx === idx ? 'text-blue-900' : 'text-slate-800'}`}>{report.fileName}</h4>
+                      <p className="text-xs text-slate-500 mt-0.5">{report.timestamp}</p>
                     </div>
                   </motion.button>
                 ))
@@ -133,44 +145,44 @@ export default function Overview({ scannedHistory, onNavigate, activeAlert, vita
           </div>
 
           {/* Document AI Analysis */}
-          <div className="lg:col-span-3 p-8 flex flex-col h-full bg-gradient-to-br from-slate-900/50 to-slate-950/50">
+          <div className="lg:col-span-3 p-7 flex flex-col h-full bg-white">
             {activeReport ? (
               <AnimatePresence mode="wait">
                 <motion.div 
                   key={activeReport.fileName}
-                  initial={{ opacity: 0, x: 10 }}
+                  initial={{ opacity: 0, x: 8 }}
                   animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -10 }}
+                  exit={{ opacity: 0, x: -8 }}
                   className="flex-1 flex flex-col h-full"
                 >
-                  <div className="mb-6 flex items-center gap-3 border-b border-white/5 pb-6">
-                    <div className="h-10 w-10 rounded-full bg-emerald-500/20 flex items-center justify-center">
-                      <Stethoscope className="h-5 w-5 text-emerald-400" />
+                  <div className="mb-5 flex items-center gap-3 border-b border-slate-100 pb-4">
+                    <div className="h-10 w-10 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600">
+                      <Stethoscope className="h-5 w-5" />
                     </div>
                     <div>
-                      <h2 className="text-xl font-headline text-white">AI Synthesis</h2>
-                      <p className="text-sm text-slate-400">Distilled from {activeReport.fileName}</p>
+                      <h2 className="text-base font-headline font-bold text-slate-800">Clinical AI Synthesis</h2>
+                      <p className="text-xs text-slate-500">Summary from {activeReport.fileName}</p>
                     </div>
                   </div>
-                  <div className="flex-1 overflow-y-auto custom-scrollbar pr-4 text-slate-300 leading-relaxed font-body">
+                  <div className="flex-1 overflow-y-auto custom-scrollbar pr-3 text-slate-700 leading-relaxed font-body text-sm space-y-3">
                      {activeReport.summary ? (
-                       <div className="prose prose-invert prose-emerald max-w-none">
+                       <div className="space-y-3">
                          {activeReport.summary.split('\n').map((line, i) => {
-                           if (line.startsWith('##')) return <h3 key={i} className="text-emerald-400 font-headline mt-6 mb-3">{line.replace(/#/g, '').trim()}</h3>;
-                           if (line.startsWith('*')) return <li key={i} className="ml-4 mb-2">{line.replace('*', '').trim()}</li>;
-                           if (line.trim() === '') return <br key={i}/>;
-                           return <p key={i} className="mb-4">{line.replace(/\*\*/g, '')}</p>;
+                           if (line.startsWith('##')) return <h3 key={i} className="text-sm font-bold font-headline text-blue-800 mt-4 mb-2 pb-1 border-b border-slate-100">{line.replace(/#/g, '').trim()}</h3>;
+                           if (line.startsWith('*')) return <li key={i} className="ml-4 text-slate-700 leading-relaxed">{line.replace('*', '').trim()}</li>;
+                           if (line.trim() === '') return null;
+                           return <p key={i} className="text-slate-700 leading-relaxed">{line.replace(/\*\*/g, '')}</p>;
                          })}
                        </div>
                      ) : (
-                       <p className="text-slate-500 italic">No summary available.</p>
+                       <p className="text-slate-400 italic">No clinical summary available for this scan.</p>
                      )}
                   </div>
                 </motion.div>
               </AnimatePresence>
             ) : (
-              <div className="h-full flex flex-col items-center justify-center text-slate-500">
-                Select a document to read my analysis.
+              <div className="h-full flex flex-col items-center justify-center text-slate-400 text-sm py-12">
+                Select a document from the left to inspect AI summary.
               </div>
             )}
           </div>

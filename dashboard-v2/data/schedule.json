@@ -1,29 +1,22 @@
 [
   {
-    "boxNumber": 2,
-    "medicine": "Amoxirillin",
-    "dosage": "500mg",
-    "time": "05:04",
-    "taken": true,
-    "takenAt": "06:34:14",
-    "_id": "6ac0548ed82925891f2b44c2"
-  },
-  {
-    "boxNumber": 3,
-    "medicine": "T. Placida",
-    "dosage": "",
-    "time": "05:24",
-    "taken": true,
-    "takenAt": "06:34:08",
-    "_id": "6ac0548ed82925891f2b44c3"
-  },
-  {
+    "time": "07:57",
+    "medicine": "Paracetamol - 500mg",
+    "dosage": "—",
     "boxNumber": 1,
-    "medicine": "Amoxirillin",
-    "dosage": "500mg",
-    "time": "05:48",
     "taken": true,
-    "takenAt": "06:33:56",
-    "_id": "6ac0548ed82925891f2b44c4"
+    "takenAt": "08:36:37",
+    "missed": false,
+    "_id": "6ac07142d82925891f2b458d"
+  },
+  {
+    "time": "06:59",
+    "medicine": "paracetamol - 1tab",
+    "dosage": "—",
+    "boxNumber": 2,
+    "taken": true,
+    "takenAt": "08:36:42",
+    "missed": false,
+    "_id": "6ac07142d82925891f2b458e"
   }
 ]

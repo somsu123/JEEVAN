@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Activity, User } from 'lucide-react';
+import { Activity, User, ShieldCheck } from 'lucide-react';
 import Sidebar from './components/Sidebar';
 import Overview from './components/Overview';
 import ReportScanner from './components/ReportScanner';
@@ -77,7 +77,6 @@ export default function App() {
     online: false, state: 'UNKNOWN', presenceDetected: false, lastSeen: '', nextDoseTime: '', uptime: 0, deviceId: 'medbox-01',
   });
   const [pendingRxCount, setPendingRxCount] = useState(0);
-  const [medicineReminder, setMedicineReminder] = useState<{ medicine: string; dosage: string; time: string; message: string } | null>(null);
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -381,7 +380,7 @@ export default function App() {
       case 'report-scanner': return <ReportScanner onAddScanResult={(res) => setScannedHistory(p => [res, ...p])} scannedHistory={scannedHistory} />;
       case 'rx-review': return <RxReview />;
       case 'dose-history': return <DoseHistory />;
-      default: return <div className="p-8 text-center text-slate-400">View not found. Return to Overview.</div>;
+      default: return <div className="p-8 text-center text-slate-500 font-medium">View not found. Return to Overview.</div>;
     }
   };
 
@@ -389,47 +388,47 @@ export default function App() {
   const timeString = currentTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[#030712] font-body text-slate-100 antialiased selection:bg-emerald-500/30 selection:text-emerald-300 relative">
+    <div className="flex h-screen overflow-hidden bg-[#F8FAFC] font-body text-slate-700 antialiased selection:bg-blue-100 selection:text-blue-800 relative">
       <Sidebar currentView={currentView} onViewChange={setCurrentView} activeAlert={activeAlert} onTriggerSOS={() => setActiveAlert(true)} fallCount={activeFallCount} pendingRxCount={pendingRxCount} />
 
       <div className="flex-1 flex flex-col min-w-0 relative z-10">
-        {/* Floating Top Nav (21st.dev Style) */}
-        <header className="h-20 shrink-0 px-8 flex items-center justify-between z-40 bg-gradient-to-b from-[#030712] to-transparent pointer-events-none">
+        {/* Floating Top Nav */}
+        <header className="h-16 shrink-0 px-8 flex items-center justify-between z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/80 shadow-2xs">
           <div className="flex items-center gap-4 pointer-events-auto">
             <div className="relative group cursor-pointer">
-              <div className="h-11 w-11 rounded-2xl bg-slate-800/80 backdrop-blur-md border border-white/10 flex items-center justify-center text-emerald-400 overflow-hidden transition-transform group-hover:scale-105">
+              <div className="h-10 w-10 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center text-blue-600 overflow-hidden transition-transform group-hover:scale-105 shadow-2xs">
                 <User className="h-5 w-5" aria-hidden="true" />
               </div>
-              <span className={`absolute -bottom-1 -right-1 h-3.5 w-3.5 rounded-full border-[3px] border-[#030712] ${espConnected ? 'bg-emerald-500 pulse-emerald' : 'bg-slate-500'}`} />
+              <span className={`absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-white ${espConnected ? 'bg-emerald-500 pulse-emerald' : 'bg-slate-400'}`} />
             </div>
             <div className="flex flex-col">
-              <span className="text-sm font-bold font-headline text-white tracking-wide">JEEVAN</span>
-              <span className="text-xs text-slate-400 font-medium">Care dashboard</span>
+              <span className="text-base font-bold font-headline text-slate-800 tracking-tight">JEEVAN Eldercare Platform</span>
+              <span className="text-xs text-slate-500 font-medium">Continuous Care & Remote Monitoring</span>
             </div>
           </div>
 
-          <div className="flex items-center gap-6 pointer-events-auto">
-            <div className="flex items-center gap-3 px-4 py-2 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-md">
-              <Activity className="h-4 w-4 text-emerald-400" />
+          <div className="flex items-center gap-4 pointer-events-auto">
+            <div className="flex items-center gap-3 px-4 py-2 rounded-xl bg-slate-50 border border-slate-200 shadow-2xs">
+              <Activity className="h-4 w-4 text-emerald-600 shrink-0" />
               <div className="flex flex-col text-right">
-                <span className="text-xs font-bold text-slate-200 leading-none">{timeString}</span>
-                <span className="text-[10px] text-slate-400 uppercase tracking-wider mt-1">
-                  {espConnected ? 'Vitals streaming' : hardwareOnline ? 'Waiting for vitals' : 'Sensor offline'}
+                <span className="text-sm font-bold text-slate-800 leading-none">{timeString}</span>
+                <span className="text-xs text-slate-500 font-medium mt-0.5">
+                  {espConnected ? 'Vitals streaming' : hardwareOnline ? 'Waiting for vitals' : 'Sensors standby'}
                 </span>
               </div>
             </div>
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto custom-scrollbar px-8 pb-12 pt-4">
+        <main className="flex-1 overflow-y-auto custom-scrollbar px-8 pb-12 pt-6">
           <div className="max-w-[1400px] mx-auto h-full">
             <AnimatePresence mode="wait">
               <motion.div
                 key={currentView}
-                initial={{ opacity: 0, y: 15, filter: 'blur(8px)' }}
-                animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-                exit={{ opacity: 0, y: -15, filter: 'blur(8px)' }}
-                transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -12 }}
+                transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
                 className="h-full"
               >
                 {renderView()}

@@ -1,6 +1,18 @@
 [
   {
     "type": "rx",
+    "message": "Prescription uploaded -- 1 medicines extracted, 1 changes pending",
+    "severity": "info",
+    "timestamp": 1791000455
+  },
+  {
+    "type": "rx",
+    "message": "Prescription uploaded -- 1 medicines extracted, 1 changes pending",
+    "severity": "info",
+    "timestamp": 1791000190
+  },
+  {
+    "type": "rx",
     "message": "Schedule confirmed — compartment 0: \"Paracetamol - 500mg\"",
     "severity": "info",
     "timestamp": 1790994388
@@ -586,17 +598,5 @@
     "message": "Prescription report 'ce2ca0f38002e2f6e4392e8173cd2551.jpg' scanned successfully",
     "severity": "info",
     "timestamp": 1786736111
-  },
-  {
-    "type": "scan",
-    "message": "Prescription report 'WhatsApp Image 2026-05-30 at 16.13.28.jpeg' scanned successfully",
-    "severity": "info",
-    "timestamp": 1780220666
-  },
-  {
-    "type": "scan",
-    "message": "Prescription report 'WhatsApp Image 2026-05-31 at 13.54.39.jpeg' scanned successfully",
-    "severity": "info",
-    "timestamp": 1780220637
   }
 ]

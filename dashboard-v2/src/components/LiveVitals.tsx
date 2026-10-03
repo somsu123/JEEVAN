@@ -21,25 +21,25 @@ interface LiveVitalsProps {
 // ─── Status color utilities ───────────────────────────────────────────────────
 function spo2Status(spo2: number, fingerPresent: boolean = false) {
   if (!fingerPresent || !spo2 || spo2 <= 0) {
-    return { label: 'Standby', color: 'text-slate-500', bg: 'bg-slate-800/50', border: 'border-slate-700/50' };
+    return { label: 'Standby', color: 'text-slate-500', bg: 'bg-slate-100', border: 'border-slate-200' };
   }
-  if (spo2 < 90) return { label: 'CRITICAL LOW', color: 'text-rose-400', bg: 'bg-rose-500/10', border: 'border-rose-500/20' };
-  if (spo2 < 94) return { label: 'LOW', color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/20' };
-  return { label: 'Normal', color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20' };
+  if (spo2 < 90) return { label: 'Critical Low', color: 'text-rose-700', bg: 'bg-rose-50', border: 'border-rose-200' };
+  if (spo2 < 94) return { label: 'Low Level', color: 'text-amber-800', bg: 'bg-amber-50', border: 'border-amber-200' };
+  return { label: 'Normal Oxygen', color: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-200' };
 }
 
 function signalBadge(signal?: string) {
   switch (signal) {
     case 'excellent':
-      return { label: 'Signal: Excellent', color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20' };
+      return { label: 'Signal: Strong', color: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-200' };
     case 'good':
-      return { label: 'Signal: Good', color: 'text-cyan-400', bg: 'bg-cyan-500/10', border: 'border-cyan-500/20' };
+      return { label: 'Signal: Good', color: 'text-blue-700', bg: 'bg-blue-50', border: 'border-blue-200' };
     case 'fair':
-      return { label: 'Signal: Fair', color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/20' };
+      return { label: 'Signal: Fair', color: 'text-amber-800', bg: 'bg-amber-50', border: 'border-amber-200' };
     case 'weak':
-      return { label: 'Signal: Weak', color: 'text-rose-400', bg: 'bg-rose-500/10', border: 'border-rose-500/20' };
+      return { label: 'Signal: Weak', color: 'text-rose-700', bg: 'bg-rose-50', border: 'border-rose-200' };
     default:
-      return { label: 'Signal: Standby', color: 'text-slate-400', bg: 'bg-slate-800/50', border: 'border-slate-700/50' };
+      return { label: 'Signal: Standby', color: 'text-slate-600', bg: 'bg-slate-100', border: 'border-slate-200' };
   }
 }
 
@@ -55,8 +55,8 @@ const movementIcons: Record<string, React.ElementType> = {
 function BPMSparkline({ history, fingerPresent }: { history: any[], fingerPresent: boolean }) {
   if (!history || history.length === 0) {
     return (
-      <div className="h-28 flex items-center justify-center text-xs font-mono text-slate-500">
-        Awaiting pulse wave telemetry...
+      <div className="h-24 flex items-center justify-center text-xs text-slate-400 font-medium">
+        Awaiting pulse wave transmission...
       </div>
     );
   }
@@ -76,17 +76,17 @@ function BPMSparkline({ history, fingerPresent }: { history: any[], fingerPresen
   const fillPoints = `0,100 ${points} 100,100`;
 
   return (
-    <div className="relative w-full h-28 mt-auto">
+    <div className="relative w-full h-24 mt-auto">
       <svg className="w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
         <defs>
           <linearGradient id="hr-gradient" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stopColor="#10b981" stopOpacity="0.3" />
-            <stop offset="100%" stopColor="#10b981" stopOpacity="0" />
+            <stop offset="0%" stopColor="#10B981" stopOpacity="0.18" />
+            <stop offset="100%" stopColor="#10B981" stopOpacity="0.0" />
           </linearGradient>
         </defs>
-        <line x1="0" y1="25" x2="100" y2="25" className="stroke-slate-800/50" strokeWidth="0.3" strokeDasharray="2,2" />
-        <line x1="0" y1="50" x2="100" y2="50" className="stroke-slate-800/50" strokeWidth="0.3" strokeDasharray="2,2" />
-        <line x1="0" y1="75" x2="100" y2="75" className="stroke-slate-800/50" strokeWidth="0.3" strokeDasharray="2,2" />
+        <line x1="0" y1="25" x2="100" y2="25" className="stroke-slate-100" strokeWidth="0.5" strokeDasharray="2,2" />
+        <line x1="0" y1="50" x2="100" y2="50" className="stroke-slate-100" strokeWidth="0.5" strokeDasharray="2,2" />
+        <line x1="0" y1="75" x2="100" y2="75" className="stroke-slate-100" strokeWidth="0.5" strokeDasharray="2,2" />
 
         {fingerPresent && data.length > 1 ? (
           <>
@@ -94,15 +94,14 @@ function BPMSparkline({ history, fingerPresent }: { history: any[], fingerPresen
             <polyline
               points={points}
               fill="none"
-              stroke="#10b981"
-              strokeWidth="1.5"
+              stroke="#10B981"
+              strokeWidth="2"
               strokeLinecap="round"
               strokeLinejoin="round"
-              className="drop-shadow-sm"
             />
           </>
         ) : (
-          <line x1="0" y1="50" x2="100" y2="50" className="stroke-slate-700" strokeWidth="1" strokeDasharray="4,4" />
+          <line x1="0" y1="50" x2="100" y2="50" className="stroke-slate-300" strokeWidth="1" strokeDasharray="4,4" />
         )}
       </svg>
     </div>
@@ -113,8 +112,8 @@ function BPMSparkline({ history, fingerPresent }: { history: any[], fingerPresen
 function SpO2Sparkline({ history, fingerPresent }: { history: any[], fingerPresent: boolean }) {
   if (!history || history.length === 0) {
     return (
-      <div className="h-16 flex items-center justify-center text-[10px] font-mono text-slate-500">
-        Awaiting SpO₂ trend...
+      <div className="h-14 flex items-center justify-center text-xs text-slate-400 font-medium">
+        Awaiting oxygen trend...
       </div>
     );
   }
@@ -135,12 +134,12 @@ function SpO2Sparkline({ history, fingerPresent }: { history: any[], fingerPrese
   const fillPoints = `0,100 ${points} 100,100`;
 
   return (
-    <div className="relative w-full h-16 mt-2">
+    <div className="relative w-full h-14 mt-1">
       <svg className="w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
         <defs>
           <linearGradient id="spo2-gradient" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stopColor="#06b6d4" stopOpacity="0.3" />
-            <stop offset="100%" stopColor="#06b6d4" stopOpacity="0" />
+            <stop offset="0%" stopColor="#3B82F6" stopOpacity="0.18" />
+            <stop offset="100%" stopColor="#3B82F6" stopOpacity="0.0" />
           </linearGradient>
         </defs>
         {fingerPresent && data.length > 1 ? (
@@ -149,14 +148,14 @@ function SpO2Sparkline({ history, fingerPresent }: { history: any[], fingerPrese
             <polyline
               points={points}
               fill="none"
-              stroke="#06b6d4"
-              strokeWidth="1.5"
+              stroke="#3B82F6"
+              strokeWidth="2"
               strokeLinecap="round"
               strokeLinejoin="round"
             />
           </>
         ) : (
-          <line x1="0" y1="50" x2="100" y2="50" className="stroke-slate-700" strokeWidth="1" strokeDasharray="4,4" />
+          <line x1="0" y1="50" x2="100" y2="50" className="stroke-slate-300" strokeWidth="1" strokeDasharray="4,4" />
         )}
       </svg>
     </div>
@@ -165,29 +164,29 @@ function SpO2Sparkline({ history, fingerPresent }: { history: any[], fingerPrese
 
 // ─── Circular SpO2 Gauge ──────────────────────────────────────────────────────
 function SpO2Gauge({ value, status }: { value: number; status: { label: string; color: string } }) {
-  const circumference = 2 * Math.PI * 40; // radius = 40
+  const circumference = 2 * Math.PI * 38; // radius = 38
   const clamped = Math.max(0, Math.min(100, value || 0));
   const offset = circumference - (clamped / 100) * circumference;
 
   return (
-    <div className="relative w-32 h-32">
+    <div className="relative w-28 h-28">
       <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
-        <circle cx="50" cy="50" r="40" fill="none" stroke="#1e293b" strokeWidth="8" />
+        <circle cx="50" cy="50" r="38" fill="none" stroke="#F1F5F9" strokeWidth="7" />
         <circle
-          cx="50" cy="50" r="40" fill="none"
-          stroke="#06b6d4"
-          strokeWidth="8"
+          cx="50" cy="50" r="38" fill="none"
+          stroke="#3B82F6"
+          strokeWidth="7"
           strokeDasharray={circumference}
           strokeDashoffset={offset}
           strokeLinecap="round"
-          className="drop-shadow-lg transition-all duration-1000"
+          className="transition-all duration-700"
         />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className={`text-3xl font-headline font-bold ${value > 0 ? 'text-slate-100' : 'text-slate-600'}`}>
-          {value > 0 ? value : '--'}<span className="text-base text-slate-400">%</span>
+        <span className={`text-2xl font-headline font-bold ${value > 0 ? 'text-slate-800' : 'text-slate-400'}`}>
+          {value > 0 ? value : '--'}<span className="text-xs text-slate-500 font-bold ml-0.5">%</span>
         </span>
-        <span className={`text-[10px] font-medium mt-0.5 ${status.color}`}>{status.label}</span>
+        <span className={`text-xs font-semibold mt-0.5 ${status.color}`}>{status.label}</span>
       </div>
     </div>
   );
@@ -207,7 +206,6 @@ export default function LiveVitals({ vitals, hardwareOnline, espConnected = fals
   const sigBadge = signalBadge(vitalsFresh ? vitals.signalQuality : 'unknown');
   const MovementIcon = movementIcons[vitals.movementState] || Activity;
 
-  // Derive sensor state clearly
   const bpmHistory = vitals.heartRateHistory || [];
   const bpmValues = vitalsFresh && fingerPresent
     ? bpmHistory.map((h: any) => h.value).filter((v: number) => v > 0)
@@ -221,218 +219,223 @@ export default function LiveVitals({ vitals, hardwareOnline, espConnected = fals
 
   return (
     <div className="flex flex-col gap-6 relative">
-      {/* Decorative orb */}
-      <div className="orb-emerald -top-40 -right-40" />
-
       {/* ── Header ── */}
       {!hideHeader && (
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <h1 className="text-2xl font-headline font-bold text-slate-100 tracking-tight">
-            Live Vitals Monitor
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-headline font-bold text-slate-800 tracking-tight">
+            Live Biometric Vitals
           </h1>
-          <div className={`flex items-center gap-2 px-3 py-1 rounded-full border ${vitalsFresh ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-slate-700/30 border-slate-600/30'}`}>
-            <div className={`w-2 h-2 rounded-full ${vitalsFresh ? 'bg-emerald-500 pulse-emerald' : 'bg-slate-500'}`} />
-            <span className={`text-xs font-bold uppercase tracking-wider font-label ${vitalsFresh ? 'text-emerald-400' : 'text-slate-400'}`}>{vitalsFresh ? 'Live' : 'Stale'}</span>
+          <div className={`flex items-center gap-2 px-3.5 py-1.5 rounded-full border text-xs font-semibold ${vitalsFresh ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
+            <div className={`w-2.5 h-2.5 rounded-full ${vitalsFresh ? 'bg-emerald-500 pulse-emerald' : 'bg-slate-400'}`} />
+            <span>{vitalsFresh ? 'Live Stream Active' : 'Standby Mode'}</span>
           </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
           {/* Signal Quality */}
-          <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-mono ${sigBadge.bg} ${sigBadge.border} ${sigBadge.color}`}>
-            <Radio className={`w-3.5 h-3.5 ${vitalsFresh ? 'animate-pulse' : ''}`} />
+          <div className={`flex items-center gap-2 px-3.5 py-2 rounded-xl border text-xs font-medium ${sigBadge.bg} ${sigBadge.border} ${sigBadge.color} shadow-2xs`}>
+            <Radio className={`w-4 h-4 ${vitalsFresh ? 'animate-pulse' : ''}`} />
             <span>{sigBadge.label}</span>
           </div>
 
           {/* Hardware Connection */}
-          <div className="flex items-center gap-2 bg-slate-800/60 px-3 py-1.5 rounded-lg border border-slate-700/50">
-            <div className={`w-2 h-2 rounded-full ${
+          <div className="flex items-center gap-2 bg-white px-3.5 py-2 rounded-xl border border-slate-200 shadow-2xs">
+            <div className={`w-2.5 h-2.5 rounded-full ${
               vitalsFresh
                 ? 'bg-emerald-500 pulse-emerald'
                 : hardwareOnline
-                  ? 'bg-slate-500'
-                  : 'bg-rose-600'
+                  ? 'bg-slate-400'
+                  : 'bg-rose-500'
             }`} />
-            <span className={`text-xs font-medium ${
-              vitalsFresh ? 'text-emerald-300' : hardwareOnline ? 'text-slate-400' : 'text-rose-400'
+            <span className={`text-xs font-semibold ${
+              vitalsFresh ? 'text-emerald-700' : hardwareOnline ? 'text-slate-600' : 'text-rose-600'
             }`}>
-              {vitalsFresh ? 'ESP32 Connected' : hardwareOnline ? 'Waiting for vitals' : 'Sensor Offline'}
+              {vitalsFresh ? 'Bracelet Connected' : hardwareOnline ? 'Waiting for vitals' : 'Bracelet Standby'}
             </span>
           </div>
 
-          <div className="font-mono text-slate-400 text-xs px-3 py-1.5 bg-slate-800/50 rounded-lg border border-slate-700/50">
-            {vitalsFresh ? vitals.lastUpdated : '--'}
+          <div className="text-slate-500 text-xs px-3.5 py-2 bg-white rounded-xl border border-slate-200 shadow-2xs font-medium">
+            {vitalsFresh ? vitals.lastUpdated : '--:--'}
           </div>
         </div>
       </header>
       )}
 
       {/* ── Bento Grid Layout ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 flex-1">
 
-        {/* ── Large Heart Rate Section (Left) ── */}
-        <div className="lg:col-span-6 glass-card rounded-2xl p-6 flex flex-col relative overflow-hidden group">
-          <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/5 rounded-full blur-3xl -mr-20 -mt-20 pointer-events-none" />
-
-          <div className="flex justify-between items-start mb-4 z-10">
-            <div className="flex items-center gap-2">
-              <Heart className="h-5 w-5 text-emerald-500" />
-              <h2 className="text-lg font-headline font-semibold text-slate-200">Heart Rate (BPM)</h2>
+        {/* ── Heart Rate Card ── */}
+        <div className="lg:col-span-6 bg-white border border-slate-200 rounded-3xl p-6 flex flex-col relative overflow-hidden shadow-xs hover:shadow-sm transition-shadow">
+          <div className="flex justify-between items-start mb-3">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-2xl bg-rose-50 text-rose-600 border border-rose-100">
+                <Heart className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="text-base font-headline font-bold text-slate-800">Heart Rate (Pulse BPM)</h2>
+                <p className="text-xs text-slate-500 font-medium">Optical Pulse Oximetry Sensor (MAX30102)</p>
+              </div>
             </div>
-            {/* Three-state finger/sensor status badge */}
+
             {!vitalsFresh ? (
-              <div className="flex items-center gap-1.5 bg-slate-700/30 px-3 py-1 rounded-full border border-slate-600/30">
-                <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
-                <span className="text-xs font-bold text-slate-400 font-mono tracking-wide">VITALS STALE</span>
+              <div className="flex items-center gap-1.5 bg-slate-100 px-3 py-1 rounded-full border border-slate-200">
+                <span className="w-2 h-2 rounded-full bg-slate-400" />
+                <span className="text-xs font-semibold text-slate-600">Standby</span>
               </div>
             ) : vitals.sensorError ? (
-              <div className="flex items-center gap-1.5 bg-rose-500/10 px-3 py-1 rounded-full border border-rose-500/30">
-                <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
-                <span className="text-xs font-bold text-rose-400 font-mono tracking-wide">SENSOR UNAVAILABLE</span>
+              <div className="flex items-center gap-1.5 bg-rose-50 px-3 py-1 rounded-full border border-rose-200">
+                <span className="w-2 h-2 rounded-full bg-rose-500" />
+                <span className="text-xs font-bold text-rose-700">Sensor Error</span>
               </div>
             ) : fingerPresent ? (
-              <div className="flex items-center gap-2 bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/20">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 pulse-emerald" />
-                <span className="text-xs font-medium text-emerald-400">Finger Detected</span>
+              <div className="flex items-center gap-1.5 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 pulse-emerald" />
+                <span className="text-xs font-bold text-emerald-700">Pulse Detected</span>
               </div>
             ) : (
-              <div className="flex items-center gap-1.5 bg-amber-500/10 px-3 py-1 rounded-full border border-amber-500/30 animate-pulse">
+              <div className="flex items-center gap-1.5 bg-amber-50 px-3 py-1 rounded-full border border-amber-200 animate-pulse">
                 <span className="text-xs">👆</span>
-                <span className="text-xs font-bold text-amber-400 font-mono tracking-wide">FINGER NOT DETECTED</span>
+                <span className="text-xs font-bold text-amber-800">Place Finger</span>
               </div>
             )}
           </div>
 
-          {/* Hero BPM */}
-          <div className="flex-1 flex flex-col justify-center items-center z-10 py-3">
-            <div className="flex items-baseline gap-2">
-              <span className={`text-7xl lg:text-8xl font-headline font-bold tracking-tighter transition-colors duration-500 ${
+          {/* Hero BPM Reading */}
+          <div className="flex-1 flex flex-col justify-center items-center py-3">
+            <div className="flex items-baseline gap-2.5">
+              <span className={`text-6xl lg:text-7xl font-headline font-bold tracking-tight ${
                 !vitalsFresh
-                  ? 'text-slate-600'
+                  ? 'text-slate-300'
                   : fingerPresent
-                    ? 'text-emerald-500'
-                    : 'text-slate-600'
+                    ? 'text-slate-800'
+                    : 'text-slate-300'
               }`}>
                 {fingerPresent && vitals.heartRate ? vitals.heartRate : '--'}
               </span>
-              <span className={`text-xl font-bold font-label ${
-                fingerPresent ? 'text-emerald-500/60' : 'text-slate-700'
+              <span className={`text-lg font-bold ${
+                fingerPresent ? 'text-rose-600' : 'text-slate-400'
               }`}>BPM</span>
             </div>
-            {/* Subtle status line under BPM */}
+
             {vitalsFresh && !fingerPresent && (
-              <p className="text-xs text-amber-500/70 font-mono mt-2 animate-pulse">
-                Place finger on MAX30102 sensor
+              <p className="text-xs text-amber-800 font-medium mt-1">
+                Rest finger gently on the bracelet sensor
               </p>
             )}
             {!vitalsFresh && (
-              <p className="text-xs text-slate-500 font-mono mt-2">
-                Waiting for a current sensor packet
+              <p className="text-xs text-slate-400 font-medium mt-1">
+                Waiting for real-time sensor transmission
               </p>
             )}
             {fingerPresent && typeof vitals.heartRate === 'number' && vitals.heartRate > 0 && (
-              <Heart
-                className="h-6 w-6 text-rose-400 animate-pulse mt-2"
-                style={{ animationDuration: `${(60 / vitals.heartRate).toFixed(2)}s` }}
-              />
+              <div className="flex items-center gap-1.5 mt-1 text-xs text-emerald-700 font-semibold bg-emerald-50 px-3 py-1 rounded-full border border-emerald-100">
+                <Heart className="h-3.5 w-3.5 text-rose-500 animate-pulse" />
+                <span>Normal sinus pulse detected</span>
+              </div>
             )}
           </div>
 
-          {/* BPM Stats */}
-          <div className="grid grid-cols-2 gap-2 my-2 z-10">
-            <div className="bg-slate-800/40 rounded-lg p-2 border border-slate-700/40 text-center">
-              <span className="text-[10px] text-slate-400 uppercase tracking-wider block">Min BPM</span>
-              <span className="text-sm font-bold text-slate-200 font-mono">{minBpm}</span>
+          {/* BPM Stats Chips */}
+          <div className="grid grid-cols-2 gap-3 my-2">
+            <div className="bg-slate-50 rounded-2xl p-3 border border-slate-200/80 text-center">
+              <span className="text-xs text-slate-500 font-semibold uppercase tracking-wider block">Minimum BPM</span>
+              <span className="text-base font-bold text-slate-800 font-mono mt-0.5 block">{minBpm}</span>
             </div>
-            <div className="bg-slate-800/40 rounded-lg p-2 border border-slate-700/40 text-center">
-              <span className="text-[10px] text-slate-400 uppercase tracking-wider block">Max BPM</span>
-              <span className="text-sm font-bold text-slate-200 font-mono">{maxBpm}</span>
+            <div className="bg-slate-50 rounded-2xl p-3 border border-slate-200/80 text-center">
+              <span className="text-xs text-slate-500 font-semibold uppercase tracking-wider block">Maximum BPM</span>
+              <span className="text-base font-bold text-slate-800 font-mono mt-0.5 block">{maxBpm}</span>
             </div>
           </div>
 
           {/* ECG Graph */}
-          <div className="z-10 mt-2">
-            <div className="flex justify-between text-[9px] text-slate-500 font-mono mb-1 uppercase tracking-wider">
-              <span>Last {Math.min(bpmHistory.length, 60)} readings</span>
-              <span>MAX30102 PPG Waveform</span>
+          <div className="mt-2">
+            <div className="flex justify-between text-xs text-slate-500 font-medium mb-1">
+              <span>Past {Math.min(bpmHistory.length, 60)} Data Points</span>
+              <span>Pulse PPG Stream</span>
             </div>
             <BPMSparkline history={bpmHistory} fingerPresent={fingerPresent} />
           </div>
         </div>
 
-        {/* ── SpO2 & Activity Section (Right) ── */}
-        <div className="lg:col-span-6 grid grid-cols-1 sm:grid-cols-2 gap-6">
+        {/* ── SpO2 & Movement Section (Right) ── */}
+        <div className="lg:col-span-6 grid grid-cols-1 sm:grid-cols-2 gap-5">
 
-          {/* SpO2 Card — Circular Gauge + Trend */}
-          <div className="glass-card rounded-2xl p-5 flex flex-col justify-between sm:col-span-2 relative overflow-hidden">
+          {/* SpO2 Card */}
+          <div className="bg-white border border-slate-200 rounded-3xl p-6 flex flex-col justify-between sm:col-span-2 shadow-xs hover:shadow-sm transition-shadow">
             <div className="flex justify-between items-center mb-3">
-              <div className="flex items-center gap-2">
-                <Wind className="h-5 w-5 text-cyan-400" />
-                <h2 className="text-base font-headline font-semibold text-slate-200">Blood Oxygen (SpO₂)</h2>
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-2xl bg-blue-50 text-blue-600 border border-blue-100">
+                  <Wind className="h-5 w-5" />
+                </div>
+                <div>
+                  <h2 className="text-base font-headline font-bold text-slate-800">Blood Oxygen Level (SpO₂)</h2>
+                  <p className="text-xs text-slate-500 font-medium">Dual-wavelength Red/IR Pulse Oximetry</p>
+                </div>
               </div>
-              <span className={`text-[11px] font-mono px-2.5 py-0.5 rounded-full border ${spo2St.bg} ${spo2St.border} ${spo2St.color}`}>
+              <span className={`text-xs font-semibold px-3.5 py-1 rounded-full border ${spo2St.bg} ${spo2St.border} ${spo2St.color}`}>
                 {spo2St.label}
               </span>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-center mt-2">
               <div className="flex justify-center">
                 <SpO2Gauge value={fingerPresent ? vitals.oxygenSpO2 : 0} status={spo2St} />
               </div>
               <div className="flex flex-col justify-center">
-                <div className="text-xs text-slate-400 mb-1 flex items-center gap-1 font-mono">
-                  <TrendingUp className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>SpO₂ Calibration Curve (R-ratio)</span>
+                <div className="text-xs text-slate-700 mb-1 flex items-center gap-1.5 font-semibold">
+                  <TrendingUp className="w-4 h-4 text-blue-600" />
+                  <span>Oxygen Saturation History</span>
                 </div>
-                <div className="text-[11px] text-slate-500 leading-relaxed mb-2">
-                  Clinical DC-filtered high-pass ratio computed from Red/IR photoplethysmogram channels.
+                <div className="text-xs text-slate-500 leading-relaxed mb-1">
+                  Synchronized infrared optical photoplethysmogram tracking.
                 </div>
                 <SpO2Sparkline history={vitals.spo2History || []} fingerPresent={fingerPresent} />
               </div>
             </div>
           </div>
 
-          {/* Movement Card */}
+          {/* Movement & Activity Card */}
           {!isHomeView && (
             <>
-              <div className="glass-card rounded-2xl p-5 flex flex-col">
-                <div className="flex items-center gap-2 mb-4">
-                  <MovementIcon className="h-4 w-4 text-indigo-400" />
-                  <h2 className="text-sm font-headline font-semibold text-slate-300">Activity Status</h2>
+              <div className="bg-white border border-slate-200 rounded-3xl p-5 flex flex-col shadow-xs">
+                <div className="flex items-center gap-2.5 mb-3">
+                  <div className="p-2 rounded-xl bg-indigo-50 text-indigo-600 border border-indigo-100">
+                    <MovementIcon className="h-4 w-4" />
+                  </div>
+                  <h2 className="text-sm font-headline font-bold text-slate-800">Activity State</h2>
                 </div>
-                <div className="flex-1 flex flex-col items-center justify-center">
-                  <div className="w-12 h-12 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center mb-2">
-                    <MovementIcon className="h-6 w-6 text-indigo-400" />
+                <div className="flex-1 flex flex-col items-center justify-center py-2">
+                  <div className="w-12 h-12 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center mb-2 text-indigo-600 shadow-2xs">
+                    <MovementIcon className="h-6 w-6" />
                   </div>
-                  <div className={`text-lg font-headline font-semibold ${vitals.movementState === 'Unknown' ? 'text-slate-500' : 'text-slate-200'}`}>
-                    {vitals.movementState === 'Unknown' ? '--' : vitals.movementState}
+                  <div className="text-base font-headline font-bold text-slate-800">
+                    {vitals.movementState === 'Unknown' ? 'Standby' : vitals.movementState}
                   </div>
-                  <div className="text-[10px] text-slate-500 mt-1 font-label">
-                    {vitals.movementState === 'Unknown' ? 'No movement telemetry' : 'Motion Accelerometer'}
-                  </div>
+                  <p className="text-xs text-slate-500 mt-0.5 font-medium">Motion Accelerometer</p>
                 </div>
               </div>
 
               {/* Room Presence Card */}
-              <div className="glass-card rounded-2xl p-5 flex flex-col">
-                <div className="flex items-center gap-2 mb-4">
-                  <User className="h-4 w-4 text-teal-400" />
-                  <h2 className="text-sm font-headline font-semibold text-slate-300">Room Presence</h2>
+              <div className="bg-white border border-slate-200 rounded-3xl p-5 flex flex-col shadow-xs">
+                <div className="flex items-center gap-2.5 mb-3">
+                  <div className="p-2 rounded-xl bg-teal-50 text-teal-600 border border-teal-100">
+                    <User className="h-4 w-4" />
+                  </div>
+                  <h2 className="text-sm font-headline font-bold text-slate-800">Patient Proximity</h2>
                 </div>
-                <div className="flex-1 flex flex-col items-center justify-center">
+                <div className="flex-1 flex flex-col items-center justify-center py-2">
                   <div className="relative mb-2">
-                    <div className="w-12 h-12 rounded-full bg-slate-800/80 flex items-center justify-center border border-slate-700">
-                      <User className="h-6 w-6 text-slate-300" />
+                    <div className="w-12 h-12 rounded-2xl bg-teal-50 flex items-center justify-center border border-teal-100 text-teal-600 shadow-2xs">
+                      <User className="h-6 w-6" />
                     </div>
-                    <div className={`absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full border-2 border-slate-900 ${
-                      vitals.roomPresence === null ? 'bg-slate-600' : vitals.roomPresence ? 'bg-emerald-500' : 'bg-slate-600'
+                    <div className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-white ${
+                      vitals.roomPresence === null ? 'bg-slate-300' : vitals.roomPresence ? 'bg-emerald-500' : 'bg-slate-300'
                     }`} />
                   </div>
-                  <span className="text-lg font-headline font-semibold text-slate-200">
-                    {vitals.roomPresence === null ? 'Unavailable' : vitals.roomPresence ? 'Patient Present' : 'No Presence'}
+                  <span className="text-base font-headline font-bold text-slate-800">
+                    {vitals.roomPresence === null ? 'Standby' : vitals.roomPresence ? 'Near Device' : 'No Presence'}
                   </span>
-                  <p className="text-[10px] text-slate-500 font-label mt-1">
-                    {vitals.roomPresence === null ? 'No presence telemetry' : 'Ultrasonic HC-SR04'}
-                  </p>
+                  <p className="text-xs text-slate-500 mt-0.5 font-medium">Ultrasonic Sensor (D5)</p>
                 </div>
               </div>
             </>
@@ -440,25 +443,22 @@ export default function LiveVitals({ vitals, hardwareOnline, espConnected = fals
         </div>
       </div>
 
-      {/* ── Sedentary Sync Bar ── */}
-      <div>
-        <div className="flex justify-between items-end mb-2">
-          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider font-label">Sedentary Time Tracker</span>
-          <span className="text-xs font-mono text-slate-500">
+      {/* ── Sedentary Activity Bar ── */}
+      <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-xs">
+        <div className="flex justify-between items-center mb-2">
+          <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">Rest & Sedentary Duration</span>
+          <span className="text-xs text-slate-600 font-semibold">
             {hasSedentaryData
-              ? <>{vitals.movementState === 'Resting' ? 'Resting' : 'Active'} for <span className="text-amber-400 font-bold">{Math.round((vitals.bloodLevelSeconds as number) / 60)} min</span></>
-              : 'Activity duration unavailable'}
+              ? <>{vitals.movementState === 'Resting' ? 'Resting' : 'Active'} for <span className="text-blue-700 font-bold">{Math.round((vitals.bloodLevelSeconds as number) / 60)} min</span></>
+              : 'Activity duration standby'}
           </span>
         </div>
-        <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+        <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
           <div
-            className={`h-full rounded-full transition-all duration-500 ${hasSedentaryData ? 'bg-gradient-to-r from-emerald-500 to-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.4)]' : 'bg-slate-700'}`}
+            className={`h-full rounded-full transition-all duration-500 ${hasSedentaryData ? 'bg-blue-600' : 'bg-slate-200'}`}
             style={{ width: `${sedentaryPercent}%` }}
           />
         </div>
-        {hasSedentaryData && (vitals.bloodLevelSeconds ?? 0) > 2700 && (
-          <p className="text-[10px] text-amber-400 mt-1.5 font-mono">⚠ Consider encouraging gentle movement to improve circulation.</p>
-        )}
       </div>
     </div>
   );

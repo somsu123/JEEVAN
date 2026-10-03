@@ -21,52 +21,52 @@ interface FallAlertsProps {
 }
 
 function confidenceColor(conf: number) {
-  if (conf >= 0.85) return 'text-rose-400';
-  if (conf >= 0.65) return 'text-amber-400';
-  return 'text-yellow-400';
+  if (conf >= 0.85) return 'text-rose-700';
+  if (conf >= 0.65) return 'text-amber-800';
+  return 'text-amber-700';
 }
 
 function severityConfig(type: FallEvent['type']) {
   switch (type) {
     case 'Critical Fall':
       return {
-        bg: 'border-l-4 border-l-rose-500 bg-slate-900/40 backdrop-blur-xl border-t border-r border-b border-slate-800/80',
-        badge: 'bg-rose-500/20 text-rose-300 border-rose-500/30',
+        bg: 'border-l-4 border-l-rose-500 bg-white border-t border-r border-b border-slate-200 shadow-xs',
+        badge: 'bg-rose-50 text-rose-700 border-rose-200 font-bold',
         icon: ShieldAlert,
-        iconColor: 'text-rose-400',
+        iconColor: 'text-rose-600',
       };
     case 'Rapid Descent':
       return {
-        bg: 'border-l-4 border-l-orange-500 bg-slate-900/40 backdrop-blur-xl border-t border-r border-b border-slate-800/80',
-        badge: 'bg-orange-500/20 text-orange-300 border-orange-500/30',
+        bg: 'border-l-4 border-l-amber-500 bg-white border-t border-r border-b border-slate-200 shadow-xs',
+        badge: 'bg-amber-50 text-amber-800 border-amber-200 font-bold',
         icon: AlertTriangle,
-        iconColor: 'text-orange-400',
+        iconColor: 'text-amber-600',
       };
     default:
       return {
-        bg: 'border-l-4 border-l-amber-500 bg-slate-900/40 backdrop-blur-xl border-t border-r border-b border-slate-800/80',
-        badge: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
+        bg: 'border-l-4 border-l-blue-500 bg-white border-t border-r border-b border-slate-200 shadow-xs',
+        badge: 'bg-blue-50 text-blue-700 border-blue-200 font-bold',
         icon: Activity,
-        iconColor: 'text-amber-400',
+        iconColor: 'text-blue-600',
       };
   }
 }
 
 function ConfidenceMeter({ value }: { value: number | null }) {
   if (value == null || !Number.isFinite(value)) {
-    return <span className="text-[10px] text-slate-500 font-mono">Unavailable</span>;
+    return <span className="text-xs text-slate-400 font-medium">Telemetry Available</span>;
   }
   const pct = Math.round(value * 100);
-  const color = value >= 0.85 ? '#f43f5e' : value >= 0.65 ? '#f59e0b' : '#eab308';
+  const color = value >= 0.85 ? '#f43f5e' : value >= 0.65 ? '#f59e0b' : '#3b82f6';
   return (
-    <div className="flex items-center gap-2">
-      <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+    <div className="flex items-center gap-2.5 max-w-[220px]">
+      <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden border border-slate-200/60">
         <div
           className="h-full rounded-full transition-all duration-500"
           style={{ width: `${pct}%`, backgroundColor: color }}
         />
       </div>
-      <span className={`text-[10px] font-mono font-bold ${confidenceColor(value)}`}>{pct}%</span>
+      <span className={`text-xs font-bold ${confidenceColor(value)}`}>{pct}% confidence</span>
     </div>
   );
 }
@@ -79,38 +79,37 @@ export default function FallAlerts({ fallEvents, activeAlert, onResolveEvent, on
 
   return (
     <div className="flex flex-col gap-6 relative">
-      {/* Decorative orb */}
-      <div className="orb-indigo -top-40 right-20" />
-
       {/* ── Header ── */}
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-headline font-bold text-slate-100 tracking-tight flex items-center gap-3">
-            <ShieldAlert className="h-6 w-6 text-rose-400" />
-            Fall Detection & Safety
+          <h1 className="text-2xl font-headline font-bold text-slate-800 tracking-tight flex items-center gap-3">
+            <div className="p-2.5 rounded-2xl bg-rose-50 text-rose-600 border border-rose-100">
+              <ShieldAlert className="h-6 w-6" />
+            </div>
+            Fall Safety & Incident Alerts
           </h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Dual-source: MediaPipe camera CV + ESP32 bracelet accelerometer (3-phase detection).
+          <p className="text-sm text-slate-500 mt-1 font-medium">
+            Continuous real-time safety monitoring via Camera Vision AI and Wearable Wrist Accelerometer.
           </p>
         </div>
         <div className="flex items-center gap-3">
           {activeFalls.length > 0 ? (
-            <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-rose-500/10 border border-rose-500/40 animate-pulse">
-              <span className="h-2 w-2 bg-rose-500 rounded-full pulse-red-dot" />
-              <span className="text-sm font-bold text-rose-400 font-label uppercase tracking-wide">
-                {activeFalls.length} Active Alert{activeFalls.length > 1 ? 's' : ''}
+            <div className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-rose-50 border border-rose-200 shadow-2xs animate-pulse">
+              <span className="h-2.5 w-2.5 bg-rose-600 rounded-full pulse-red-dot" />
+              <span className="text-xs font-bold text-rose-700 uppercase tracking-wide">
+                {activeFalls.length} Active Emergency Alert{activeFalls.length > 1 ? 's' : ''}
               </span>
             </div>
           ) : (
-            <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30">
-              <Shield className="h-4 w-4 text-emerald-400" />
-              <span className="text-sm font-bold text-emerald-400 font-label">ALL CLEAR</span>
+            <div className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-emerald-50 border border-emerald-200 shadow-2xs">
+              <Shield className="h-4 w-4 text-emerald-600" />
+              <span className="text-xs font-bold text-emerald-700 tracking-wide">All Clear • No Active Fall Events</span>
             </div>
           )}
           {fallEvents.length > 0 && (
             <button
               onClick={onClearAll}
-              className="p-2.5 rounded-xl glass-card hover:border-rose-500/30 text-slate-400 hover:text-rose-400 transition-all"
+              className="p-2.5 rounded-2xl bg-white border border-slate-200 hover:border-rose-200 text-slate-400 hover:text-rose-600 shadow-2xs transition-all cursor-pointer"
               title="Clear all resolved events"
             >
               <Trash2 className="h-4 w-4" />
@@ -120,49 +119,51 @@ export default function FallAlerts({ fallEvents, activeAlert, onResolveEvent, on
       </header>
 
       {/* ── Stats Row (3 cards) ── */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="glass-card rounded-2xl p-5 flex items-center gap-4">
-          <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
-            <Camera className="h-5 w-5 text-emerald-400" />
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+        <div className="bg-white border border-slate-200 rounded-3xl p-5 flex items-center gap-4 shadow-xs">
+          <div className="p-3 rounded-2xl bg-emerald-50 text-emerald-600 border border-emerald-100">
+            <Camera className="h-5 w-5" />
           </div>
           <div>
-            <span className="text-[10px] text-slate-500 font-label tracking-wider block">CAMERA VISION</span>
-            <span className="text-sm font-bold text-emerald-400 font-headline">MediaPipe Active</span>
+            <span className="text-xs text-slate-400 font-semibold uppercase tracking-wider block">Camera Sensor</span>
+            <span className="text-sm font-bold text-slate-800 font-headline mt-0.5 block">Vision AI Active</span>
           </div>
           <span className="ml-auto h-2.5 w-2.5 rounded-full bg-emerald-500 pulse-emerald" />
         </div>
-        <div className="glass-card rounded-2xl p-5 flex items-center gap-4">
-          <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/20">
-            <Watch className="h-5 w-5 text-blue-400" />
+
+        <div className="bg-white border border-slate-200 rounded-3xl p-5 flex items-center gap-4 shadow-xs">
+          <div className="p-3 rounded-2xl bg-blue-50 text-blue-600 border border-blue-100">
+            <Watch className="h-5 w-5" />
           </div>
           <div>
-            <span className="text-[10px] text-slate-500 font-label tracking-wider block">WRIST BRACELET</span>
-            <span className="text-sm font-bold text-blue-400 font-headline">MPU6050 Online</span>
+            <span className="text-xs text-slate-400 font-semibold uppercase tracking-wider block">Wrist Bracelet</span>
+            <span className="text-sm font-bold text-slate-800 font-headline mt-0.5 block">MPU-6050 6-Axis</span>
           </div>
-          <span className="ml-auto h-2.5 w-2.5 rounded-full bg-blue-400 animate-pulse" />
+          <span className="ml-auto h-2.5 w-2.5 rounded-full bg-blue-500" />
         </div>
-        <div className="glass-card rounded-2xl p-5 flex items-center gap-4">
-          <div className="p-3 rounded-xl bg-violet-500/10 border border-violet-500/20">
-            <Activity className="h-5 w-5 text-violet-400" />
+
+        <div className="bg-white border border-slate-200 rounded-3xl p-5 flex items-center gap-4 shadow-xs">
+          <div className="p-3 rounded-2xl bg-indigo-50 text-indigo-600 border border-indigo-100">
+            <Activity className="h-5 w-5" />
           </div>
           <div>
-            <span className="text-[10px] text-slate-500 font-label tracking-wider block">TOTAL EVENTS</span>
-            <span className="text-sm font-bold text-white font-headline">{fallEvents.length} logged</span>
+            <span className="text-xs text-slate-400 font-semibold uppercase tracking-wider block">Total History</span>
+            <span className="text-sm font-bold text-slate-800 font-headline mt-0.5 block">{fallEvents.length} Recorded</span>
           </div>
         </div>
       </div>
 
-      {/* ── Filter tabs ── */}
+      {/* ── Filter Tabs ── */}
       {fallEvents.length > 0 && (
         <div className="flex gap-2">
           {(['all', 'active', 'resolved'] as const).map(f => (
             <button
               key={f}
               onClick={() => setFilter(f)}
-              className={`px-4 py-2 rounded-xl text-xs font-label font-bold capitalize transition-all ${
+              className={`px-4 py-2.5 rounded-2xl text-xs font-semibold capitalize transition-all cursor-pointer ${
                 filter === f
-                  ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400'
-                  : 'glass-card text-slate-400 hover:text-slate-200'
+                  ? 'bg-blue-50 text-blue-700 border border-blue-200 shadow-2xs font-bold'
+                  : 'bg-white text-slate-600 border border-slate-200 hover:text-slate-800'
               }`}
             >
               {f} {f === 'active' ? `(${activeFalls.length})` : f === 'all' ? `(${fallEvents.length})` : ''}
@@ -173,20 +174,19 @@ export default function FallAlerts({ fallEvents, activeAlert, onResolveEvent, on
 
       {/* ── Event Timeline ── */}
       {filtered.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 text-center space-y-4">
-          <div className="p-6 rounded-2xl bg-emerald-500/5 border border-emerald-500/10">
-            <Shield className="h-14 w-14 text-emerald-500/30" />
+        <div className="bg-white border border-slate-200 rounded-3xl flex flex-col items-center justify-center py-16 text-center space-y-3 shadow-xs">
+          <div className="p-4 rounded-3xl bg-emerald-50 border border-emerald-100 text-emerald-600">
+            <Shield className="h-10 w-10" />
           </div>
           <div>
-            <h3 className="text-base font-bold text-slate-300 font-headline">No Fall Events Detected</h3>
+            <h3 className="text-base font-bold text-slate-800 font-headline">Zero Fall Incidents Detected</h3>
             <p className="text-xs text-slate-500 mt-1 max-w-sm">
-              Both the camera (MediaPipe) and wrist bracelet are actively monitoring.
-              Any detected event will appear here immediately.
+              Continuous monitoring active across vision models and wearable motion sensors.
             </p>
           </div>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-3.5">
           {filtered.map((event) => {
             const cfg = severityConfig(event.type);
             const Icon = cfg.icon;
@@ -195,55 +195,55 @@ export default function FallAlerts({ fallEvents, activeAlert, onResolveEvent, on
             return (
               <div
                 key={event.id}
-                className={`p-5 rounded-2xl transition-all ${
+                className={`p-5 rounded-3xl transition-all ${
                   event.status === 'resolved'
-                    ? 'bg-slate-900/20 backdrop-blur border border-slate-800/40 opacity-60 hover:opacity-80'
+                    ? 'bg-slate-50/70 border border-slate-200'
                     : cfg.bg
                 }`}
               >
                 <div className="flex items-start gap-4">
                   {/* Icon */}
-                  <div className={`p-3 rounded-xl border shrink-0 ${
+                  <div className={`p-3 rounded-2xl border shrink-0 ${
                     event.status === 'resolved'
-                      ? 'bg-slate-800/50 border-slate-700'
-                      : 'bg-slate-950/60 border-slate-800'
+                      ? 'bg-white border-slate-200 text-slate-400'
+                      : 'bg-slate-50 border-slate-200'
                   }`}>
                     {event.status === 'resolved'
-                      ? <CheckCircle2 className="h-5 w-5 text-emerald-400" />
+                      ? <CheckCircle2 className="h-5 w-5 text-emerald-600" />
                       : <Icon className={`h-5 w-5 ${cfg.iconColor}`} />
                     }
                   </div>
 
                   {/* Content */}
                   <div className="flex-1 min-w-0">
-                    <div className="flex flex-wrap items-center gap-2 mb-2">
-                      <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-label font-bold border ${cfg.badge}`}>
-                        {event.type.toUpperCase()}
+                    <div className="flex flex-wrap items-center gap-2 mb-1.5">
+                      <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${cfg.badge}`}>
+                        {event.type}
                       </span>
-                      <span className="flex items-center gap-1 text-[10px] text-slate-400 font-mono">
-                        <SourceIcon className="h-3 w-3" />
-                        {event.source.toUpperCase()}
+                      <span className="flex items-center gap-1 text-xs text-slate-600 font-medium">
+                        <SourceIcon className="h-3.5 w-3.5 text-slate-500" />
+                        {event.source === 'camera' ? 'Camera Vision' : 'Wrist Sensor'}
                       </span>
                       {event.status === 'resolved' && (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                          RESOLVED {event.resolvedAt ? `@ ${event.resolvedAt}` : ''}
+                        <span className="px-3 py-1 rounded-full text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold">
+                          Resolved {event.resolvedAt ? `@ ${event.resolvedAt}` : ''}
                         </span>
                       )}
                     </div>
 
-                    <div className="flex items-center gap-4 mb-3 text-xs text-slate-400">
-                      <span className="flex items-center gap-1">
-                        <Clock className="h-3 w-3" />
+                    <div className="flex items-center gap-4 mb-2 text-xs text-slate-500 font-medium">
+                      <span className="flex items-center gap-1.5">
+                        <Clock className="h-3.5 w-3.5 text-slate-400" />
                         {event.timestamp}
                       </span>
-                      <span className="flex items-center gap-1">
-                        <MapPin className="h-3 w-3" />
+                      <span className="flex items-center gap-1.5">
+                        <MapPin className="h-3.5 w-3.5 text-slate-400" />
                         {event.location}
                       </span>
                     </div>
 
                     <div className="space-y-1">
-                      <span className="text-[10px] text-slate-500 font-label tracking-wider">Detection confidence</span>
+                      <span className="text-xs text-slate-400 font-medium">Detection Confidence</span>
                       <ConfidenceMeter value={event.confidence} />
                     </div>
                   </div>
@@ -252,9 +252,9 @@ export default function FallAlerts({ fallEvents, activeAlert, onResolveEvent, on
                   {event.status === 'active' && (
                     <button
                       onClick={() => onResolveEvent(event.id)}
-                      className="shrink-0 px-4 py-2 rounded-xl glass-card hover:border-emerald-500/30 text-xs font-bold text-slate-400 hover:text-emerald-400 font-label transition-all"
+                      className="shrink-0 px-4 py-2.5 rounded-2xl bg-white hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 text-xs font-bold text-slate-700 hover:text-emerald-700 transition-all shadow-2xs cursor-pointer"
                     >
-                      Resolve
+                      Acknowledge & Resolve
                     </button>
                   )}
                 </div>
@@ -265,27 +265,21 @@ export default function FallAlerts({ fallEvents, activeAlert, onResolveEvent, on
       )}
 
       {/* ── Hardware Integration Guide ── */}
-      <div className="glass-card rounded-2xl p-6">
-        <h4 className="text-xs font-bold text-slate-300 font-label uppercase tracking-[0.15em] mb-4">
-          Detection Sources
+      <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-xs">
+        <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-3">
+          Configured Sensor Detection Pipelines
         </h4>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-slate-400">
-          <div className="space-y-2 p-4 bg-slate-950/40 rounded-xl border border-slate-800/50">
-            <span className="text-emerald-400 font-bold font-headline block">Raspberry Pi Vision</span>
-            <code className="text-slate-400 font-mono text-[10px] bg-slate-900/80 px-2 py-1 rounded block">
-              python pi-fall-detector/fall_detector.py
-            </code>
-            <p className="text-[10px] leading-relaxed text-slate-500">
-              MediaPipe Pose + skeleton detection. Posts to /api/fall-event on detection.
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-slate-600">
+          <div className="space-y-1.5 p-4 bg-slate-50 rounded-2xl border border-slate-200">
+            <span className="text-emerald-700 font-bold block text-sm">Camera Skeleton Pose Tracking</span>
+            <p className="text-xs leading-relaxed text-slate-500">
+              Vision AI continuously scanning for sudden vertical falls and floor posture.
             </p>
           </div>
-          <div className="space-y-2 p-4 bg-slate-950/40 rounded-xl border border-slate-800/50">
-            <span className="text-blue-400 font-bold font-headline block">ESP32 Smart Bracelet</span>
-            <code className="text-slate-400 font-mono text-[10px] bg-slate-900/80 px-2 py-1 rounded block">
-              firmware/fall_bracelet.ino → /api/fall-event
-            </code>
-            <p className="text-[10px] leading-relaxed text-slate-500">
-              3-phase fall detection: free-fall → impact → confirm. MPU6050 at ±8g range.
+          <div className="space-y-1.5 p-4 bg-slate-50 rounded-2xl border border-slate-200">
+            <span className="text-blue-700 font-bold block text-sm">ESP32 Wrist IMU Sensor</span>
+            <p className="text-xs leading-relaxed text-slate-500">
+              MPU-6050 accelerometer tracking free-fall acceleration drops followed by impact deceleration.
             </p>
           </div>
         </div>
