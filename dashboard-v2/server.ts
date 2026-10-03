@@ -1,3 +1,5 @@
+import dns from "node:dns";
+try { dns.setDefaultResultOrder("ipv4first"); } catch { }
 import express from "express";
 import path from "path";
 import fs from "fs";
@@ -33,33 +35,32 @@ process.on("unhandledRejection", (reason) => {
   console.error("[CRITICAL] Unhandled promise rejection:", reason);
 });
 
-const RX_EXTRACTION_PROMPT = `You are a clinical AI assistant.
-Examine this medical prescription document carefully.
-1. Extract the Prescription Number / Rx Number / Rx ID (e.g. "Rx #12345", "RX-9082", or Prescription ID) if visible on the document.
-2. Extract all prescribed medicines/drugs.
+const RX_EXTRACTION_PROMPT = `You are an expert clinical AI assistant and medical OCR specialist.
+Carefully examine this medical prescription / medication list document.
 
-Return a valid JSON object matching this schema:
+CRITICAL EXTRACTION REQUIREMENTS:
+1. Extract EVERY SINGLE medicine / drug listed in the document. DO NOT omit, summarize, or stop after the first few items. If there are 5, 10, 15, or 20 medications, extract every single one individually as a separate item in the medicines list.
+2. For each medication:
+   - name: exact brand or generic drug name as written (e.g. "Albuterol HFA", "Aspirin", "Carvedilol", "Metformin", "Paracetamol")
+   - dosage: strength and unit (e.g. "500mg", "81 mg", "90", "28 units", "25 mg", "1000 mg"), null if unclear
+   - frequency: full dosing instructions (e.g. "1 daily", "2 puffs twice a day", "1 twice daily", "28 units at bedtime", "2 puffs every 4 hours as needed")
+   - suggestedTime: extract the exact time of dose ONLY if explicitly written in the prescription (e.g. "08:00", "8:30 AM", "14:00", "9:00 PM"). If NO specific clock time is mentioned in the prescription, return null. DO NOT guess, assume, or invent any timing.
+   - confidence: "high" if clearly readable, "low" if ambiguous
+3. prescriptionNumber: extract any Rx #, Rx ID, Script #, or Prescription Number printed on the paper. If not found, return null.
+
+Return ONLY a valid JSON object matching this schema:
 {
   "prescriptionNumber": "string or null",
   "medicines": [
     {
-      "name": "exact medicine name as written (never empty)",
-      "dosage": "strength and unit (e.g. 500mg), or null",
-      "frequency": "dosing instructions (e.g. 3x daily), or null",
-      "suggestedTime": "HH:MM from frequency (morning=08:00, noon=13:00, evening=18:00, night=21:00)",
-      "confidence": "high" or "low"
+      "name": "exact drug name",
+      "dosage": "strength and unit or null",
+      "frequency": "dosing instructions or null",
+      "suggestedTime": "HH:MM or null",
+      "confidence": "high"
     }
   ]
-}
-
-Rules:
-- prescriptionNumber: extract any Rx #, Rx ID, Script #, or Prescription Number printed on the paper. If not found, return null.
-- name: exact medicine name as written (never empty)
-- dosage: strength and unit if readable (e.g. "10mg"), null if unclear
-- frequency: dosing instructions if readable (e.g. "once daily", "3X a day"), null if unclear
-- suggestedTime: HH:MM 24-hour format
-- confidence: "high" if readable, "low" if ambiguous
-- Return "medicines": [] if no medicines identified`;
+}`;
 
 function extractRxNumber(parsed: any, ocrText?: string): string | null {
   if (parsed && typeof parsed === "object") {
@@ -129,17 +130,35 @@ function fireReady(): boolean {
   return !!mongoDb;
 }
 
-// ── Medbox schedule helpers (MongoDB-backed) ──────────────────────────────────
+// ── Medbox schedule types & helpers (MongoDB-backed) ──────────────────────────
+export interface DoseEntry {
+  time: string;
+  medicine: string;
+  dosage: string;
+  boxNumber: number;
+  taken: boolean;
+  takenAt?: string;
+  missed?: boolean;
+  timeoutMinutes?: number;
+}
+
+let inMemoryScheduleDoses: DoseEntry[] = [];
+function saveScheduleLocally(doses: DoseEntry[]) {
+  inMemoryScheduleDoses = [...doses];
+}
+
 async function readSchedule(): Promise<DoseEntry[]> {
-  if (!fireReady()) return [];
+  if (!fireReady()) return inMemoryScheduleDoses;
   try {
     const docs = await mongoDb!.collection("medbox_schedule").find({}).toArray();
-    return docs.map((d: any) => {
+    const result = docs.map((d: any) => {
       const { _id, ...rest } = d;
       return rest as DoseEntry;
     });
+    if (result.length > 0) inMemoryScheduleDoses = result;
+    return result;
   } catch {
-    return [];
+    return inMemoryScheduleDoses;
   }
 }
 
@@ -861,10 +880,11 @@ app.post("/api/medicine-schedule", async (req, res) => {
         taken: s.taken || false,
         takenAt: s.takenAt,
         missed: s.missed || false,
+        timeoutMinutes: Math.min(10, Math.max(1, Number(s.timeoutMinutes) || 5)),
       }));
       await writeSchedule(doses);
       saveScheduleLocally(doses);
-      console.log(`[MongoDB] Wrote ${doses.length} doses to medbox_schedule.`);
+      console.log(`[MongoDB] Wrote ${doses.length} doses to medbox_schedule (timeouts: ${doses.map(d => `${d.boxNumber}:${d.timeoutMinutes}m`).join(", ")}).`);
     }
 
     const times = (slots || []).map((s: any) => s.scheduledTime).filter(Boolean);
@@ -1005,6 +1025,109 @@ setInterval(async () => {
     console.error("[REMINDER] Cron error:", err?.message);
   }
 }, 60_000);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MEDICINE TIMEOUT & MISSED DOSE WATCHDOG
+// ─────────────────────────────────────────────────────────────────────────────
+// Checks active doses every 10 seconds against current time and slot timeout (1 to 10 min).
+// When timeout is exceeded without intake, automatically marks dose as missed,
+// updates medbox_schedule, appends dose_events & medbox_events in MongoDB, and broadcasts SSE.
+setInterval(async () => {
+  try {
+    const schedule = await readSchedule();
+    if (!schedule || schedule.length === 0) return;
+
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    let scheduleModified = false;
+
+    for (const dose of schedule) {
+      if (dose.taken || dose.missed) continue;
+      if (!dose.time || !dose.time.includes(":")) continue;
+
+      const [h, m] = dose.time.split(":").map(Number);
+      if (isNaN(h) || isNaN(m)) continue;
+
+      const doseMinutes = h * 60 + m;
+      const timeout = Math.min(10, Math.max(1, Number(dose.timeoutMinutes) || 5));
+      const expiryMinutes = doseMinutes + timeout;
+      const minutesSinceDose = currentMinutes - doseMinutes;
+
+      // When the current time exceeds dose scheduled time + timeout (within active 12-hour window)
+      if (currentMinutes >= expiryMinutes && minutesSinceDose >= timeout && minutesSinceDose < 720) {
+        console.log(`[TIMEOUT WATCHDOG] ⚠️ Timeout expired for Box ${dose.boxNumber}: "${dose.medicine}" (scheduled ${dose.time}, limit ${timeout}m). Marking as MISSED.`);
+        dose.missed = true;
+        scheduleModified = true;
+
+        const compIdx = (Number(dose.boxNumber) || 1) - 1;
+
+        // 1. Log to dose_events (history/adherence)
+        await appendDoseEvent({
+          compartment: compIdx,
+          boxNumber: Number(dose.boxNumber) || 1,
+          label: dose.medicine,
+          scheduledTime: dose.time,
+          timeoutMinutes: timeout,
+          takenAt: null,
+          status: "missed",
+          reason: `Timeout limit of ${timeout} minutes exceeded`,
+        });
+
+        // 2. Log to medbox_events
+        await appendMedboxEvent({
+          event: "DOSE_MISSED",
+          boxNumber: Number(dose.boxNumber) || 1,
+          medicine: dose.medicine,
+          dosage: dose.dosage,
+          timeoutMinutes: timeout,
+          timestamp: now.toISOString(),
+          deviceId: "medbox-01",
+        });
+
+        // 3. Broadcast SSE alerts to all connected clients
+        broadcastSSE("medicine_missed", {
+          box: Number(dose.boxNumber) || 1,
+          medicine: dose.medicine,
+          time: dose.time,
+          timeoutMinutes: timeout,
+          timestamp: now.toLocaleTimeString("en-US", { hour12: false }),
+        });
+
+        broadcastSSE("dose_event", {
+          compartment: compIdx,
+          label: dose.medicine,
+          status: "missed",
+          takenAt: null,
+        });
+
+        // 4. Send caregiver alert
+        sendMissedDoseAlert(dose.medicine, dose.time, dose.dosage).catch(() => { });
+      }
+    }
+
+    if (scheduleModified) {
+      await writeSchedule(schedule);
+      saveScheduleLocally(schedule);
+      broadcastSSE("schedule_updated", { doses: schedule });
+      broadcastSSE("medicine_schedule_updated", {
+        slots: schedule.map(d => ({
+          slotNumber: d.boxNumber,
+          medicineName: d.medicine,
+          dosage: d.dosage,
+          scheduledTime: d.time,
+          taken: d.taken,
+          takenAt: d.takenAt,
+          missed: d.missed,
+          timeoutMinutes: d.timeoutMinutes || 5,
+        }))
+      });
+      console.log(`[TIMEOUT WATCHDOG] ✅ Updated medbox_schedule after marking missed doses.`);
+    }
+  } catch (err: any) {
+    console.error("[TIMEOUT WATCHDOG] Error checking dose timeouts:", err?.message);
+  }
+}, 10_000);
+
 
 
 
@@ -1233,17 +1356,6 @@ app.delete("/api/medicines/:name", async (req, res) => {
 // MEDICINE BOX — ESP32 Hardware Integration
 // ─────────────────────────────────────────────────────────────────────────────
 
-// DoseEntry schema (all persistence is in MongoDB medbox_schedule collection)
-interface DoseEntry {
-  time: string;
-  medicine: string;
-  dosage: string;
-  boxNumber: number;
-  taken: boolean;
-  takenAt?: string;
-  missed?: boolean;
-}
-
 // ── Medbox device status ──────────────────────────────────────────────────────
 interface MedboxStatusRecord {
   online: boolean;
@@ -1305,50 +1417,38 @@ async function sendMissedDoseAlert(medicine: string, time: string, dosage: strin
 // ── GET /api/medication/schedule ──────────────────────────────────────────────
 app.get("/api/medication/schedule", async (_req, res) => {
   try {
-    // 1. Fetch active medicines from MongoDB Atlas (via Flask API)
-    const data = await flaskGet("/api/medicines");
+    const doses = await readSchedule();
+    if (doses && doses.length > 0) {
+      return res.json({ deviceId: "medbox-01", doses });
+    }
 
+    // Fallback: check Flask medicines collection if medbox_schedule is empty
+    const data = await flaskGet("/api/medicines").catch(() => ({ medicines: [] }));
     if (data && Array.isArray(data.medicines) && data.medicines.length > 0) {
       const dbMeds = data.medicines;
-      const sortedMeds = [...dbMeds].sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
-      const mappedMeds = sortedMeds.slice(0, 2);
-
-      // 2. Read today's intake completion from MongoDB medbox_schedule
-      const mongoSchedule = await readSchedule();
-
-      const doses: DoseEntry[] = [];
-
-      mappedMeds.forEach((med, index) => {
-        const boxNumber = (index + 1) as 1 | 2;
+      const sortedMeds = [...dbMeds].sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0)).slice(0, 4);
+      const fallbackDoses: DoseEntry[] = [];
+      sortedMeds.forEach((med, index) => {
+        const boxNumber = index + 1;
         const times = Array.isArray(med.times) && med.times.length > 0 ? med.times : ["08:00"];
-
         times.forEach((t: string) => {
-          const match = mongoSchedule.find(
-            (d) =>
-              d.boxNumber === boxNumber &&
-              d.time === t &&
-              d.medicine.toLowerCase() === med.name.toLowerCase()
-          );
-
-          doses.push({
+          fallbackDoses.push({
             time: t,
             medicine: med.name,
             dosage: med.dosage || "—",
             boxNumber: boxNumber,
-            taken: match ? match.taken : false,
-            takenAt: match ? match.takenAt : undefined,
-            missed: match ? match.missed : false,
+            taken: false,
+            missed: false,
+            timeoutMinutes: 5,
           });
         });
       });
-
-      console.log(`[MongoDB] Dynamic schedule: ${doses.length} doses for ${mappedMeds.length} medicines.`);
-      return res.json({ deviceId: "medbox-01", doses });
+      return res.json({ deviceId: "medbox-01", doses: fallbackDoses });
     }
 
-    throw new Error("No medicines found in database");
+    return res.json({ deviceId: "medbox-01", doses: [] });
   } catch (err: any) {
-    console.warn(`[MongoDB] Schedule fetch failed (${err.message}). Falling back to medbox_schedule collection.`);
+    console.warn(`[MongoDB] Schedule fetch error (${err.message}). Returning cached schedule.`);
     const doses = await readSchedule();
     return res.json({ deviceId: "medbox-01", doses });
   }
@@ -2455,7 +2555,7 @@ Return ONLY a valid JSON object matching this exact schema:
       "name": "Medicine Name",
       "dosage": "500mg",
       "frequency": "twice daily",
-      "suggestedTime": "08:00",
+      "suggestedTime": null,
       "confidence": "high",
       "purpose": "instructions or indication"
     }
@@ -2466,7 +2566,7 @@ Rules:
 - name: Exact medicine name (required)
 - dosage: Strength and unit if present, or null
 - frequency: Schedule if present, or null
-- suggestedTime: HH:MM 24-hour format (e.g. "08:00" for OD/BD/morning, "13:00" for noon, "18:00" for evening, "21:00" for HS/bedtime/night)
+- suggestedTime: extract the exact time of dose ONLY if explicitly written in the text (e.g. "08:00", "8:30 AM", "14:00", "9:00 PM"). If NO specific clock time is mentioned, return null. DO NOT guess, invent, or default any time.
 - confidence: "high"
 - purpose: Directions or indications
 `;
@@ -2601,9 +2701,15 @@ Rules:
       const med = extractedMeds[i];
       const cacheEntry = cacheEntries.find(c => c.compartment === i) || null;
       const currentLabel = cacheEntry ? cacheEntry.label : "(empty)";
-      const timeParts = (med.suggestedTime || "08:00").split(":");
-      const propH = parseInt(timeParts[0], 10) || 8;
-      const propM = parseInt(timeParts[1], 10) || 0;
+      let propH: number | null = null;
+      let propM: number | null = null;
+      if (med.suggestedTime && med.suggestedTime.includes(":")) {
+        const timeParts = med.suggestedTime.split(":");
+        propH = parseInt(timeParts[0], 10);
+        propM = parseInt(timeParts[1], 10);
+        if (isNaN(propH)) propH = null;
+        if (isNaN(propM)) propM = null;
+      }
       const proposedLabel = med.dosage ? `${med.name} - ${med.dosage}` : med.name;
 
       const changeDoc = {
@@ -2669,9 +2775,15 @@ app.post("/api/rx/reassign-override", async (req, res) => {
       const med = meds[i];
       const cacheEntry = cacheEntries.find(c => c.compartment === i) || null;
       const currentLabel = cacheEntry ? cacheEntry.label : "(empty)";
-      const timeParts = (med.suggestedTime || "08:00").split(":");
-      const propH = parseInt(timeParts[0], 10) || 8;
-      const propM = parseInt(timeParts[1], 10) || 0;
+      let propH: number | null = null;
+      let propM: number | null = null;
+      if (med.suggestedTime && med.suggestedTime.includes(":")) {
+        const timeParts = med.suggestedTime.split(":");
+        propH = parseInt(timeParts[0], 10);
+        propM = parseInt(timeParts[1], 10);
+        if (isNaN(propH)) propH = null;
+        if (isNaN(propM)) propM = null;
+      }
       const proposedLabel = med.dosage ? `${med.name} - ${med.dosage}` : med.name;
 
       const changeDoc = {
@@ -2711,6 +2823,7 @@ app.post("/api/rx/confirm/:changeId", async (req, res) => {
     customHour,
     customMinute,
     customTime,
+    timeoutMinutes,
     proposedLabel,
     extractedMed,
     prescriptionId,
@@ -2722,6 +2835,7 @@ app.post("/api/rx/confirm/:changeId", async (req, res) => {
     customHour?: number;
     customMinute?: number;
     customTime?: string; // e.g. "01:35"
+    timeoutMinutes?: number;
     proposedLabel?: string;
     extractedMed?: any;
     prescriptionId?: string;
@@ -2844,32 +2958,24 @@ app.post("/api/rx/confirm/:changeId", async (req, res) => {
   }
 
   // ── Step 2: Merge the confirmed change into the schedule ──────────────────
-  // Only the target compartment changes; all others are preserved exactly.
+  // Only the target compartment changes; all others are preserved and strictly deduplicated.
   const comp = compartment !== undefined ? Number(compartment) : Number(change.compartment);
-  const merged: Esp32DoseEntry[] = esp32Schedule.map(d => {
-    if (Number(d.compartment) === Number(comp)) {
-      return {
-        ...d,
-        compartment: Number(comp),
-        label: change.proposedLabel,
-        hour: targetHour,
-        minute: targetMinute,
-        givenToday: false, // reset since compartment is being reloaded
-      };
+  const scheduleMap = new Map<number, Esp32DoseEntry>();
+  for (const item of esp32Schedule) {
+    const cIdx = Number(item.compartment);
+    if (!isNaN(cIdx)) {
+      scheduleMap.set(cIdx, { ...item, compartment: cIdx });
     }
-    return { ...d, compartment: Number(d.compartment) };
+  }
+  scheduleMap.set(comp, {
+    compartment: comp,
+    label: change.proposedLabel,
+    hour: targetHour,
+    minute: targetMinute,
+    givenToday: false,
   });
 
-  // If this compartment wasn't in the existing schedule, add it
-  if (!merged.some(d => Number(d.compartment) === Number(comp))) {
-    merged.push({
-      compartment: Number(comp),
-      label: change.proposedLabel,
-      hour: targetHour,
-      minute: targetMinute,
-      givenToday: false,
-    });
-  }
+  const merged: Esp32DoseEntry[] = Array.from(scheduleMap.values()).sort((a, b) => a.compartment - b.compartment);
 
   // ── Step 3: POST to ESP32 (single write point, warning on offline) ────────
   if (ESP32_BASE_URL) {
@@ -2954,16 +3060,35 @@ app.post("/api/rx/confirm/:changeId", async (req, res) => {
     // 1. Update medbox_schedule
     const currentSchedule = await readSchedule();
     const formattedTime = `${String(targetHour).padStart(2, "0")}:${String(targetMinute).padStart(2, "0")}`;
+    const parsedTimeout = Math.min(10, Math.max(1, Number(timeoutMinutes) || Number(change.timeoutMinutes) || 5));
     const newDose: DoseEntry = {
       boxNumber: comp + 1, // 1-based index (0 -> 1, 1 -> 2, etc.)
       medicine: change.extractedMed?.name || change.proposedLabel.split(" - ")[0],
       dosage: change.extractedMed?.dosage || "",
       time: formattedTime,
-      taken: false
+      taken: false,
+      missed: false,
+      timeoutMinutes: parsedTimeout,
     };
     const updatedSchedule = currentSchedule.filter(d => d.boxNumber !== newDose.boxNumber);
-    updatedSchedule.push(newDose);
+    if (change.proposedLabel && change.proposedLabel !== "(empty)") {
+      updatedSchedule.push(newDose);
+    }
     await writeSchedule(updatedSchedule);
+    saveScheduleLocally(updatedSchedule);
+    broadcastSSE("schedule_updated", { doses: updatedSchedule });
+    broadcastSSE("medicine_schedule_updated", {
+      slots: updatedSchedule.map(d => ({
+        slotNumber: d.boxNumber,
+        medicineName: d.medicine,
+        dosage: d.dosage,
+        scheduledTime: d.time,
+        taken: d.taken,
+        takenAt: d.takenAt,
+        missed: d.missed,
+        timeoutMinutes: d.timeoutMinutes || 5,
+      }))
+    });
 
     // 2. Update medicines collection for scheduler reminders
     if (change.extractedMed) {

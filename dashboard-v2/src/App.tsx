@@ -28,6 +28,7 @@ interface ServerDoseEntry {
   taken: boolean;
   takenAt?: string;
   missed?: boolean;
+  timeoutMinutes?: number;
   notes?: string;
 }
 
@@ -41,6 +42,7 @@ function mapDosesToSlots(doses: ServerDoseEntry[]): MedicineSlot[] {
     taken: d.taken,
     takenAt: d.takenAt,
     missed: d.missed || false,
+    timeoutMinutes: Number(d.timeoutMinutes) || 5,
     presenceConfirmed: d.taken,   // If taken, presence was confirmed
     touchVerified: d.taken,       // If taken, touch was verified
     notes: d.notes,
@@ -56,6 +58,7 @@ function mapSlotsToServerDoses(slots: MedicineSlot[]): ServerDoseEntry[] {
     taken: s.taken,
     takenAt: s.takenAt,
     missed: s.missed || false,
+    timeoutMinutes: Number(s.timeoutMinutes) || 5,
     notes: s.notes,
   }));
 }
@@ -348,6 +351,41 @@ export default function App() {
     } catch { /* ignore */ }
   }, [medicineSlots]);
 
+  const handleDeleteSlot = useCallback(async (slotId: string) => {
+    const targetSlot = medicineSlots.find(s => s.id === slotId);
+    const updatedSlots = medicineSlots.filter(s => s.id !== slotId);
+    setMedicineSlots(updatedSlots);
+
+    try {
+      await fetch('/api/medicine-schedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slots: updatedSlots }),
+      });
+
+      if (targetSlot) {
+        const compIdx = (targetSlot.slotNumber || 1) - 1;
+        await fetch(`/api/rx/confirm/clear-${compIdx}-${Date.now()}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            reloadConfirmed: true,
+            compartment: compIdx,
+            customTime: "08:00",
+            proposedLabel: "(empty)",
+            currentLabel: targetSlot.medicineName || '(empty)'
+          }),
+        }).catch(() => {});
+
+        if (targetSlot.medicineName && targetSlot.medicineName !== '(empty)') {
+          await fetch(`/api/medicines/${encodeURIComponent(targetSlot.medicineName)}`, {
+            method: 'DELETE'
+          }).catch(() => {});
+        }
+      }
+    } catch { /* ignore */ }
+  }, [medicineSlots]);
+
   const handleUpdateSlots = useCallback(async (newSlots: MedicineSlot[]) => {
     setMedicineSlots(newSlots);
     try {
@@ -376,7 +414,7 @@ export default function App() {
       case 'overview': return <Overview scannedHistory={scannedHistory} onNavigate={setCurrentView} activeAlert={activeAlert} vitals={vitals} hardwareOnline={hardwareOnline} espConnected={espConnected} />;
       case 'live-vitals': return <LiveVitals vitals={vitals} hardwareOnline={hardwareOnline} espConnected={espConnected} />;
       case 'fall-alerts': return <FallAlerts fallEvents={fallEvents} activeAlert={activeAlert} onResolveEvent={handleResolveFall} onClearAll={handleClearFalls} />;
-      case 'medicine': return <MedicineBox slots={medicineSlots} lidOpen={lidOpen} medboxStatus={medboxStatus} onMarkTaken={handleMarkTaken} onMarkMissed={handleMarkMissed} onResetSlot={handleResetSlot} onUpdateSlots={handleUpdateSlots} />;
+      case 'medicine': return <MedicineBox slots={medicineSlots} lidOpen={lidOpen} medboxStatus={medboxStatus} onMarkTaken={handleMarkTaken} onMarkMissed={handleMarkMissed} onResetSlot={handleResetSlot} onDeleteSlot={handleDeleteSlot} onUpdateSlots={handleUpdateSlots} />;
       case 'report-scanner': return <ReportScanner onAddScanResult={(res) => setScannedHistory(p => [res, ...p])} scannedHistory={scannedHistory} />;
       case 'rx-review': return <RxReview />;
       case 'dose-history': return <DoseHistory />;

@@ -38,6 +38,9 @@ export default function useSocket() {
   useEffect(() => {
     let lastPacketAt = 0;
     let freshnessTimer = null;
+    let currentBpm = null;
+    let currentSpo2 = null;
+
     const backendUrl = import.meta.env.VITE_BPM_SERVER_URL || window.location.origin;
     const socket = io(backendUrl, {
       path: '/socket.io',
@@ -54,6 +57,8 @@ export default function useSocket() {
       freshnessTimer = null;
       setIsFresh(false);
       setEspConnected(false);
+      currentBpm = null;
+      currentSpo2 = null;
       setBpm(null);
       setSpo2(null);
       setLastUpdate(null);
@@ -103,6 +108,8 @@ export default function useSocket() {
         lastPacketAt = fresh ? Date.now() - Math.max(0, ageMs) : 0;
         if (fresh) armFreshnessGuard();
         else clearLiveVitals();
+        currentBpm = null;
+        currentSpo2 = null;
         setBpm(null);
         setSpo2(null);
         setLastUpdate(fresh ? new Date(serverTime) : null);
@@ -111,8 +118,14 @@ export default function useSocket() {
       }
       lastPacketAt = Date.now() - Math.max(0, ageMs);
       armFreshnessGuard();
-      setBpm(status.latestBpm > 0 ? status.latestBpm : null);
-      setSpo2(status.latestSpo2 > 0 ? status.latestSpo2 : null);
+      if (status.latestBpm > 0) {
+        currentBpm = status.latestBpm;
+        setBpm(status.latestBpm);
+      }
+      if (status.latestSpo2 > 0) {
+        currentSpo2 = status.latestSpo2;
+        setSpo2(status.latestSpo2);
+      }
       setLastUpdate(new Date(serverTime));
       setSensorStatus((previous) => ({ ...previous, fingerDetected: true, signal: status.signal || 'unknown' }));
     });
@@ -125,8 +138,27 @@ export default function useSocket() {
       setEspConnected(true);
       setIsFresh(true);
       setLastUpdate(new Date(receivedAt));
-      setBpm(data.fingerDetected && data.bpm > 0 ? data.bpm : null);
-      setSpo2(data.fingerDetected && data.spo2 > 0 ? data.spo2 : null);
+
+      if (data.fingerDetected) {
+        if (data.bpm > 0) {
+          currentBpm = data.bpm;
+          setBpm(data.bpm);
+        } else if (currentBpm) {
+          setBpm(currentBpm);
+        }
+        if (data.spo2 > 0) {
+          currentSpo2 = data.spo2;
+          setSpo2(data.spo2);
+        } else if (currentSpo2) {
+          setSpo2(currentSpo2);
+        }
+      } else {
+        currentBpm = null;
+        currentSpo2 = null;
+        setBpm(null);
+        setSpo2(null);
+      }
+
       setSensorStatus({
         fingerDetected: Boolean(data.fingerDetected),
         signal: data.signal || 'unknown',
@@ -135,13 +167,18 @@ export default function useSocket() {
         uptime: data.uptime || 0,
         sensorError: Boolean(data.sensorError),
       });
+
       setHistory((previous) => {
-        const [entry] = formatHistory([{ ...data, timestamp: receivedAt }]);
+        const [entry] = formatHistory([{
+          ...data,
+          bpm: data.bpm > 0 ? data.bpm : (currentBpm || data.bpm),
+          spo2: data.spo2 > 0 ? data.spo2 : (currentSpo2 || data.spo2),
+          timestamp: receivedAt
+        }]);
         return [...previous, entry].slice(-MAX_HISTORY);
       });
     });
 
-    // [FIX #4] Clear readings locally within 2 s even if the TCP socket stays open.
     return () => {
       if (freshnessTimer) clearTimeout(freshnessTimer);
       socket.removeAllListeners();

@@ -1,6 +1,216 @@
 [
   {
     "type": "rx",
+    "message": "Schedule confirmed — compartment 0: \"albuterol HFA - 90\"",
+    "severity": "info",
+    "timestamp": 1791006564
+  },
+  {
+    "type": "rx",
+    "message": "Prescription uploaded -- 16 medicines extracted, 4 changes pending",
+    "severity": "info",
+    "timestamp": 1791006514
+  },
+  {
+    "type": "medicine",
+    "message": "Medicine 'Amoxicillin (Himox) - 500mg' deleted",
+    "severity": "info",
+    "timestamp": 1791005934
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 0: \"(empty)\"",
+    "severity": "info",
+    "timestamp": 1791005934
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 1: \"(empty)\"",
+    "severity": "info",
+    "timestamp": 1791005919
+  },
+  {
+    "type": "scan",
+    "message": "Prescription report scanned: 0 medicines extracted",
+    "severity": "info",
+    "timestamp": 1791005672
+  },
+  {
+    "type": "scan",
+    "message": "Prescription report scanned: 0 medicines extracted",
+    "severity": "info",
+    "timestamp": 1791005371
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 0: \"Amoxicillin (Himox) - 500mg\"",
+    "severity": "info",
+    "timestamp": 1791003152
+  },
+  {
+    "type": "rx",
+    "message": "Prescription uploaded -- 1 medicines extracted, 1 changes pending",
+    "severity": "info",
+    "timestamp": 1791003137
+  },
+  {
+    "type": "medicine",
+    "message": "Medicine 'Carvedilol - 25 mg' deleted",
+    "severity": "info",
+    "timestamp": 1791003106
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 1: \"(empty)\"",
+    "severity": "info",
+    "timestamp": 1791003106
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 0: \"(empty)\"",
+    "severity": "info",
+    "timestamp": 1791003090
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 1: \"(empty)\"",
+    "severity": "info",
+    "timestamp": 1791002774
+  },
+  {
+    "type": "medicine",
+    "message": "Medicine 'albuterol HFA - 90' deleted",
+    "severity": "info",
+    "timestamp": 1791002756
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 0: \"(empty)\"",
+    "severity": "info",
+    "timestamp": 1791002756
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 0: \"albuterol HFA - 90\"",
+    "severity": "info",
+    "timestamp": 1791002390
+  },
+  {
+    "type": "rx",
+    "message": "Prescription uploaded -- 16 medicines extracted, 4 changes pending",
+    "severity": "info",
+    "timestamp": 1791002371
+  },
+  {
+    "type": "rx",
+    "message": "Prescription uploaded -- 3 medicines extracted, 3 changes pending",
+    "severity": "info",
+    "timestamp": 1791002189
+  },
+  {
+    "type": "rx",
+    "message": "Prescription uploaded -- 16 medicines extracted, 4 changes pending",
+    "severity": "info",
+    "timestamp": 1791002157
+  },
+  {
+    "type": "rx",
+    "message": "Prescription uploaded -- 16 medicines extracted, 4 changes pending",
+    "severity": "info",
+    "timestamp": 1791001970
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 1: \"(empty)\"",
+    "severity": "info",
+    "timestamp": 1791001431
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 1: \"(empty)\"",
+    "severity": "info",
+    "timestamp": 1791001430
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 1: \"(empty)\"",
+    "severity": "info",
+    "timestamp": 1791001429
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 1: \"(empty)\"",
+    "severity": "info",
+    "timestamp": 1791001429
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 1: \"(empty)\"",
+    "severity": "info",
+    "timestamp": 1791001428
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 0: \"(empty)\"",
+    "severity": "info",
+    "timestamp": 1791001414
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 0: \"(empty)\"",
+    "severity": "info",
+    "timestamp": 1791001414
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 0: \"(empty)\"",
+    "severity": "info",
+    "timestamp": 1791001413
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 0: \"(empty)\"",
+    "severity": "info",
+    "timestamp": 1791001412
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 0: \"(empty)\"",
+    "severity": "info",
+    "timestamp": 1791001412
+  },
+  {
+    "type": "rx",
+    "message": "Prescription uploaded -- 16 medicines extracted, 4 changes pending",
+    "severity": "info",
+    "timestamp": 1791001371
+  },
+  {
+    "type": "rx",
+    "message": "Prescription uploaded -- 16 medicines extracted, 4 changes pending",
+    "severity": "info",
+    "timestamp": 1791001294
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 1: \"Carvedilol - 25 mg\"",
+    "severity": "info",
+    "timestamp": 1791001244
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 1: \"Carvedilol - 25 mg\"",
+    "severity": "info",
+    "timestamp": 1791001182
+  },
+  {
+    "type": "rx",
+    "message": "Prescription uploaded -- 16 medicines extracted, 4 changes pending",
+    "severity": "info",
+    "timestamp": 1791001152
+  },
+  {
+    "type": "rx",
     "message": "Prescription uploaded -- 1 medicines extracted, 1 changes pending",
     "severity": "info",
     "timestamp": 1791000455
@@ -388,215 +598,5 @@
     "message": "Prescription uploaded -- 0 medicines extracted, 0 changes pending",
     "severity": "info",
     "timestamp": 1790885233
-  },
-  {
-    "type": "rx",
-    "message": "Prescription uploaded -- 0 medicines extracted, 0 changes pending",
-    "severity": "info",
-    "timestamp": 1790885021
-  },
-  {
-    "type": "scan",
-    "message": "Prescription report scanned successfully",
-    "severity": "info",
-    "timestamp": 1790884987
-  },
-  {
-    "type": "rx",
-    "message": "Prescription uploaded -- 0 medicines extracted, 0 changes pending",
-    "severity": "info",
-    "timestamp": 1790884969
-  },
-  {
-    "type": "scan",
-    "message": "Prescription report scanned successfully",
-    "severity": "info",
-    "timestamp": 1790884887
-  },
-  {
-    "type": "rx",
-    "message": "Prescription 'rx_sample.jpg' uploaded — 2 medicines extracted, 2 changes pending",
-    "severity": "info",
-    "timestamp": 1790880034
-  },
-  {
-    "type": "rx",
-    "message": "Prescription 'test_prescription.png' uploaded — 0 medicines extracted, 0 changes pending",
-    "severity": "info",
-    "timestamp": 1790880020
-  },
-  {
-    "type": "rx",
-    "message": "Schedule confirmed — compartment 1: \"Paracetamol - 500 mg\"",
-    "severity": "info",
-    "timestamp": 1787237950
-  },
-  {
-    "type": "rx",
-    "message": "Schedule confirmed — compartment 2: \"Cetirizine - 10 mg\"",
-    "severity": "info",
-    "timestamp": 1787235931
-  },
-  {
-    "type": "rx",
-    "message": "Prescription 'medicine_schedule.pdf' uploaded — 3 medicines extracted, 2 changes pending",
-    "severity": "info",
-    "timestamp": 1787235877
-  },
-  {
-    "type": "rx",
-    "message": "Schedule confirmed — compartment 2: \"Paracetamol - 500 mg\"",
-    "severity": "info",
-    "timestamp": 1787129091
-  },
-  {
-    "type": "rx",
-    "message": "Schedule confirmed — compartment 2: \"Amoxicillin - 500 mg\"",
-    "severity": "info",
-    "timestamp": 1787127694
-  },
-  {
-    "type": "rx",
-    "message": "Schedule confirmed — compartment 3: \"Cetirizine - 10 mg\"",
-    "severity": "info",
-    "timestamp": 1787127504
-  },
-  {
-    "type": "rx",
-    "message": "Prescription 'medicine_schedule.pdf' uploaded — 3 medicines extracted, 3 changes pending",
-    "severity": "info",
-    "timestamp": 1787127464
-  },
-  {
-    "type": "rx",
-    "message": "Schedule confirmed — compartment 1: \"Paracetamol - 500 mg\"",
-    "severity": "info",
-    "timestamp": 1787127356
-  },
-  {
-    "type": "rx",
-    "message": "Prescription 'test_rx.png' uploaded — 0 medicines extracted, 0 changes pending",
-    "severity": "info",
-    "timestamp": 1787127217
-  },
-  {
-    "type": "rx",
-    "message": "Schedule confirmed — compartment 1: \"Amoxicillin - 500 mg\"",
-    "severity": "info",
-    "timestamp": 1787126090
-  },
-  {
-    "type": "rx",
-    "message": "Schedule confirmed — compartment 0: \"Cetirizine - 10 mg\"",
-    "severity": "info",
-    "timestamp": 1787086506
-  },
-  {
-    "type": "rx",
-    "message": "Prescription 'medicine_schedule.pdf' uploaded — 3 medicines extracted, 3 changes pending",
-    "severity": "info",
-    "timestamp": 1787086485
-  },
-  {
-    "type": "rx",
-    "message": "Schedule confirmed — compartment 2: \"Amoxicillin - 500 mg\"",
-    "severity": "info",
-    "timestamp": 1787085188
-  },
-  {
-    "type": "rx",
-    "message": "Schedule confirmed — compartment 2: \"Paracetamol - 500 mg\"",
-    "severity": "info",
-    "timestamp": 1787084727
-  },
-  {
-    "type": "rx",
-    "message": "Schedule confirmed — compartment 3: \"Cetirizine - 10 mg\"",
-    "severity": "info",
-    "timestamp": 1787084362
-  },
-  {
-    "type": "rx",
-    "message": "Prescription 'medicine_schedule.pdf' uploaded — 3 medicines extracted, 3 changes pending",
-    "severity": "info",
-    "timestamp": 1787084346
-  },
-  {
-    "type": "rx",
-    "message": "Schedule confirmed — compartment 0: \"Paracetamol - 500 mg\"",
-    "severity": "info",
-    "timestamp": 1787084106
-  },
-  {
-    "type": "rx",
-    "message": "Schedule confirmed — compartment 0: \"Paracetamol - 500 mg\"",
-    "severity": "info",
-    "timestamp": 1787084039
-  },
-  {
-    "type": "rx",
-    "message": "Schedule confirmed — compartment 2: \"Cetirizine - 10 mg\"",
-    "severity": "info",
-    "timestamp": 1787084016
-  },
-  {
-    "type": "rx",
-    "message": "Schedule confirmed — compartment 0: \"Paracetamol - 500 mg\"",
-    "severity": "info",
-    "timestamp": 1787083988
-  },
-  {
-    "type": "rx",
-    "message": "Schedule confirmed — compartment 1: \"Amoxicillin - 500 mg\"",
-    "severity": "info",
-    "timestamp": 1787083769
-  },
-  {
-    "type": "rx",
-    "message": "Schedule confirmed — compartment 2: \"Cetirizine - 10 mg\"",
-    "severity": "info",
-    "timestamp": 1787083416
-  },
-  {
-    "type": "rx",
-    "message": "Prescription 'medicine_schedule.pdf' uploaded — 3 medicines extracted, 3 changes pending",
-    "severity": "info",
-    "timestamp": 1787083407
-  },
-  {
-    "type": "rx",
-    "message": "Schedule confirmed — compartment 0: \"Amoxicillin - 500 mg\"",
-    "severity": "info",
-    "timestamp": 1787083091
-  },
-  {
-    "type": "rx",
-    "message": "Prescription 'medicine_schedule.pdf' uploaded — 3 medicines extracted, 3 changes pending",
-    "severity": "info",
-    "timestamp": 1787083082
-  },
-  {
-    "type": "rx",
-    "message": "Prescription 'medicine_schedule.pdf' uploaded — 3 medicines extracted, 3 changes pending",
-    "severity": "info",
-    "timestamp": 1787074583
-  },
-  {
-    "type": "rx",
-    "message": "Prescription 'medicine_schedule.pdf' uploaded — 3 medicines extracted, 3 changes pending",
-    "severity": "info",
-    "timestamp": 1787074551
-  },
-  {
-    "type": "rx",
-    "message": "Prescription 'medicine_schedule.pdf' uploaded — 3 medicines extracted, 3 changes pending",
-    "severity": "info",
-    "timestamp": 1787071765
-  },
-  {
-    "type": "scan",
-    "message": "Prescription report 'ce2ca0f38002e2f6e4392e8173cd2551.jpg' scanned successfully",
-    "severity": "info",
-    "timestamp": 1786736111
   }
 ]

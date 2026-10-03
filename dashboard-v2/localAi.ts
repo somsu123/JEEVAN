@@ -1,7 +1,5 @@
-/**
- * localAi.ts -- Ollama client for JEEVAN ElderCare Dashboard v2
- * Privacy guarantee: NO patient data leaves this machine.
- */
+import dns from "node:dns";
+try { dns.setDefaultResultOrder("ipv4first"); } catch { }
 import dotenv from "dotenv";
 dotenv.config();
 
@@ -155,22 +153,34 @@ export function tryParseJSON(text: string): unknown {
   return null;
 }
 
-function sanitizeTime(t: unknown): string {
-  if (typeof t !== "string" || !t.trim()) return "08:00";
-  const m = t.match(/(\d{1,2}):(\d{2})/);
+function sanitizeTime(t: unknown): string | null {
+  if (typeof t !== "string" || !t.trim()) return null;
+  const trimmed = t.trim();
+  if (/^null$|^none$|^n\/a$|^undefined$/i.test(trimmed)) return null;
+
+  // 1. Match explicit 24h or 12h clock times like "08:30", "8:00 AM", "14:00", "9:00 PM"
+  const m = trimmed.match(/(\d{1,2}):(\d{2})(?:\s*(am|pm))?/i);
   if (m) {
-    const hh = m[1].padStart(2, "0");
+    let hh = parseInt(m[1], 10);
     const mm = m[2];
-    return `${hh}:${mm}`;
+    const ampm = m[3]?.toLowerCase();
+    if (ampm === "pm" && hh < 12) hh += 12;
+    if (ampm === "am" && hh === 12) hh = 0;
+    return `${String(hh).padStart(2, "0")}:${mm}`;
   }
-  const lower = t.toLowerCase();
-  if (lower.includes("7 am") || lower.includes("7am")) return "07:00";
-  if (lower.includes("6 pm") || lower.includes("6pm")) return "18:00";
-  if (lower.includes("night") || lower.includes("bed") || lower.includes("hs") || lower.includes("dinner")) return "21:00";
-  if (lower.includes("evening") || lower.includes("sunset")) return "18:00";
-  if (lower.includes("noon") || lower.includes("afternoon") || lower.includes("lunch") || lower.includes("1 pm")) return "13:00";
-  if (lower.includes("ac") || lower.includes("before food") || lower.includes("empty stomach")) return "07:00";
-  return "08:00";
+
+  // 2. Match direct 12-hour with am/pm without colon e.g. "8 AM", "8pm", "9 PM"
+  const ampmMatch = trimmed.match(/\b(\d{1,2})\s*(am|pm)\b/i);
+  if (ampmMatch) {
+    let hh = parseInt(ampmMatch[1], 10);
+    const ampm = ampmMatch[2].toLowerCase();
+    if (ampm === "pm" && hh < 12) hh += 12;
+    if (ampm === "am" && hh === 12) hh = 0;
+    return `${String(hh).padStart(2, "0")}:00`;
+  }
+
+  // Do NOT guess or default a time if not explicitly stated in prescription
+  return null;
 }
 
 export async function extractWithVision(
@@ -181,42 +191,62 @@ export async function extractWithVision(
   let cleanImage = base64Image;
   if (cleanImage.includes(",")) cleanImage = cleanImage.split(",")[1];
 
+  // Try Gemini cloud vision models first if configured
   if (!LOCAL_AI_ONLY && process.env.GEMINI_API_KEY) {
-    try {
-      console.log("[AI] Routing vision task to Gemini 3.1 Flash Lite...");
-      const apiKey = process.env.GEMINI_API_KEY;
-      const body = {
-        contents: [
-          { parts: [ { inlineData: { mimeType: 'image/jpeg', data: cleanImage } }, { text: prompt } ] }
-        ],
-        generationConfig: { responseMimeType: 'application/json' }
-      };
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key=${apiKey}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
-      const json = await res.json();
-      if (!json.error && json.candidates?.[0]?.content?.parts?.[0]?.text) {
-        const raw = json.candidates[0].content.parts[0].text;
-        return { raw, parsed: tryParseJSON(raw), model: "gemini-3.1-flash-lite" };
-      } else {
-        console.error("[AI] Gemini API returned error or empty:", json.error);
+    const geminiModels = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-3.8-flash"];
+    const apiKey = process.env.GEMINI_API_KEY;
+
+    for (const model of geminiModels) {
+      try {
+        console.log(`[AI] Routing vision task to Gemini (${model})...`);
+        const body = {
+          contents: [
+            {
+              parts: [
+                { inlineData: { mimeType: "image/jpeg", data: cleanImage } },
+                { text: prompt }
+              ]
+            }
+          ],
+          generationConfig: {
+            responseMimeType: "application/json",
+            temperature: 0.1
+          }
+        };
+
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+        });
+
+        const json = await res.json();
+        if (!json.error && json.candidates?.[0]?.content?.parts?.[0]?.text) {
+          const raw = json.candidates[0].content.parts[0].text;
+          const parsed = tryParseJSON(raw);
+          console.log(`[AI] ✅ Gemini (${model}) vision extraction succeeded.`);
+          return { raw, parsed, model };
+        } else {
+          console.warn(`[AI] Gemini (${model}) returned:`, json.error?.message || "empty response");
+        }
+      } catch (e: any) {
+        console.warn(`[AI] Gemini (${model}) failed:`, e.message);
       }
-    } catch (e) {
-      console.error("[AI] Gemini fallback failed:", e);
     }
+    console.warn("[AI] All Gemini vision models exhausted, falling back to local Ollama vision...");
   }
 
+  // Local Ollama Vision fallback
+  console.log(`[AI] Using local Ollama vision (${VISION_MODEL})...`);
   const messages: OllamaMessage[] = [{ role: "user", content: prompt, images: [cleanImage] }];
   const body = {
     model: VISION_MODEL,
     messages,
     options: {
-      temperature: 0.1,
-      repeat_penalty: 1.25,
-      num_predict: 800,
-      num_ctx: 2048,
+      temperature: 0.05,
+      repeat_penalty: 1.15,
+      num_predict: 2048,
+      num_ctx: 4096,
     }
   };
   const result = await ollamaStreamChat(body, timeoutMs);
@@ -236,9 +266,9 @@ export async function generateWithText(
     model: TEXT_MODEL,
     messages,
     options: {
-      temperature: 0.2,
-      num_predict: 1024,
-      num_ctx: 2048,
+      temperature: 0.1,
+      num_predict: 2048,
+      num_ctx: 4096,
     }
   };
   const result = await ollamaStreamChat(body, timeoutMs);
@@ -259,13 +289,15 @@ export interface RxMed {
   name: string;
   dosage: string | null;
   frequency: string | null;
-  suggestedTime: string;
+  suggestedTime: string | null;
   confidence: "high" | "low";
   purpose?: string;
 }
 
 export function sanitizeRxMeds(raw: unknown): RxMed[] {
+  let textToParse = "";
   if (typeof raw === "string") {
+    textToParse = raw;
     const parsed = tryParseJSON(raw);
     if (parsed) raw = parsed;
   }
@@ -293,12 +325,39 @@ export function sanitizeRxMeds(raw: unknown): RxMed[] {
     }
   }
 
+  // If list is still empty but we have raw string, salvage individual JSON objects
+  if (list.length === 0 && textToParse) {
+    const objRegex = /\{[^{}]*?"name"\s*:\s*"([^"]+)"[^{}]*?\}/g;
+    let match: RegExpExecArray | null;
+    while ((match = objRegex.exec(textToParse)) !== null) {
+      try {
+        const item = JSON.parse(match[0]);
+        if (item && item.name) list.push(item);
+      } catch {
+        // Fallback regex field extraction
+        const nameMatch = match[0].match(/"name"\s*:\s*"([^"]+)"/);
+        const doseMatch = match[0].match(/"dosage"\s*:\s*"([^"]+)"/);
+        const freqMatch = match[0].match(/"frequency"\s*:\s*"([^"]+)"/);
+        const timeMatch = match[0].match(/"suggestedTime"\s*:\s*"([^"]+)"/);
+        if (nameMatch && nameMatch[1]) {
+          list.push({
+            name: nameMatch[1],
+            dosage: doseMatch ? doseMatch[1] : null,
+            frequency: freqMatch ? freqMatch[1] : null,
+            suggestedTime: timeMatch ? sanitizeTime(timeMatch[1]) : null,
+            confidence: "high"
+          });
+        }
+      }
+    }
+  }
+
   return list
     .map((item: any) => {
       const name = String(item?.name || item?.medicine || item?.drug || "").trim();
       const dosage = item?.dosage ? String(item.dosage).trim() : null;
       const frequency = item?.frequency ? String(item.frequency).trim() : null;
-      const timeCandidate = item?.suggestedTime || item?.time || frequency || dosage || "";
+      const timeCandidate = item?.suggestedTime || item?.time || null;
       const suggestedTime = sanitizeTime(timeCandidate);
       const confidence = item?.confidence === "low" ? ("low" as const) : ("high" as const);
       const purpose = item?.purpose ? String(item.purpose).trim() : undefined;
@@ -306,8 +365,8 @@ export function sanitizeRxMeds(raw: unknown): RxMed[] {
     })
     .filter((m) => m.name.length > 0 && !/^none$|^n\/a$|^null$/i.test(m.name))
     .filter((m, idx, arr) => {
-      const clean = m.name.toLowerCase().replace(/[^a-z0-9]/g, "");
-      return arr.findIndex((x) => x.name.toLowerCase().replace(/[^a-z0-9]/g, "") === clean) === idx;
+      const clean = `${m.name.toLowerCase().replace(/[^a-z0-9]/g, "")}-${(m.dosage || '').toLowerCase().replace(/[^a-z0-9]/g, "")}`;
+      return arr.findIndex((x) => `${x.name.toLowerCase().replace(/[^a-z0-9]/g, "")}-${(x.dosage || '').toLowerCase().replace(/[^a-z0-9]/g, "")}` === clean) === idx;
     });
 }
 

@@ -17,6 +17,8 @@ import {
   X,
   Activity,
   Package,
+  Trash2,
+  Timer,
 } from 'lucide-react';
 import { MedicineSlot, MedboxStatus, MedboxDeviceState } from '../types';
 
@@ -28,6 +30,7 @@ interface MedicineBoxProps {
   onMarkTaken: (id: string) => void;
   onMarkMissed: (id: string) => void;
   onResetSlot: (id: string) => void;
+  onDeleteSlot?: (id: string) => void;
   onUpdateSlots: (slots: MedicineSlot[]) => void;
 }
 
@@ -185,14 +188,17 @@ function BoxCard({
   onMarkTaken,
   onMarkMissed,
   onResetSlot,
+  onDeleteSlot,
 }: {
   slot: MedicineSlot;
   espState: MedboxDeviceState;
   onMarkTaken: (id: string) => void;
   onMarkMissed: (id: string) => void;
   onResetSlot: (id: string) => void;
+  onDeleteSlot?: (id: string) => void;
 }) {
   const [confirmMiss, setConfirmMiss] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const missed = (slot as any).missed === true;
   const countdown = useCountdown(slot.scheduledTime, slot.taken, missed);
 
@@ -247,39 +253,81 @@ function BoxCard({
 
       <div className="p-5 space-y-4">
 
-        {/* Header: box number + medicine name + status badge */}
+        {/* Header: box number + medicine name + status badge + delete toggle button */}
         <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-3 min-w-0">
+          <div className="flex items-center gap-3 min-w-0 flex-1">
             <div className={`flex items-center justify-center h-12 w-12 rounded-2xl bg-gradient-to-br ${gradient} text-white font-bold text-lg shrink-0 shadow-xs ${slot.taken || missed ? 'opacity-50' : ''}`}>
               {slot.slotNumber}
             </div>
-            <div>
-              <h3 className={`text-base font-bold font-headline leading-tight ${slot.taken ? 'line-through text-slate-400' : missed ? 'text-rose-700' : 'text-slate-800'}`}>
+            <div className="min-w-0 flex-1">
+              <h3 className={`text-base font-bold font-headline leading-tight truncate ${slot.taken ? 'line-through text-slate-400' : missed ? 'text-rose-700' : 'text-slate-800'}`}>
                 {slot.medicineName}
               </h3>
-              <span className="text-xs text-slate-500 font-medium">{slot.dosage}</span>
+              <span className="text-xs text-slate-500 font-medium block truncate">{slot.dosage}</span>
             </div>
           </div>
-          <span className={`px-3 py-1 rounded-full text-xs font-semibold border shrink-0 ${statusStyles[status]}`}>
-            {statusLabels[status]}
-          </span>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            <span className={`px-2.5 py-1 rounded-full text-xs font-semibold border shrink-0 ${statusStyles[status]}`}>
+              {statusLabels[status]}
+            </span>
+
+            {/* Delete option symbol on top of medicine card with toggle */}
+            {confirmDelete ? (
+              <div className="flex items-center gap-1 bg-rose-50 border border-rose-200 p-1 rounded-xl shadow-2xs animate-in fade-in zoom-in-95 duration-150">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onDeleteSlot?.(slot.id);
+                    setConfirmDelete(false);
+                  }}
+                  title="Confirm delete medicine"
+                  className="px-2 py-0.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition shadow-2xs cursor-pointer"
+                >
+                  Delete
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmDelete(false)}
+                  title="Cancel"
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 text-xs transition cursor-pointer"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setConfirmDelete(true)}
+                title="Delete medicine from this compartment"
+                className="p-1.5 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-200 transition cursor-pointer shrink-0"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            )}
+          </div>
         </div>
 
-        {/* Time + countdown */}
-        <div className="flex items-center justify-between text-xs py-2 px-3.5 rounded-2xl bg-slate-50 border border-slate-100">
+        {/* Time + countdown + timeout badge */}
+        <div className="flex items-center justify-between text-xs py-2 px-3.5 rounded-2xl bg-slate-50 border border-slate-100 flex-wrap gap-2">
           <div className="flex items-center gap-2 text-slate-800 font-semibold">
             <Clock className="h-4 w-4 text-slate-500" />
             <span>{formatTime12(slot.scheduledTime)}</span>
           </div>
-          <span className={`font-semibold text-xs ${
-            slot.taken ? 'text-emerald-700' : missed ? 'text-rose-600' : 'text-blue-700'
-          }`}>
-            {slot.taken && slot.takenAt ? `at ${slot.takenAt}` : countdown}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-blue-700 font-bold bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100 flex items-center gap-1">
+              <Timer className="h-3 w-3 text-blue-600" /> {slot.timeoutMinutes || 5}m limit
+            </span>
+            <span className={`font-semibold text-xs ${
+              slot.taken ? 'text-emerald-700' : missed ? 'text-rose-600' : 'text-blue-700'
+            }`}>
+              {slot.taken && slot.takenAt ? `at ${slot.takenAt}` : countdown}
+            </span>
+          </div>
         </div>
 
         {/* Sensor indicators */}
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium border ${
             slot.presenceConfirmed
               ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
@@ -375,13 +423,21 @@ function AddSlotForm({ onAdd, onClose }: {
   const [name, setName] = useState('');
   const [dosage, setDosage] = useState('');
   const [time, setTime] = useState('08:00');
+  const [timeoutMinutes, setTimeoutMinutes] = useState<number>(5);
   const [box, setBox] = useState<1 | 2 | 3 | 4>(1);
   const [notes, setNotes] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
-    onAdd({ slotNumber: box, medicineName: name.trim(), dosage: dosage.trim() || '—', scheduledTime: time, notes });
+    onAdd({
+      slotNumber: box,
+      medicineName: name.trim(),
+      dosage: dosage.trim() || '—',
+      scheduledTime: time,
+      timeoutMinutes,
+      notes
+    });
     onClose();
   };
 
@@ -448,6 +504,46 @@ function AddSlotForm({ onAdd, onClose }: {
             />
           </div>
 
+          {/* Timeout Timer (1 to 10 min) */}
+          <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-2.5">
+            <div className="flex items-center justify-between text-xs">
+              <label className="font-semibold text-slate-700 flex items-center gap-1.5">
+                <Timer className="h-3.5 w-3.5 text-blue-600" /> Timeout Timer:
+              </label>
+              <span className="font-bold text-blue-800 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200">
+                {timeoutMinutes} min
+              </span>
+            </div>
+            <div className="flex items-center gap-2.5">
+              <span className="text-[11px] font-bold text-slate-400">1m</span>
+              <input
+                type="range"
+                min="1"
+                max="10"
+                step="1"
+                value={timeoutMinutes}
+                onChange={e => setTimeoutMinutes(Number(e.target.value))}
+                className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+              />
+              <span className="text-[11px] font-bold text-slate-400">10m</span>
+            </div>
+            <div className="flex items-center gap-1 flex-wrap pt-1">
+              {[1, 2, 3, 5, 10].map(mins => (
+                <button
+                  key={mins}
+                  type="button"
+                  onClick={() => setTimeoutMinutes(mins)}
+                  className={`px-2 py-0.5 rounded-lg text-xs font-bold border transition cursor-pointer ${
+                    timeoutMinutes === mins ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-700 border-slate-200 hover:bg-blue-50'
+                  }`}
+                >{mins}m</button>
+              ))}
+            </div>
+            <p className="text-[10px] text-slate-500">
+              Auto-marks missed if dose is not taken within {timeoutMinutes}m of scheduled time.
+            </p>
+          </div>
+
           <div>
             <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1.5">Special Instructions (Optional)</label>
             <textarea
@@ -481,6 +577,7 @@ export default function MedicineBox({
   onMarkTaken,
   onMarkMissed,
   onResetSlot,
+  onDeleteSlot,
   onUpdateSlots,
 }: MedicineBoxProps) {
   const [showAddForm, setShowAddForm] = useState(false);
@@ -606,6 +703,7 @@ export default function MedicineBox({
                 onMarkTaken={onMarkTaken}
                 onMarkMissed={onMarkMissed}
                 onResetSlot={onResetSlot}
+                onDeleteSlot={onDeleteSlot}
               />
             ))}
           </div>

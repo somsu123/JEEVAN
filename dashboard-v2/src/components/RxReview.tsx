@@ -2,14 +2,16 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Upload, AlertTriangle, CheckCircle2, XCircle, Clock, Package,
   FileText, ChevronRight, Loader2, RefreshCw, Eye, EyeOff, ShieldCheck,
-  ArrowRight, Pill, Sparkles,
+  ArrowRight, Pill, Sparkles, Timer,
 } from 'lucide-react';
 import { ExtractedMed, Prescription } from '../types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-function fmt12(hhmm: string): string {
-  if (!hhmm || !hhmm.includes(':')) return '08:00 AM';
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function fmt12(hhmm?: string | null): string {
+  if (!hhmm || !hhmm.includes(':')) return '';
   const [h, m] = hhmm.split(':').map(Number);
+  if (isNaN(h)) return '';
   return `${h % 12 || 12}:${String(m || 0).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`;
 }
 
@@ -157,7 +159,7 @@ function PrescriptionHistoryItem({ rx }: { rx: Prescription }) {
               <span className="text-slate-400 font-bold">{i + 1}.</span>
               <span className="text-slate-800 font-bold">{m.name}</span>
               {m.dosage && <span className="text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md font-medium">{m.dosage}</span>}
-              <span className="text-slate-500">{fmt12(m.suggestedTime)}</span>
+              {m.suggestedTime && <span className="text-slate-500">{fmt12(m.suggestedTime)}</span>}
               <ConfidenceBadge conf={m.confidence} />
             </div>
           ))}
@@ -179,6 +181,7 @@ export default function RxReview() {
   } | null>(null);
   const [showRawOcr, setShowRawOcr]   = useState(false);
   const [rawOcrText, setRawOcrText]   = useState('');
+  const [searchTerm, setSearchTerm]   = useState('');
 
   // Active schedule state from ESP32 / Server
   const [activeSchedule, setActiveSchedule] = useState<any[]>([]);
@@ -191,12 +194,13 @@ export default function RxReview() {
   const [selectedSlot, setSelectedSlot]     = useState<number>(0); // 0, 1, 2, 3
   const [medicineName, setMedicineName]     = useState<string>('');
   const [dosage, setDosage]                 = useState<string>('');
-  const [scheduleTime, setScheduleTime]     = useState<string>('08:00');
+  const [scheduleTime, setScheduleTime]     = useState<string>('');
+  const [timeoutMinutes, setTimeoutMinutes] = useState<number>(5);
   const [reloadConfirmed, setReloadConfirmed] = useState<boolean>(false);
 
   const showMsg = useCallback((type: 'success' | 'error', text: string) => {
     setActionMsg({ type, text });
-    setTimeout(() => setActionMsg(null), 5000);
+    setTimeout(() => setActionMsg(null), 6000);
   }, []);
 
   // Fetch current live schedule & prescriptions
@@ -238,6 +242,12 @@ export default function RxReview() {
       const hh = String(matched.hour ?? 8).padStart(2, '0');
       const mm = String(matched.minute ?? 0).padStart(2, '0');
       setScheduleTime(`${hh}:${mm}`);
+      setTimeoutMinutes(Number(matched.timeoutMinutes) || 5);
+    } else {
+      setMedicineName('');
+      setDosage('');
+      setScheduleTime('');
+      setTimeoutMinutes(5);
     }
     setReloadConfirmed(false);
   }, [selectedSlot, activeSchedule]);
@@ -247,6 +257,7 @@ export default function RxReview() {
     setUploading(true);
     setUploadError(null);
     setLastUpload(null);
+    setSearchTerm('');
     try {
       const base64 = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
@@ -273,10 +284,8 @@ export default function RxReview() {
         const firstMed = data.extractedMeds[0];
         setMedicineName(firstMed.name || '');
         setDosage(firstMed.dosage || '');
-        if (firstMed.suggestedTime) {
-          setScheduleTime(firstMed.suggestedTime);
-        }
-        showMsg('success', `✓ Extracted ${data.extractedMeds.length} medicines. Slot form populated.`);
+        setScheduleTime(firstMed.suggestedTime || '');
+        showMsg('success', `✓ Successfully extracted ${data.extractedMeds.length} medicines! Select any medicine below to configure its slot.`);
       }
 
       fetchSchedule();
@@ -287,21 +296,25 @@ export default function RxReview() {
     }
   }, [fetchSchedule, showMsg]);
 
-  // Handle clicking an extracted medicine card on the left to populate the slot form
-  const handleSelectExtractedMed = (med: ExtractedMed) => {
+  // Assign a specific extracted medicine into a specific slot (or current selected slot)
+  const handleAssignToSlot = (med: ExtractedMed, targetSlot?: number) => {
+    const slotToUse = targetSlot !== undefined ? targetSlot : selectedSlot;
+    setSelectedSlot(slotToUse);
     setMedicineName(med.name || '');
     setDosage(med.dosage || '');
-    if (med.suggestedTime) {
-      setScheduleTime(med.suggestedTime);
-    }
+    setScheduleTime(med.suggestedTime || '');
     setReloadConfirmed(false);
-    showMsg('success', `Populated form with "${med.name}". Choose slot & click Set Reminder.`);
+    showMsg('success', `Populated "${med.name}" into Slot ${slotToUse + 1}. Check physical reload box and click Set Reminder.`);
   };
 
-  // Submit Slot Schedule to ESP32
+  // Submit Slot Schedule to ESP32 / Server
   const handleSaveSlot = async () => {
     if (!medicineName.trim()) {
       showMsg('error', 'Please enter a medicine name.');
+      return;
+    }
+    if (!scheduleTime.trim()) {
+      showMsg('error', 'Please select or enter a dose alarm time.');
       return;
     }
     if (!reloadConfirmed) {
@@ -321,6 +334,7 @@ export default function RxReview() {
           reloadConfirmed: true,
           compartment: selectedSlot,
           customTime: scheduleTime,
+          timeoutMinutes: timeoutMinutes,
           proposedLabel: combinedLabel,
           currentLabel: activeSchedule.find(s => Number(s.compartment) === selectedSlot)?.label || '(empty)',
         }),
@@ -328,7 +342,7 @@ export default function RxReview() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to sync with ESP32');
 
-      showMsg('success', `✅ Slot ${selectedSlot + 1} configured! Lid opened & LED glowing on MedBox.`);
+      showMsg('success', `✅ Slot ${selectedSlot + 1} updated to "${combinedLabel}" at ${fmt12(scheduleTime)} (Timeout: ${timeoutMinutes}m)!`);
       setReloadConfirmed(false);
       fetchSchedule();
     } catch (err: any) {
@@ -338,8 +352,55 @@ export default function RxReview() {
     }
   };
 
+  // Clear a slot
+  const handleClearSlot = async (slotIdx: number) => {
+    const changeId = `clear-${slotIdx}-${Date.now()}`;
+    try {
+      const res = await fetch(`/api/rx/confirm/${changeId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reloadConfirmed: true,
+          compartment: slotIdx,
+          customTime: "08:00",
+          proposedLabel: "(empty)",
+          currentLabel: activeSchedule.find(s => Number(s.compartment) === slotIdx)?.label || '(empty)',
+        }),
+      });
+      if (res.ok) {
+        showMsg('success', `Cleared Slot ${slotIdx + 1}`);
+        if (selectedSlot === slotIdx) {
+          setMedicineName('');
+          setDosage('');
+          setScheduleTime('');
+          setTimeoutMinutes(5);
+          setReloadConfirmed(false);
+        }
+        fetchSchedule();
+      }
+    } catch (e: any) {
+      showMsg('error', `Failed to clear slot: ${e.message}`);
+    }
+  };
+
+  // Check if a medicine is currently in any slot
+  const getAssignedSlots = (medName: string) => {
+    if (!medName) return [];
+    const cleanMed = medName.toLowerCase().trim();
+    return activeSchedule
+      .map((s, idx) => ({ ...s, slotIndex: idx }))
+      .filter(s => s.label && s.label !== '(empty)' && s.label.toLowerCase().includes(cleanMed));
+  };
+
   const currentSlotEntry = activeSchedule.find(s => Number(s.compartment) === selectedSlot);
   const c = selectedSlot % 4;
+
+  // Filtered extracted medicines
+  const filteredMeds = (lastUpload?.extractedMeds || []).filter(m => {
+    if (!searchTerm.trim()) return true;
+    const term = searchTerm.toLowerCase().trim();
+    return m.name.toLowerCase().includes(term) || (m.dosage && m.dosage.toLowerCase().includes(term)) || (m.frequency && m.frequency.toLowerCase().includes(term));
+  });
 
   return (
     <div className="flex flex-col gap-6 relative">
@@ -350,10 +411,10 @@ export default function RxReview() {
             <div className="p-2.5 rounded-2xl bg-blue-50 text-blue-600 border border-blue-100">
               <Upload className="h-6 w-6" />
             </div>
-            Prescription Scanner &amp; Review
+            Prescription Scanner &amp; Medication Review
           </h1>
           <p className="text-sm text-slate-500 mt-1 font-medium">
-            Upload a prescription photo · AI extracts medicines · select slot (1–4), customize time &amp; set reminder
+            Upload prescription document · AI extracts all medicines individually · assign to Slots 1–4 with custom dose alarms and timeout window
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -367,7 +428,7 @@ export default function RxReview() {
       </header>
 
       {actionMsg && (
-        <div className={`px-4 py-3 rounded-2xl border text-sm font-medium ${
+        <div className={`px-4 py-3 rounded-2xl border text-sm font-medium animate-in fade-in slide-in-from-top duration-300 ${
           actionMsg.type === 'success' ? 'bg-emerald-50 border-emerald-300 text-emerald-800' : 'bg-rose-50 border-rose-300 text-rose-800'
         }`}>{actionMsg.text}</div>
       )}
@@ -378,7 +439,7 @@ export default function RxReview() {
         <div className="space-y-5">
           <div className="bg-white border border-slate-200 rounded-3xl p-6 space-y-4 shadow-xs">
             <h2 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
-              <Upload className="h-4 w-4 text-blue-600" /> Upload Prescription
+              <Upload className="h-4 w-4 text-blue-600" /> Upload Prescription Document
             </h2>
             <UploadDropZone onFile={handleFile} uploading={uploading} />
             <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 font-medium">
@@ -397,51 +458,127 @@ export default function RxReview() {
           </div>
 
           {lastUpload && lastUpload.extractedMeds && lastUpload.extractedMeds.length > 0 && (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+            <div className="space-y-3.5">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <h2 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
                   <Sparkles className="h-4 w-4 text-blue-600" /> Extracted Medicines ({lastUpload.extractedMeds.length})
                 </h2>
-                {rawOcrText && (
-                  <button onClick={() => setShowRawOcr(v => !v)} className="flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-slate-700 transition cursor-pointer">
-                    {showRawOcr ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                    {showRawOcr ? 'Hide' : 'Show'} raw text
-                  </button>
-                )}
+                <div className="flex items-center gap-3">
+                  {rawOcrText && (
+                    <button onClick={() => setShowRawOcr(v => !v)} className="flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-slate-700 transition cursor-pointer">
+                      {showRawOcr ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                      {showRawOcr ? 'Hide raw text' : 'Raw text'}
+                    </button>
+                  )}
+                </div>
               </div>
+
+              {/* Search & Filter bar for extracted medicines */}
+              {lastUpload.extractedMeds.length > 3 && (
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={searchTerm}
+                    onChange={e => setSearchTerm(e.target.value)}
+                    placeholder={`Filter among ${lastUpload.extractedMeds.length} medicines...`}
+                    className="w-full px-4 py-2.5 rounded-2xl bg-slate-50 border border-slate-200 text-xs text-slate-800 placeholder:text-slate-400 focus:bg-white focus:border-blue-500 focus:outline-none transition"
+                  />
+                  {searchTerm && (
+                    <button
+                      onClick={() => setSearchTerm('')}
+                      className="absolute right-3 top-2.5 text-xs text-slate-400 hover:text-slate-600 cursor-pointer"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+              )}
+
               {showRawOcr && (
-                <pre className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-2xl p-4 overflow-auto max-h-36 whitespace-pre-wrap">
+                <pre className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-2xl p-4 overflow-auto max-h-36 whitespace-pre-wrap font-mono">
                   {rawOcrText}
                 </pre>
               )}
-              <div className="space-y-3">
-                {lastUpload.extractedMeds.map((med, i) => (
-                  <div
-                    key={i}
-                    onClick={() => handleSelectExtractedMed(med)}
-                    className="p-5 rounded-2xl border border-slate-200 bg-white hover:border-blue-400 hover:bg-blue-50/20 shadow-xs transition-all cursor-pointer group flex items-center justify-between gap-3"
-                  >
-                    <div className="space-y-1 flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-base font-bold text-slate-800 group-hover:text-blue-700 transition">{med.name}</span>
-                        {med.dosage && <span className="text-xs text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md font-semibold">{med.dosage}</span>}
-                        <ConfidenceBadge conf={med.confidence} />
+
+              <div className="space-y-3 max-h-[540px] overflow-y-auto custom-scrollbar pr-1">
+                {filteredMeds.map((med, i) => {
+                  const assigned = getAssignedSlots(med.name);
+                  const isAssigned = assigned.length > 0;
+
+                  return (
+                    <div
+                      key={i}
+                      className={`p-4 sm:p-5 rounded-2xl border transition-all ${
+                        isAssigned
+                          ? 'border-emerald-300 bg-emerald-50/20'
+                          : 'border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50/10'
+                      } shadow-2xs`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="space-y-1.5 flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs font-bold text-slate-400">{i + 1}.</span>
+                            <span className="text-base font-bold text-slate-800">{med.name}</span>
+                            {med.dosage && (
+                              <span className="text-xs text-slate-700 bg-slate-100 px-2 py-0.5 rounded-md font-bold">
+                                {med.dosage}
+                              </span>
+                            )}
+                            <ConfidenceBadge conf={med.confidence} />
+                            {isAssigned && (
+                              <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1">
+                                <CheckCircle2 className="h-3 w-3 text-emerald-600" />
+                                {assigned.map(a => `Slot ${a.slotIndex + 1}`).join(', ')}
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-3 text-xs text-slate-500 font-medium flex-wrap">
+                            {med.frequency && (
+                              <span className="bg-slate-50 px-2 py-0.5 rounded border border-slate-100 text-slate-600">
+                                {med.frequency}
+                              </span>
+                            )}
+                            {med.suggestedTime && (
+                              <span className="flex items-center gap-1 text-blue-700 font-semibold bg-blue-50/80 px-2 py-0.5 rounded border border-blue-100">
+                                <Clock className="h-3 w-3 text-blue-600" /> Time: {fmt12(med.suggestedTime)}
+                              </span>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-3 text-xs text-slate-500 font-medium">
-                        {med.frequency && <span>{med.frequency}</span>}
-                        <span className="flex items-center gap-1 text-slate-600 font-medium">
-                          <Clock className="h-3.5 w-3.5 text-blue-600" /> {fmt12(med.suggestedTime)}
-                        </span>
+
+                      {/* Quick Assign Buttons on Card */}
+                      <div className="mt-3.5 pt-3 border-t border-slate-100 flex items-center justify-between flex-wrap gap-2">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-xs font-semibold text-slate-400 mr-1">Assign to:</span>
+                          {[0, 1, 2, 3].map((slotIdx) => (
+                            <button
+                              key={slotIdx}
+                              type="button"
+                              onClick={() => handleAssignToSlot(med, slotIdx)}
+                              className={`px-2.5 py-1 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                                selectedSlot === slotIdx
+                                  ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                                  : 'bg-slate-50 hover:bg-blue-50 text-slate-700 hover:text-blue-700 border-slate-200'
+                              }`}
+                            >
+                              Slot {slotIdx + 1}
+                            </button>
+                          ))}
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleAssignToSlot(med, selectedSlot)}
+                          className="px-3 py-1.5 rounded-xl border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-600 hover:text-white hover:border-blue-600 text-xs font-bold transition flex items-center gap-1 shrink-0 cursor-pointer"
+                        >
+                          Use in Slot {selectedSlot + 1} <ArrowRight className="h-3.5 w-3.5" />
+                        </button>
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      className="px-4 py-2 rounded-xl border border-blue-200 bg-blue-50 text-blue-700 text-xs font-bold group-hover:bg-blue-600 group-hover:text-white group-hover:border-blue-600 transition flex items-center gap-1.5 shrink-0 shadow-xs cursor-pointer"
-                    >
-                      Use in Slot <ArrowRight className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -474,7 +611,7 @@ export default function RxReview() {
                     Slot {selectedSlot + 1} Configuration
                   </h2>
                   <p className="text-xs text-slate-500 font-medium">
-                    Set medication details, dosage, and dose alarm time
+                    Select compartment, medicine name, dosage, dose alarm time, and timeout window
                   </p>
                 </div>
               </div>
@@ -487,8 +624,8 @@ export default function RxReview() {
             <div className="space-y-2">
               <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center justify-between">
                 <span>Select Target Compartment (1 – 4):</span>
-                <span className="text-blue-700 font-bold">
-                  Currently: {currentSlotEntry?.label ? currentSlotEntry.label : '(Empty)'}
+                <span className="text-blue-700 font-bold text-xs truncate max-w-[200px]">
+                  Current: {currentSlotEntry?.label ? currentSlotEntry.label : '(Empty)'}
                 </span>
               </label>
               <div className="grid grid-cols-4 gap-2.5">
@@ -508,7 +645,7 @@ export default function RxReview() {
                       }`}
                     >
                       <div className="text-xs font-bold">Slot {slotIdx + 1}</div>
-                      <div className={`text-xs truncate mt-0.5 ${isActive ? 'text-blue-100' : 'text-slate-500'}`}>
+                      <div className={`text-xs truncate mt-0.5 font-medium ${isActive ? 'text-blue-100' : 'text-slate-500'}`}>
                         {hasMed ? slotData.label.split(' - ')[0] : 'Empty'}
                       </div>
                     </button>
@@ -527,7 +664,7 @@ export default function RxReview() {
                   type="text"
                   value={medicineName}
                   onChange={(e) => setMedicineName(e.target.value)}
-                  placeholder="e.g. Amoxicillin, Metformin, Paracetamol"
+                  placeholder="e.g. Albuterol, Metformin, Paracetamol"
                   className="w-full px-4 py-3 rounded-2xl bg-white border border-slate-200 text-slate-800 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100 focus:outline-none placeholder:text-slate-400 transition"
                 />
               </div>
@@ -546,25 +683,23 @@ export default function RxReview() {
               </div>
             </div>
 
-            {/* 3. Dose Schedule Time */}
-            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2.5">
+            {/* 3. Dose Schedule Time + Presets */}
+            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <label className="text-xs font-semibold text-slate-600 uppercase tracking-wider flex items-center gap-1.5">
-                  <Clock className="h-4 w-4 text-blue-600" /> Dose Schedule Time:
+                  <Clock className="h-4 w-4 text-blue-600" /> Dose Schedule Alarm Time:
                 </label>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const d = new Date(Date.now() + 1 * 60 * 1000);
-                    const hh = String(d.getHours()).padStart(2, '0');
-                    const mm = String(d.getMinutes()).padStart(2, '0');
-                    setScheduleTime(`${hh}:${mm}`);
-                  }}
-                  className="text-xs font-semibold text-blue-700 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-3 py-1 rounded-xl transition shadow-2xs cursor-pointer"
-                >
-                  +1 min from now (Test)
-                </button>
+                {scheduleTime ? (
+                  <span className="text-xs text-blue-800 font-bold bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200">
+                    Alarm: {fmt12(scheduleTime)}
+                  </span>
+                ) : (
+                  <span className="text-xs text-slate-500 font-medium bg-slate-100 px-2.5 py-0.5 rounded-full border border-slate-200">
+                    No time set
+                  </span>
+                )}
               </div>
+
               <div className="flex items-center gap-3">
                 <input
                   type="time"
@@ -572,10 +707,101 @@ export default function RxReview() {
                   onChange={(e) => setScheduleTime(e.target.value)}
                   className="px-4 py-2.5 rounded-2xl bg-white border border-slate-200 text-slate-800 font-mono text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100 focus:outline-none transition shadow-2xs"
                 />
-                <span className="text-xs text-blue-800 font-semibold">
-                  Alarm set for {fmt12(scheduleTime)}
+
+                {/* Quick Presets */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => setScheduleTime("08:00")}
+                    className="px-2.5 py-1 rounded-xl bg-white hover:bg-blue-50 border border-slate-200 text-xs font-semibold text-slate-700 hover:text-blue-700 transition cursor-pointer"
+                  >
+                    Morning (8 AM)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setScheduleTime("13:00")}
+                    className="px-2.5 py-1 rounded-xl bg-white hover:bg-blue-50 border border-slate-200 text-xs font-semibold text-slate-700 hover:text-blue-700 transition cursor-pointer"
+                  >
+                    Noon (1 PM)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setScheduleTime("18:00")}
+                    className="px-2.5 py-1 rounded-xl bg-white hover:bg-blue-50 border border-slate-200 text-xs font-semibold text-slate-700 hover:text-blue-700 transition cursor-pointer"
+                  >
+                    Evening (6 PM)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setScheduleTime("21:00")}
+                    className="px-2.5 py-1 rounded-xl bg-white hover:bg-blue-50 border border-slate-200 text-xs font-semibold text-slate-700 hover:text-blue-700 transition cursor-pointer"
+                  >
+                    Night (9 PM)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const d = new Date(Date.now() + 1 * 60 * 1000);
+                      const hh = String(d.getHours()).padStart(2, '0');
+                      const mm = String(d.getMinutes()).padStart(2, '0');
+                      setScheduleTime(`${hh}:${mm}`);
+                    }}
+                    className="px-2.5 py-1 rounded-xl bg-amber-50 hover:bg-amber-100 border border-amber-300 text-xs font-bold text-amber-800 transition cursor-pointer"
+                  >
+                    +1m (Test)
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* 3b. Dose Timeout Timer (1 to 10 min) */}
+            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wider flex items-center gap-1.5">
+                  <Timer className="h-4 w-4 text-blue-600" /> Dose Intake Timeout Window:
+                </label>
+                <span className="text-xs text-blue-800 font-bold bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200">
+                  Timeout: {timeoutMinutes} min
                 </span>
               </div>
+
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2.5 flex-1">
+                  <span className="text-xs font-bold text-slate-400 shrink-0">1m</span>
+                  <input
+                    type="range"
+                    min="1"
+                    max="10"
+                    step="1"
+                    value={timeoutMinutes}
+                    onChange={(e) => setTimeoutMinutes(Number(e.target.value))}
+                    className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                  />
+                  <span className="text-xs font-bold text-slate-400 shrink-0">10m</span>
+                </div>
+
+                {/* Quick Presets */}
+                <div className="flex items-center gap-1 shrink-0">
+                  {[1, 2, 3, 5, 10].map((mins) => (
+                    <button
+                      key={mins}
+                      type="button"
+                      onClick={() => setTimeoutMinutes(mins)}
+                      className={`px-2 py-1 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                        timeoutMinutes === mins
+                          ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                          : 'bg-white hover:bg-blue-50 text-slate-700 border-slate-200'
+                      }`}
+                    >
+                      {mins}m
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <p className="text-[11px] text-slate-500 font-medium">
+                ⏱ If patient does not open lid &amp; take dose within <strong>{timeoutMinutes} minute{timeoutMinutes > 1 ? 's' : ''}</strong> of alarm, it will be automatically marked as <strong>Missed</strong>.
+              </p>
             </div>
 
             {/* 4. Physical Reload Confirmation Checkbox */}
@@ -611,9 +837,9 @@ export default function RxReview() {
               <button
                 type="button"
                 onClick={handleSaveSlot}
-                disabled={!reloadConfirmed || savingSlot || !medicineName.trim()}
+                disabled={!reloadConfirmed || savingSlot || !medicineName.trim() || !scheduleTime.trim()}
                 className={`flex-1 flex items-center justify-center gap-2 py-3.5 rounded-2xl text-sm font-bold transition-all ${
-                  reloadConfirmed && medicineName.trim() && !savingSlot
+                  reloadConfirmed && medicineName.trim() && scheduleTime.trim() && !savingSlot
                     ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-sm active:scale-95 cursor-pointer'
                     : 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
                 }`}
@@ -627,11 +853,12 @@ export default function RxReview() {
                 onClick={() => {
                   setMedicineName('');
                   setDosage('');
+                  setScheduleTime('');
                   setReloadConfirmed(false);
                 }}
                 className="px-5 py-3.5 rounded-2xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-xs font-semibold text-slate-700 transition cursor-pointer"
               >
-                Clear
+                Reset
               </button>
             </div>
           </div>
@@ -650,7 +877,7 @@ export default function RxReview() {
                   <div
                     key={slotIdx}
                     onClick={() => setSelectedSlot(slotIdx)}
-                    className={`p-3.5 rounded-2xl border transition-all cursor-pointer ${
+                    className={`p-3.5 rounded-2xl border transition-all cursor-pointer relative group ${
                       isSelected
                         ? 'border-blue-500 bg-blue-50/60 ring-2 ring-blue-500/20 shadow-xs'
                         : 'border-slate-200 bg-white hover:border-slate-300'
@@ -658,9 +885,24 @@ export default function RxReview() {
                   >
                     <div className="flex items-center justify-between text-xs">
                       <span className="font-bold text-slate-800">Slot {slotIdx + 1}</span>
-                      <span className={`text-xs font-semibold ${hasItem ? 'text-emerald-700' : 'text-slate-400'}`}>
-                        {hasItem ? fmt12(`${String(item.hour).padStart(2, '0')}:${String(item.minute).padStart(2, '0')}`) : 'Empty'}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-xs font-semibold ${hasItem ? 'text-emerald-700' : 'text-slate-400'}`}>
+                          {hasItem ? fmt12(`${String(item.hour).padStart(2, '0')}:${String(item.minute).padStart(2, '0')}`) : 'Empty'}
+                        </span>
+                        {hasItem && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleClearSlot(slotIdx);
+                            }}
+                            title="Clear this slot"
+                            className="text-slate-400 hover:text-rose-600 transition text-xs font-bold px-1"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
                     </div>
                     <p className="text-xs font-bold text-slate-700 truncate mt-1">
                       {hasItem ? item.label : '(empty)'}

@@ -76,12 +76,11 @@ export interface MedicineSlot {
   taken: boolean;
   takenAt?: string;
   missed?: boolean;
+  timeoutMinutes?: number;     // Grace period (1–10m) before dose is marked as missed
   presenceConfirmed: boolean;  // ultrasonic sensor
   touchVerified: boolean;       // touch sensor
   notes?: string;
 }
-
-
 
 // ─── Report Scanner ──────────────────────────────────────────────────────────
 export interface ScanResult {
@@ -127,7 +126,7 @@ export interface ExtractedMed {
   name: string;
   dosage: string | null;
   frequency: string | null;
-  suggestedTime: string;     // "HH:MM"
+  suggestedTime: string | null;     // "HH:MM" or null if not in prescription
   confidence: 'high' | 'low';
 }
 
@@ -139,6 +138,7 @@ export interface PendingChange {
   proposedLabel: string;     // label as it should appear on the LCD
   proposedHour: number;
   proposedMinute: number;
+  timeoutMinutes?: number;   // 1–10 minutes grace period
   extractedMed?: ExtractedMed;
   status: 'pending' | 'confirmed' | 'rejected';
   createdAt: string;
@@ -167,4 +167,3 @@ export interface Prescription {
   status: 'pending_review' | 'applied' | 'rejected';
   prescriptionNumber?: string | null;
 }
-
