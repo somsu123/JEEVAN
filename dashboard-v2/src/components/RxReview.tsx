@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Upload, AlertTriangle, CheckCircle2, XCircle, Clock, Package,
   FileText, ChevronRight, Loader2, RefreshCw, Eye, EyeOff, ShieldCheck,
-  ArrowRight, Pill, Sparkles, Timer,
+  ArrowRight, Pill, Sparkles, Timer, Plus,
 } from 'lucide-react';
 import { ExtractedMed, Prescription } from '../types';
 
@@ -119,50 +119,203 @@ const COMP_BG   = ['bg-emerald-50', 'bg-blue-50', 'bg-purple-50', 'bg-amber-50']
 const COMP_BORDER = ['border-emerald-300', 'border-blue-300', 'border-purple-300', 'border-amber-300'];
 
 // ─── Past prescription history item ──────────────────────────────────────────
-function PrescriptionHistoryItem({ rx }: { rx: Prescription }) {
-  const [expanded, setExpanded] = useState(false);
+function PrescriptionHistoryItem({
+  rx,
+  activeSchedule = [],
+  selectedSlot = 0,
+  onAssignToSlot,
+  onLoadAsActive,
+  defaultExpanded = false,
+}: {
+  rx: Prescription;
+  activeSchedule?: any[];
+  selectedSlot?: number;
+  onAssignToSlot?: (med: ExtractedMed, slotIdx?: number) => void;
+  onLoadAsActive?: (rx: Prescription) => void;
+  defaultExpanded?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(defaultExpanded || rx.status === 'pending_review');
+  const [filterText, setFilterText] = useState('');
+
   const statusColors: Record<string, string> = {
     pending_review: 'bg-amber-50 text-amber-800 border-amber-300',
     applied: 'bg-emerald-50 text-emerald-700 border-emerald-300',
     rejected: 'bg-rose-50 text-rose-700 border-rose-300',
   };
+
+  const meds = rx.extractedMeds || [];
+  const filteredMeds = meds.filter((m) => {
+    if (!filterText.trim()) return true;
+    const term = filterText.toLowerCase().trim();
+    return (
+      m.name.toLowerCase().includes(term) ||
+      (m.dosage && m.dosage.toLowerCase().includes(term)) ||
+      (m.frequency && m.frequency.toLowerCase().includes(term))
+    );
+  });
+
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white shadow-xs overflow-hidden">
-      <button className="w-full flex items-center justify-between p-4 hover:bg-slate-50 transition text-left cursor-pointer" onClick={() => setExpanded(e => !e)}>
+    <div className="rounded-2xl border border-slate-200 bg-white shadow-xs overflow-hidden transition-all">
+      <button
+        className="w-full flex items-center justify-between p-4 hover:bg-slate-50 transition text-left cursor-pointer"
+        onClick={() => setExpanded((e) => !e)}
+      >
         <div className="flex items-center gap-3 min-w-0">
-          <div className="p-2.5 rounded-xl bg-slate-100 text-slate-600 shrink-0">
+          <div className="p-2.5 rounded-xl bg-blue-50 text-blue-600 border border-blue-100 shrink-0">
             <FileText className="h-4 w-4" />
           </div>
           <div className="min-w-0">
-            <p className="text-sm font-bold text-slate-800 truncate">
-              {rx.fileName}
+            <p className="text-sm font-bold text-slate-800 truncate flex items-center gap-2">
+              <span>{rx.fileName || 'Prescription Document'}</span>
               {rx.prescriptionNumber && (
-                <span className="ml-2 text-xs text-blue-700 font-semibold">
-                  (Rx #{rx.prescriptionNumber})
+                <span className="text-xs text-blue-700 font-semibold bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200">
+                  Rx #{rx.prescriptionNumber}
                 </span>
               )}
             </p>
-            <p className="text-xs text-slate-500 font-medium mt-0.5">{relTime(rx.uploadedAt)} · {rx.extractedMeds?.length ?? 0} medicines</p>
+            <p className="text-xs text-slate-500 font-medium mt-0.5">
+              {relTime(rx.uploadedAt || (rx as any).createdAt)} · {meds.length} medicine{meds.length !== 1 ? 's' : ''} available
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <span className={`px-2.5 py-1 rounded-full text-xs font-semibold border ${statusColors[rx.status] || ''}`}>
-            {rx.status?.replace('_', ' ').toUpperCase()}
+          <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold border ${statusColors[rx.status] || 'bg-slate-50 text-slate-700 border-slate-200'}`}>
+            {(rx.status || 'PENDING REVIEW').replace('_', ' ').toUpperCase()}
           </span>
-          <ChevronRight className={`h-4 w-4 text-slate-400 transition-transform ${expanded ? 'rotate-90' : ''}`} />
+          <ChevronRight className={`h-4 w-4 text-slate-400 transition-transform duration-200 ${expanded ? 'rotate-90' : ''}`} />
         </div>
       </button>
-      {expanded && (rx.extractedMeds?.length ?? 0) > 0 && (
-        <div className="border-t border-slate-100 p-4 bg-slate-50/50 space-y-2.5">
-          {rx.extractedMeds.map((m, i) => (
-            <div key={i} className="flex items-center gap-2 text-xs flex-wrap bg-white p-3 rounded-xl border border-slate-200">
-              <span className="text-slate-400 font-bold">{i + 1}.</span>
-              <span className="text-slate-800 font-bold">{m.name}</span>
-              {m.dosage && <span className="text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md font-medium">{m.dosage}</span>}
-              {m.suggestedTime && <span className="text-slate-500">{fmt12(m.suggestedTime)}</span>}
-              <ConfidenceBadge conf={m.confidence} />
+
+      {expanded && meds.length > 0 && (
+        <div className="border-t border-slate-100 p-4 bg-slate-50/70 space-y-3">
+          {/* Header instructions & load all action */}
+          <div className="flex items-center justify-between flex-wrap gap-2 pb-2 border-b border-slate-200/70">
+            <div className="flex items-center gap-1.5 text-xs text-slate-600 font-medium">
+              <Pill className="h-3.5 w-3.5 text-blue-600" />
+              <span>Select any medicine below to continue or add into a compartment:</span>
             </div>
-          ))}
+            {onLoadAsActive && (
+              <button
+                type="button"
+                onClick={() => onLoadAsActive(rx)}
+                className="text-[11px] font-bold text-blue-700 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-2.5 py-1 rounded-xl transition flex items-center gap-1 cursor-pointer"
+              >
+                <Sparkles className="h-3 w-3" /> Load in Active View
+              </button>
+            )}
+          </div>
+
+          {/* Quick search if > 4 medicines */}
+          {meds.length > 4 && (
+            <div className="relative">
+              <input
+                type="text"
+                value={filterText}
+                onChange={(e) => setFilterText(e.target.value)}
+                placeholder={`Search ${meds.length} medicines in this Rx...`}
+                className="w-full px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-blue-500"
+              />
+              {filterText && (
+                <button
+                  onClick={() => setFilterText('')}
+                  className="absolute right-2.5 top-1.5 text-xs text-slate-400 hover:text-slate-600 cursor-pointer"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Medicines List with Add-to-Compartment buttons */}
+          <div className="space-y-2.5 max-h-96 overflow-y-auto custom-scrollbar pr-1">
+            {filteredMeds.map((m, i) => {
+              const cleanMed = m.name.toLowerCase().trim();
+              const assigned = (activeSchedule || [])
+                .map((s, idx) => ({ ...s, slotIndex: idx }))
+                .filter((s) => s.label && s.label !== '(empty)' && s.label.toLowerCase().includes(cleanMed));
+              const isAssigned = assigned.length > 0;
+
+              return (
+                <div
+                  key={i}
+                  onClick={() => onAssignToSlot && onAssignToSlot(m, selectedSlot)}
+                  className={`p-3.5 rounded-2xl border transition-all cursor-pointer group ${
+                    isAssigned
+                      ? 'border-emerald-300 bg-emerald-50/50 hover:border-emerald-400'
+                      : 'border-slate-200 bg-white hover:border-blue-400 hover:bg-blue-50/20 hover:shadow-xs'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3 flex-wrap">
+                    <div className="space-y-1 min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-bold text-slate-400">{i + 1}.</span>
+                        <span className="text-sm font-bold text-slate-800 group-hover:text-blue-700 transition">
+                          {m.name}
+                        </span>
+                        {m.dosage && (
+                          <span className="text-xs text-slate-700 bg-slate-100 px-2 py-0.5 rounded-md font-bold">
+                            {m.dosage}
+                          </span>
+                        )}
+                        <ConfidenceBadge conf={m.confidence} />
+                        {isAssigned && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1">
+                            <CheckCircle2 className="h-3 w-3 text-emerald-600" />
+                            {assigned.map((a) => `Slot ${a.slotIndex + 1}`).join(', ')}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2 text-xs text-slate-500 flex-wrap">
+                        {m.frequency && (
+                          <span className="bg-slate-50 px-2 py-0.5 rounded border border-slate-100 text-slate-600 text-[11px]">
+                            {m.frequency}
+                          </span>
+                        )}
+                        {m.suggestedTime && (
+                          <span className="flex items-center gap-1 text-blue-700 font-semibold bg-blue-50/80 px-2 py-0.5 rounded border border-blue-100 text-[11px]">
+                            <Clock className="h-3 w-3 text-blue-600" /> Time: {fmt12(m.suggestedTime)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Slot Allocation Buttons */}
+                  <div className="mt-2.5 pt-2.5 border-t border-slate-100 flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-1 flex-wrap" onClick={(e) => e.stopPropagation()}>
+                      <span className="text-[11px] font-semibold text-slate-400 mr-1">Load into:</span>
+                      {[0, 1, 2, 3].map((slotIdx) => (
+                        <button
+                          key={slotIdx}
+                          type="button"
+                          onClick={() => onAssignToSlot && onAssignToSlot(m, slotIdx)}
+                          className={`px-2.5 py-1 rounded-xl text-[11px] font-bold border transition-all cursor-pointer ${
+                            selectedSlot === slotIdx
+                              ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                              : 'bg-slate-50 hover:bg-blue-50 text-slate-700 hover:text-blue-700 border-slate-200'
+                          }`}
+                        >
+                          Slot {slotIdx + 1}
+                        </button>
+                      ))}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onAssignToSlot && onAssignToSlot(m, selectedSlot);
+                      }}
+                      className="px-3 py-1.5 rounded-xl border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-600 hover:text-white hover:border-blue-600 text-[11px] font-bold transition flex items-center gap-1 shrink-0 cursor-pointer shadow-2xs"
+                    >
+                      <Plus className="h-3 w-3" /> Continue in Slot {selectedSlot + 1}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
@@ -196,6 +349,8 @@ export default function RxReview() {
   const [dosage, setDosage]                 = useState<string>('');
   const [scheduleTime, setScheduleTime]     = useState<string>('');
   const [timeoutMinutes, setTimeoutMinutes] = useState<number>(5);
+  const [retryIntervalMinutes, setRetryIntervalMinutes] = useState<number>(5); // 2–15m
+  const [maxRetries, setMaxRetries]         = useState<number>(3); // 1–4 times
   const [reloadConfirmed, setReloadConfirmed] = useState<boolean>(false);
 
   const showMsg = useCallback((type: 'success' | 'error', text: string) => {
@@ -243,11 +398,15 @@ export default function RxReview() {
       const mm = String(matched.minute ?? 0).padStart(2, '0');
       setScheduleTime(`${hh}:${mm}`);
       setTimeoutMinutes(Number(matched.timeoutMinutes) || 5);
+      setRetryIntervalMinutes(Number(matched.retryIntervalMinutes) || 5);
+      setMaxRetries(Number(matched.maxRetries) || 3);
     } else {
       setMedicineName('');
       setDosage('');
       setScheduleTime('');
       setTimeoutMinutes(5);
+      setRetryIntervalMinutes(5);
+      setMaxRetries(3);
     }
     setReloadConfirmed(false);
   }, [selectedSlot, activeSchedule]);
@@ -302,9 +461,37 @@ export default function RxReview() {
     setSelectedSlot(slotToUse);
     setMedicineName(med.name || '');
     setDosage(med.dosage || '');
-    setScheduleTime(med.suggestedTime || '');
+    if (med.suggestedTime) {
+      setScheduleTime(med.suggestedTime);
+    }
     setReloadConfirmed(false);
-    showMsg('success', `Populated "${med.name}" into Slot ${slotToUse + 1}. Check physical reload box and click Set Reminder.`);
+    showMsg('success', `✓ Populated "${med.name}${med.dosage ? ' ' + med.dosage : ''}" into Slot ${slotToUse + 1}. Check the physical reload box to confirm.`);
+
+    // Scroll to configuration panel on mobile/smaller screens
+    const el = document.getElementById('slot-config-panel');
+    if (el && window.innerWidth < 1280) {
+      el.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
+
+  // Load an entire historical prescription into the active review workspace
+  const handleLoadPrescriptionAsActive = (rx: Prescription) => {
+    setLastUpload({
+      prescriptionId: rx.id,
+      extractedMeds: rx.extractedMeds || [],
+      ocrText: rx.ocrText || '',
+      prescriptionNumber: rx.prescriptionNumber || null,
+    });
+    setRawOcrText(rx.ocrText || '');
+    if (rx.extractedMeds && rx.extractedMeds.length > 0) {
+      const firstMed = rx.extractedMeds[0];
+      setMedicineName(firstMed.name || '');
+      setDosage(firstMed.dosage || '');
+      if (firstMed.suggestedTime) {
+        setScheduleTime(firstMed.suggestedTime);
+      }
+    }
+    showMsg('success', `✓ Loaded "${rx.fileName || 'Prescription'}" (${rx.extractedMeds?.length || 0} medicines) into active review view.`);
   };
 
   // Submit Slot Schedule to ESP32 / Server
@@ -335,6 +522,8 @@ export default function RxReview() {
           compartment: selectedSlot,
           customTime: scheduleTime,
           timeoutMinutes: timeoutMinutes,
+          retryIntervalMinutes: retryIntervalMinutes,
+          maxRetries: maxRetries,
           proposedLabel: combinedLabel,
           currentLabel: activeSchedule.find(s => Number(s.compartment) === selectedSlot)?.label || '(empty)',
         }),
@@ -342,7 +531,7 @@ export default function RxReview() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to sync with ESP32');
 
-      showMsg('success', `✅ Slot ${selectedSlot + 1} updated to "${combinedLabel}" at ${fmt12(scheduleTime)} (Timeout: ${timeoutMinutes}m)!`);
+      showMsg('success', `✅ Slot ${selectedSlot + 1} updated to "${combinedLabel}" at ${fmt12(scheduleTime)} (Timeout: ${timeoutMinutes}m · Auto-Reminder: ${retryIntervalMinutes}m × ${maxRetries})!`);
       setReloadConfirmed(false);
       fetchSchedule();
     } catch (err: any) {
@@ -583,21 +772,36 @@ export default function RxReview() {
             </div>
           )}
 
-          {/* Prescription History */}
+          {/* Prescription History / Pending Review Section */}
           {prescriptions.length > 0 && (
             <div className="space-y-3 pt-2">
-              <h2 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2 px-1">
-                <FileText className="h-4 w-4 text-slate-500" /> Prescription History ({prescriptions.length})
-              </h2>
-              <div className="space-y-2.5 max-h-64 overflow-y-auto custom-scrollbar pr-1">
-                {prescriptions.map(rx => <PrescriptionHistoryItem key={rx.id} rx={rx} />)}
+              <div className="flex items-center justify-between flex-wrap gap-2 px-1">
+                <h2 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                  <FileText className="h-4 w-4 text-blue-600" /> Previous Prescriptions &amp; History ({prescriptions.length})
+                </h2>
+                <span className="text-[11px] text-slate-500 font-medium bg-slate-100 px-2.5 py-0.5 rounded-full">
+                  Click any medicine below to reload into a compartment
+                </span>
+              </div>
+              <div className="space-y-3 max-h-[580px] overflow-y-auto custom-scrollbar pr-1">
+                {prescriptions.map((rx, idx) => (
+                  <PrescriptionHistoryItem
+                    key={rx.id || idx}
+                    rx={rx}
+                    activeSchedule={activeSchedule}
+                    selectedSlot={selectedSlot}
+                    onAssignToSlot={handleAssignToSlot}
+                    onLoadAsActive={handleLoadPrescriptionAsActive}
+                    defaultExpanded={idx === 0 || rx.status === 'pending_review'}
+                  />
+                ))}
               </div>
             </div>
           )}
         </div>
 
         {/* RIGHT COLUMN: Interactive Medicine Slot & Time Configuration Form */}
-        <div className="space-y-5">
+        <div className="space-y-5" id="slot-config-panel">
           <div className="bg-white rounded-3xl p-6 sm:p-7 space-y-5 border border-slate-200 shadow-xs">
 
             {/* Header & Selected Slot Indicator */}
@@ -754,54 +958,135 @@ export default function RxReview() {
               </div>
             </div>
 
-            {/* 3b. Dose Timeout Timer (1 to 10 min) */}
-            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wider flex items-center gap-1.5">
-                  <Timer className="h-4 w-4 text-blue-600" /> Dose Intake Timeout Window:
-                </label>
-                <span className="text-xs text-blue-800 font-bold bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200">
-                  Timeout: {timeoutMinutes} min
-                </span>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-2.5 flex-1">
-                  <span className="text-xs font-bold text-slate-400 shrink-0">1m</span>
-                  <input
-                    type="range"
-                    min="1"
-                    max="10"
-                    step="1"
-                    value={timeoutMinutes}
-                    onChange={(e) => setTimeoutMinutes(Number(e.target.value))}
-                    className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
-                  />
-                  <span className="text-xs font-bold text-slate-400 shrink-0">10m</span>
+            {/* 3b. Dose Intake Timeout & Auto-Reminder Engine */}
+            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-4">
+              {/* 1. Intake Timeout Window */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wider flex items-center gap-1.5">
+                    <Timer className="h-4 w-4 text-blue-600" /> 1. Intake Timeout Window:
+                  </label>
+                  <span className="text-xs text-blue-800 font-bold bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200">
+                    Timeout: {timeoutMinutes} min
+                  </span>
                 </div>
 
-                {/* Quick Presets */}
-                <div className="flex items-center gap-1 shrink-0">
-                  {[1, 2, 3, 5, 10].map((mins) => (
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2.5 flex-1">
+                    <span className="text-xs font-bold text-slate-400 shrink-0">1m</span>
+                    <input
+                      type="range"
+                      min="1"
+                      max="10"
+                      step="1"
+                      value={timeoutMinutes}
+                      onChange={(e) => setTimeoutMinutes(Number(e.target.value))}
+                      className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                    />
+                    <span className="text-xs font-bold text-slate-400 shrink-0">10m</span>
+                  </div>
+
+                  {/* Quick Presets */}
+                  <div className="flex items-center gap-1 shrink-0">
+                    {[1, 2, 3, 5, 10].map((mins) => (
+                      <button
+                        key={mins}
+                        type="button"
+                        onClick={() => setTimeoutMinutes(mins)}
+                        className={`px-2 py-1 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                          timeoutMinutes === mins
+                            ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                            : 'bg-white hover:bg-blue-50 text-slate-700 border-slate-200'
+                        }`}
+                      >
+                        {mins}m
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <p className="text-[11px] text-slate-500 font-medium">
+                  Patient has <strong>{timeoutMinutes} minute{timeoutMinutes > 1 ? 's' : ''}</strong> to approach box and take dose before alarm stops.
+                </p>
+              </div>
+
+              {/* 2. Auto-Reminder Retry Interval (2 to 15 min) */}
+              <div className="pt-3 border-t border-slate-200/70 space-y-2">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wider flex items-center gap-1.5">
+                    <Clock className="h-4 w-4 text-purple-600" /> 2. Auto-Reminder Snooze Interval:
+                  </label>
+                  <span className="text-xs text-purple-800 font-bold bg-purple-50 px-2.5 py-0.5 rounded-full border border-purple-200">
+                    Retry every: {retryIntervalMinutes} min
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2.5 flex-1">
+                    <span className="text-xs font-bold text-slate-400 shrink-0">2m</span>
+                    <input
+                      type="range"
+                      min="2"
+                      max="15"
+                      step="1"
+                      value={retryIntervalMinutes}
+                      onChange={(e) => setRetryIntervalMinutes(Number(e.target.value))}
+                      className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-purple-600"
+                    />
+                    <span className="text-xs font-bold text-slate-400 shrink-0">15m</span>
+                  </div>
+
+                  <div className="flex items-center gap-1 shrink-0">
+                    {[2, 3, 5, 10, 15].map((mins) => (
+                      <button
+                        key={mins}
+                        type="button"
+                        onClick={() => setRetryIntervalMinutes(mins)}
+                        className={`px-2 py-1 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                          retryIntervalMinutes === mins
+                            ? 'bg-purple-600 text-white border-purple-600 shadow-2xs'
+                            : 'bg-white hover:bg-purple-50 text-slate-700 border-slate-200'
+                        }`}
+                      >
+                        {mins}m
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* 3. Max Reminder Retries (1 to 4 times) */}
+              <div className="pt-3 border-t border-slate-200/70 space-y-2">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wider flex items-center gap-1.5">
+                    <RefreshCw className="h-4 w-4 text-emerald-600" /> 3. Max Reminder Cycles (1 – 4 times):
+                  </label>
+                  <span className="text-xs text-emerald-800 font-bold bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                    Max: {maxRetries} attempt{maxRetries > 1 ? 's' : ''}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-4 gap-2">
+                  {[1, 2, 3, 4].map((count) => (
                     <button
-                      key={mins}
+                      key={count}
                       type="button"
-                      onClick={() => setTimeoutMinutes(mins)}
-                      className={`px-2 py-1 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
-                        timeoutMinutes === mins
-                          ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
-                          : 'bg-white hover:bg-blue-50 text-slate-700 border-slate-200'
+                      onClick={() => setMaxRetries(count)}
+                      className={`py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer text-center ${
+                        maxRetries === count
+                          ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
+                          : 'bg-white hover:bg-emerald-50 text-slate-700 border-slate-200'
                       }`}
                     >
-                      {mins}m
+                      {count === 1 ? '1x (No Snooze)' : `${count} Reminders`}
                     </button>
                   ))}
                 </div>
               </div>
 
-              <p className="text-[11px] text-slate-500 font-medium">
-                ⏱ If patient does not open lid &amp; take dose within <strong>{timeoutMinutes} minute{timeoutMinutes > 1 ? 's' : ''}</strong> of alarm, it will be automatically marked as <strong>Missed</strong>.
-              </p>
+              {/* Summary of smart safety logic */}
+              <div className="p-2.5 rounded-xl bg-blue-50/60 border border-blue-100 text-[11px] text-slate-600 leading-relaxed font-medium">
+                💡 <strong>Smart Safety Logic:</strong> If patient does not take dose within <strong>{timeoutMinutes}m</strong>, LED blinking stops &amp; lid stays closed (ultrasonic ignored). Box will re-alarm every <strong>{retryIntervalMinutes}m</strong> (up to <strong>{maxRetries} times</strong>), after which it is marked <strong>Completely Missed</strong> for that day.
+              </div>
             </div>
 
             {/* 4. Physical Reload Confirmation Checkbox */}

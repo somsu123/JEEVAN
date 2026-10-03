@@ -54,7 +54,7 @@ export default function Overview({ scannedHistory, onNavigate, activeAlert, vita
             <span className="text-slate-500 font-normal">{greeting},</span> Patient & Caregiver.
           </h1>
           <p className="text-slate-600 text-base max-w-2xl leading-relaxed">
-            Real-time vital signs, automated fall prevention, and medical records summary below.
+            Real-time vital signs, smart medicine box adherence, and clinical records summary below.
           </p>
         </div>
 

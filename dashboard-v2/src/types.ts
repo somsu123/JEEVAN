@@ -76,9 +76,15 @@ export interface MedicineSlot {
   taken: boolean;
   takenAt?: string;
   missed?: boolean;
-  timeoutMinutes?: number;     // Grace period (1–10m) before dose is marked as missed
-  presenceConfirmed: boolean;  // ultrasonic sensor
-  touchVerified: boolean;       // touch sensor
+  completelyMissed?: boolean;
+  timeoutMinutes?: number;         // Grace period (1–10m) before dose attempt times out
+  retryIntervalMinutes?: number;   // Auto-reminder retry snooze interval (2–15m)
+  maxRetries?: number;             // Max reminder cycles (1–4 times) before completely missed
+  currentRetry?: number;           // Current reminder count (0 = initial, 1..maxRetries)
+  nextRetryTime?: string;          // "HH:MM" timestamp of next scheduled auto-reminder
+  inSnooze?: boolean;              // True when waiting for next auto-reminder
+  presenceConfirmed: boolean;      // ultrasonic sensor
+  touchVerified: boolean;          // touch sensor
   notes?: string;
 }
 
@@ -96,6 +102,7 @@ export type MedboxDeviceState =
   | 'DISPENSING'
   | 'CONFIRMED'
   | 'MISSED'
+  | 'SNOOZE'
   | 'UNKNOWN';
 
 export interface MedboxStatus {
@@ -109,13 +116,16 @@ export interface MedboxStatus {
 }
 
 // ─── Medicine Event Log (audit trail) ────────────────────────────────────────
-export type MedboxEventType = 'DOSE_TAKEN' | 'DOSE_MISSED';
+export type MedboxEventType = 'DOSE_TAKEN' | 'DOSE_MISSED' | 'DOSE_MISSED_SNOOZE' | 'DOSE_COMPLETELY_MISSED';
 
 export interface MedboxEvent {
   event: MedboxEventType;
-  box: number;               // 1, 2, or 3
+  box: number;               // 1, 2, 3, or 4
   medicine: string;
   dosage?: string;
+  retryAttempt?: number;
+  maxRetries?: number;
+  nextRetryTime?: string;
   timestamp: string;
   deviceId: string;
 }
@@ -133,12 +143,14 @@ export interface ExtractedMed {
 export interface PendingChange {
   id: string;
   prescriptionId: string;
-  compartment: number;       // 0–3, matches ESP32 LED_PIN index
-  currentLabel: string;      // what's currently in the box (from schedule_cache)
-  proposedLabel: string;     // label as it should appear on the LCD
+  compartment: number;             // 0–3, matches ESP32 LED_PIN index
+  currentLabel: string;            // what's currently in the box (from schedule_cache)
+  proposedLabel: string;           // label as it should appear on the LCD
   proposedHour: number;
   proposedMinute: number;
-  timeoutMinutes?: number;   // 1–10 minutes grace period
+  timeoutMinutes?: number;         // 1–10 minutes grace period
+  retryIntervalMinutes?: number;   // 2–15 minutes auto-reminder interval
+  maxRetries?: number;             // 1–4 reminder cycles
   extractedMed?: ExtractedMed;
   status: 'pending' | 'confirmed' | 'rejected';
   createdAt: string;

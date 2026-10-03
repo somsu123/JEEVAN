@@ -125,10 +125,19 @@ bool lidOpen = false;
 struct ScheduleEntry {
   int hour;
   int minute;
-  int compartment; // 0, 1, 2, or 3
-  char label[32];  // Medicine name (e.g. "Metformin")
-  char dosage[16]; // Dosage (e.g. "500mg")
+  int compartment;        // 0, 1, 2, or 3
+  char label[32];         // Medicine name (e.g. "Metformin")
+  char dosage[16];        // Dosage (e.g. "500mg")
   bool givenToday;
+  int timeoutMinutes;     // 1–10 min intake window (default 5)
+  int retryIntervalMin;   // 2–15 min auto-reminder snooze interval (default 5)
+  int maxRetries;         // 1–4 max reminder cycles (default 3)
+  int currentRetry;       // 0 = initial, 1..maxRetries
+  bool completelyMissed;  // true if all retries exhausted for today
+  bool inSnooze;          // true when waiting for next auto-reminder
+  int nextRetryHour;
+  int nextRetryMinute;
+  unsigned long reminderStartedMs;
 };
 
 #define MAX_SCHEDULE_ENTRIES 10
@@ -564,13 +573,13 @@ void checkAssignedSlotTimeout() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
-//  6. DOSE-TAKEN EVENT REPORTING (PORT 5050)
+//  6. DOSE-TAKEN & MISSED EVENT REPORTING (PORT 5050)
 // ─────────────────────────────────────────────────────────────────────────────────
-void queueDoseTakenEvent(int compIndex, const char* medicineName, const char* doseStr) {
+void queueMedboxEvent(const char* eventType, int compIndex, const char* medicineName, const char* doseStr) {
   queuedEvent.pending = true;
-  strncpy(queuedEvent.event, "DOSE_TAKEN", sizeof(queuedEvent.event) - 1);
+  strncpy(queuedEvent.event, eventType, sizeof(queuedEvent.event) - 1);
   queuedEvent.box = compIndex + 1; // 1-BASED BOX NUMBER (0 -> 1, 1 -> 2, 2 -> 3, 3 -> 4)
-  strncpy(queuedEvent.medicine, medicineName, sizeof(queuedEvent.medicine) - 1);
+  strncpy(queuedEvent.medicine, medicineName ? medicineName : "Unknown", sizeof(queuedEvent.medicine) - 1);
   if (doseStr) {
     strncpy(queuedEvent.dosage, doseStr, sizeof(queuedEvent.dosage) - 1);
   } else {
@@ -583,11 +592,16 @@ void queueDoseTakenEvent(int compIndex, const char* medicineName, const char* do
   queuedEvent.retriesLeft = 3;
   queuedEvent.nextRetryMs = millis();
 
-  Serial.printf("[EVENT] Queued DOSE_TAKEN event: Box %d | %s (%s) at %s\n",
+  Serial.printf("[EVENT] Queued %s event: Box %d | %s (%s) at %s\n",
+                queuedEvent.event,
                 queuedEvent.box,
                 queuedEvent.medicine,
                 queuedEvent.dosage,
                 queuedEvent.timestamp);
+}
+
+void queueDoseTakenEvent(int compIndex, const char* medicineName, const char* doseStr) {
+  queueMedboxEvent("DOSE_TAKEN", compIndex, medicineName, doseStr);
 }
 
 void processEventQueue() {
@@ -659,43 +673,62 @@ void checkSchedule() {
     lastResetDay = timeinfo.tm_mday;
     for (int i = 0; i < scheduleCount; i++) {
       scheduleList[i].givenToday = false;
+      scheduleList[i].completelyMissed = false;
+      scheduleList[i].inSnooze = false;
+      scheduleList[i].currentRetry = 0;
     }
     activeDoseIndex = -1;
     activeCompartment = -1;
     closeLid();
     turnOffAllLeds();
     currentState = STATE_IDLE;
-    Serial.println(F("[SCHEDULER] 🌙 Midnight reached: givenToday reset for all compartments."));
+    Serial.println(F("[SCHEDULER] 🌙 Midnight reached: givenToday and retries reset for all compartments."));
   }
 
   int currentMinutes = timeinfo.tm_hour * 60 + timeinfo.tm_min;
 
-  // Scan schedule for due dose (Strictly No Auto-Expiry)
+  // Scan schedule for due dose or due auto-reminder retry
   if (currentState == STATE_IDLE) {
     for (int i = 0; i < scheduleCount; i++) {
-      if (!scheduleList[i].givenToday) {
-        int dueMinutes = scheduleList[i].hour * 60 + scheduleList[i].minute;
-        int diff = currentMinutes - dueMinutes;
+      if (!scheduleList[i].givenToday && !scheduleList[i].completelyMissed) {
+        bool isDue = false;
 
-        if (diff >= 0) {
+        if (!scheduleList[i].inSnooze) {
+          int dueMinutes = scheduleList[i].hour * 60 + scheduleList[i].minute;
+          int diff = currentMinutes - dueMinutes;
+          if (diff >= 0 && diff < 720) {
+            isDue = true;
+          }
+        } else {
+          int retryMinutes = scheduleList[i].nextRetryHour * 60 + scheduleList[i].nextRetryMinute;
+          int diff = currentMinutes - retryMinutes;
+          if (diff >= 0 && diff < 720) {
+            isDue = true;
+          }
+        }
+
+        if (isDue) {
           activeDoseIndex = i;
           activeCompartment = scheduleList[i].compartment;
+          scheduleList[i].reminderStartedMs = millis();
+          scheduleList[i].inSnooze = false;
           currentState = STATE_REMINDER;
           closeLid(); // Enforce lid is strictly closed (0°) until ultrasonic signal
 
-          Serial.printf("[SCHEDULER] 🔔 Dose DUE for Slot %d: %s (%s) at %02d:%02d\n",
-                        activeCompartment + 1,
-                        scheduleList[i].label,
-                        scheduleList[i].dosage,
-                        scheduleList[i].hour,
-                        scheduleList[i].minute);
-          Serial.println(F("[SCHEDULER] ⏳ Lid is CLOSED. Displaying alert. Waiting for patient to approach within 15-20cm on D5..."));
+          int curAttempt = scheduleList[i].currentRetry + 1;
+          int maxR = scheduleList[i].maxRetries > 0 ? scheduleList[i].maxRetries : 3;
 
-          // First alert on display to take medicine
+          Serial.printf("[SCHEDULER] 🔔 Reminder (%d/%d) DUE for Slot %d: %s (%s)\n",
+                        curAttempt, maxR, activeCompartment + 1,
+                        scheduleList[i].label, scheduleList[i].dosage);
+          Serial.printf("[SCHEDULER] ⏳ Lid is CLOSED. Timeout is %dm. Waiting for patient to approach within 15-20cm on D5...\n",
+                        scheduleList[i].timeoutMinutes > 0 ? scheduleList[i].timeoutMinutes : 5);
+
+          // Alert on display to take medicine
           char line1[17];
           char line2[17];
           snprintf(line1, sizeof(line1), "Take: %.10s", scheduleList[i].label);
-          snprintf(line2, sizeof(line2), "Dose: %.10s", scheduleList[i].dosage);
+          snprintf(line2, sizeof(line2), "Slot %d (%d/%d)", activeCompartment + 1, curAttempt, maxR);
           printLcdStatus(line1, line2);
           break;
         }
@@ -709,17 +742,102 @@ void pollHardware() {
   if (now - lastSensorPollMs < SENSOR_POLL_INTERVAL_MS) return;
   lastSensorPollMs = now;
 
-  // 1. Ultrasonic Presence Sensing (15-20 cm threshold on D5)
+  // 1. Timeout Check: If patient did not take dose within timeout window
+  if (currentState == STATE_REMINDER && activeDoseIndex >= 0) {
+    unsigned long elapsedMs = now - scheduleList[activeDoseIndex].reminderStartedMs;
+    int tm = scheduleList[activeDoseIndex].timeoutMinutes > 0 ? scheduleList[activeDoseIndex].timeoutMinutes : 5;
+    unsigned long timeoutLimitMs = (unsigned long)tm * 60UL * 1000UL;
+
+    if (elapsedMs >= timeoutLimitMs) {
+      Serial.printf("[TIMEOUT] ⚠️ Intake timeout reached (%d min) for Slot %d (%s). Stopping alarm & blinking.\n",
+                    tm, activeCompartment + 1, scheduleList[activeDoseIndex].label);
+
+      // 1. Immediately turn OFF buzzer, LED blinking, and ensure lid is closed
+      setBuzzerHardware(false);
+      turnOffAllLeds();
+      digitalWrite(STATUS_LED_PIN, wifiConnected ? HIGH : LOW);
+      closeLid();
+
+      scheduleList[activeDoseIndex].currentRetry++;
+      int curR = scheduleList[activeDoseIndex].currentRetry;
+      int maxR = scheduleList[activeDoseIndex].maxRetries > 0 ? scheduleList[activeDoseIndex].maxRetries : 3;
+      int retryInt = scheduleList[activeDoseIndex].retryIntervalMin > 0 ? scheduleList[activeDoseIndex].retryIntervalMin : 5;
+
+      struct tm timeinfo;
+      int curTotalMin = 0;
+      if (getLocalTime(&timeinfo)) {
+        curTotalMin = timeinfo.tm_hour * 60 + timeinfo.tm_min;
+      }
+
+      if (curR < maxR) {
+        // ── Auto-Reminder Snooze Retry ──
+        int nextTotalMin = curTotalMin + retryInt;
+        scheduleList[activeDoseIndex].nextRetryHour = (nextTotalMin / 60) % 24;
+        scheduleList[activeDoseIndex].nextRetryMinute = nextTotalMin % 60;
+        scheduleList[activeDoseIndex].inSnooze = true;
+
+        Serial.printf("[SNOOZE] ⏳ Snoozing Slot %d. Next reminder (%d/%d) at %02d:%02d (%dm interval).\n",
+                      activeCompartment + 1, curR + 1, maxR,
+                      scheduleList[activeDoseIndex].nextRetryHour,
+                      scheduleList[activeDoseIndex].nextRetryMinute,
+                      retryInt);
+
+        char l1[17];
+        char l2[17];
+        snprintf(l1, sizeof(l1), "MISSED! (%d/%d)", curR, maxR);
+        snprintf(l2, sizeof(l2), "Retry: %02d:%02d",
+                 scheduleList[activeDoseIndex].nextRetryHour,
+                 scheduleList[activeDoseIndex].nextRetryMinute);
+        printLcdStatus(l1, l2, 5000);
+
+        queueMedboxEvent("DOSE_MISSED_SNOOZE",
+                         activeCompartment,
+                         scheduleList[activeDoseIndex].label,
+                         scheduleList[activeDoseIndex].dosage);
+
+        currentState = STATE_IDLE;
+        activeDoseIndex = -1;
+        activeCompartment = -1;
+
+      } else {
+        // ── Completely Missed for Today (Exhausted all retries) ──
+        scheduleList[activeDoseIndex].completelyMissed = true;
+        scheduleList[activeDoseIndex].inSnooze = false;
+
+        Serial.printf("[MISSED] ❌ Slot %d (%s) COMPLETELY MISSED for today after %d attempts.\n",
+                      activeCompartment + 1, scheduleList[activeDoseIndex].label, maxR);
+
+        char l1[17];
+        char l2[17];
+        snprintf(l1, sizeof(l1), "COMPLETELY MISSED");
+        snprintf(l2, sizeof(l2), "Slot %d: %.10s",
+                 scheduleList[activeDoseIndex].compartment + 1,
+                 scheduleList[activeDoseIndex].label);
+        printLcdStatus(l1, l2, 6000);
+
+        queueMedboxEvent("DOSE_COMPLETELY_MISSED",
+                         activeCompartment,
+                         scheduleList[activeDoseIndex].label,
+                         scheduleList[activeDoseIndex].dosage);
+
+        currentState = STATE_IDLE;
+        activeDoseIndex = -1;
+        activeCompartment = -1;
+      }
+    }
+  }
+
+  // 2. Ultrasonic Presence Sensing (15-20 cm threshold on D5)
   float dist = readDistanceCm();
   presenceDetected = (dist <= PRESENCE_DISTANCE_CM);
 
-  // 2. State Transition: REMINDER -> DISPENSING strictly upon Ultrasonic Presence (15-20 cm)
+  // 3. State Transition: REMINDER -> DISPENSING strictly upon Ultrasonic Presence (15-20 cm) DURING ACTIVE REMINDER ONLY
   if (currentState == STATE_REMINDER && presenceDetected && activeDoseIndex >= 0) {
     Serial.printf("[ULTRASONIC] 🎯 Patient approached at %.1f cm (<= 20cm on D5)! Opening lid to DISPENSE.\n", dist);
     currentState = STATE_DISPENSING;
     setBuzzerHardware(false); // Silence buzzer immediately
 
-    openLid(); // Lid opens ONLY after ultrasonic sensor receives signal!
+    openLid(); // Lid opens ONLY after ultrasonic sensor receives signal during active reminder!
 
     // Solid LED on assigned compartment
     turnOffAllLeds();
@@ -732,7 +850,7 @@ void pollHardware() {
     printLcdStatus(line1, line2);
   }
 
-  // 3. State Transition: DISPENSING -> TAKEN upon Push Button Confirmation
+  // 4. State Transition: DISPENSING -> TAKEN upon Push Button Confirmation
   if (currentState == STATE_DISPENSING && activeDoseIndex >= 0) {
     int buttonVal = digitalRead(BUTTON_PIN);
     bool buttonPressed = (buttonVal == LOW); // LOW = pressed with INPUT_PULLUP
@@ -745,6 +863,8 @@ void pollHardware() {
       turnOffAllLeds();
 
       scheduleList[activeDoseIndex].givenToday = true;
+      scheduleList[activeDoseIndex].inSnooze = false;
+      scheduleList[activeDoseIndex].completelyMissed = false;
       currentState = STATE_TAKEN;
       takenStateEnteredMs = millis();
 
@@ -764,7 +884,7 @@ void pollHardware() {
     }
   }
 
-  // 4. Return to IDLE from TAKEN after 3-second cooldown
+  // 5. Return to IDLE from TAKEN after 3-second cooldown
   if (currentState == STATE_TAKEN && (now - takenStateEnteredMs > 3000)) {
     currentState = STATE_IDLE;
     activeDoseIndex = -1;
@@ -772,7 +892,7 @@ void pollHardware() {
     printLcdStatus("JEEVAN MedBox", getNormalTimeStr());
   }
 
-  // 5. Idle Display: Show "JEEVAN MedBox" and live normal time (updates every second)
+  // 6. Idle Display: Show "JEEVAN MedBox" and live normal time (updates every second)
   if (currentState == STATE_IDLE && now >= lcdBannerUntilMs) {
     static unsigned long lastIdleLcdMs = 0;
     if (now - lastIdleLcdMs >= 1000) {
@@ -865,7 +985,7 @@ void handleCORS() {
 }
 
 void handleGetSchedule() {
-  static StaticJsonDocument<1536> doc;
+  static StaticJsonDocument<2048> doc;
   doc.clear();
   JsonArray array = doc.createNestedArray("schedule");
 
@@ -877,6 +997,12 @@ void handleGetSchedule() {
     obj["label"] = scheduleList[i].label;
     obj["dosage"] = scheduleList[i].dosage;
     obj["givenToday"] = scheduleList[i].givenToday;
+    obj["timeoutMinutes"] = scheduleList[i].timeoutMinutes > 0 ? scheduleList[i].timeoutMinutes : 5;
+    obj["retryIntervalMinutes"] = scheduleList[i].retryIntervalMin > 0 ? scheduleList[i].retryIntervalMin : 5;
+    obj["maxRetries"] = scheduleList[i].maxRetries > 0 ? scheduleList[i].maxRetries : 3;
+    obj["currentRetry"] = scheduleList[i].currentRetry;
+    obj["inSnooze"] = scheduleList[i].inSnooze;
+    obj["completelyMissed"] = scheduleList[i].completelyMissed;
   }
 
   String response;
@@ -895,7 +1021,7 @@ void handlePostSchedule() {
   }
 
   String body = server.arg("plain");
-  static StaticJsonDocument<1536> doc;
+  static StaticJsonDocument<2048> doc;
   doc.clear();
   DeserializationError error = deserializeJson(doc, body);
 
@@ -946,10 +1072,17 @@ void handlePostSchedule() {
     scheduleList[scheduleCount].dosage[sizeof(scheduleList[scheduleCount].dosage) - 1] = '\0';
 
     scheduleList[scheduleCount].givenToday = v["givenToday"] | false;
+    scheduleList[scheduleCount].timeoutMinutes = v["timeoutMinutes"] | 5;
+    scheduleList[scheduleCount].retryIntervalMin = v["retryIntervalMinutes"] | (v["retryIntervalMin"] | 5);
+    scheduleList[scheduleCount].maxRetries = v["maxRetries"] | 3;
+    scheduleList[scheduleCount].currentRetry = 0;
+    scheduleList[scheduleCount].inSnooze = false;
+    scheduleList[scheduleCount].completelyMissed = false;
+
     scheduleCount++;
   }
 
-  Serial.printf("[HTTP] Saved POST /api/schedule: %d entries loaded into RAM\n", scheduleCount);
+  Serial.printf("[HTTP] Saved POST /api/schedule: %d entries loaded into RAM with Auto-Reminder config\n", scheduleCount);
   server.sendHeader("Access-Control-Allow-Origin", "*");
   server.send(200, "application/json", "{\"status\":\"ok\"}");
 }

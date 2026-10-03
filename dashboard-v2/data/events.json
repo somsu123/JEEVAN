@@ -1,5 +1,83 @@
 [
   {
+    "type": "scan",
+    "message": "Prescription report scanned: 0 medicines extracted",
+    "severity": "info",
+    "timestamp": 1791022265
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 1: \"Amoxicillin (Himox) - 500mg\"",
+    "severity": "info",
+    "timestamp": 1791021413
+  },
+  {
+    "type": "rx",
+    "message": "Prescription uploaded -- 1 medicines extracted, 1 changes pending",
+    "severity": "info",
+    "timestamp": 1791021382
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 2: \"Cap. Rozad\"",
+    "severity": "info",
+    "timestamp": 1791020404
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 1: \"T. Placida\"",
+    "severity": "info",
+    "timestamp": 1791020359
+  },
+  {
+    "type": "rx",
+    "message": "Prescription uploaded -- 5 medicines extracted, 4 changes pending",
+    "severity": "info",
+    "timestamp": 1791020305
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 2: \"gabapentin - 600 mg\"",
+    "severity": "info",
+    "timestamp": 1791019114
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 1: \"aspirin - 81 mg\"",
+    "severity": "info",
+    "timestamp": 1791017544
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 1: \"aspirin - 81 mg\"",
+    "severity": "info",
+    "timestamp": 1791017525
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 0: \"albuterol HFA - 90\"",
+    "severity": "info",
+    "timestamp": 1791017491
+  },
+  {
+    "type": "rx",
+    "message": "Prescription uploaded -- 16 medicines extracted, 4 changes pending",
+    "severity": "info",
+    "timestamp": 1791017370
+  },
+  {
+    "type": "scan",
+    "message": "Prescription report scanned: 0 medicines extracted",
+    "severity": "info",
+    "timestamp": 1791017289
+  },
+  {
+    "type": "scan",
+    "message": "Prescription report scanned: 0 medicines extracted",
+    "severity": "info",
+    "timestamp": 1791017228
+  },
+  {
     "type": "rx",
     "message": "Schedule confirmed — compartment 0: \"albuterol HFA - 90\"",
     "severity": "info",
@@ -520,83 +598,5 @@
     "message": "Prescription uploaded -- 1 medicines extracted, 1 changes pending",
     "severity": "info",
     "timestamp": 1790890606
-  },
-  {
-    "type": "rx",
-    "message": "Prescription uploaded -- 1 medicines extracted, 1 changes pending",
-    "severity": "info",
-    "timestamp": 1790890575
-  },
-  {
-    "type": "rx",
-    "message": "Prescription uploaded -- 2 medicines extracted, 2 changes pending",
-    "severity": "info",
-    "timestamp": 1790890454
-  },
-  {
-    "type": "scan",
-    "message": "Prescription report scanned: 1 medicines extracted",
-    "severity": "info",
-    "timestamp": 1790890441
-  },
-  {
-    "type": "rx",
-    "message": "Prescription uploaded -- 1 medicines extracted, 1 changes pending",
-    "severity": "info",
-    "timestamp": 1790890432
-  },
-  {
-    "type": "rx",
-    "message": "Prescription uploaded -- 7 medicines extracted, 4 changes pending",
-    "severity": "info",
-    "timestamp": 1790889232
-  },
-  {
-    "type": "scan",
-    "message": "Prescription report scanned: 5 medicines extracted",
-    "severity": "info",
-    "timestamp": 1790888832
-  },
-  {
-    "type": "rx",
-    "message": "Prescription uploaded -- 4 medicines extracted, 4 changes pending",
-    "severity": "info",
-    "timestamp": 1790888811
-  },
-  {
-    "type": "scan",
-    "message": "Prescription report scanned: 5 medicines extracted",
-    "severity": "info",
-    "timestamp": 1790888328
-  },
-  {
-    "type": "rx",
-    "message": "Prescription uploaded -- 5 medicines extracted, 4 changes pending",
-    "severity": "info",
-    "timestamp": 1790888308
-  },
-  {
-    "type": "scan",
-    "message": "Prescription report scanned: 1 medicines extracted",
-    "severity": "info",
-    "timestamp": 1790887962
-  },
-  {
-    "type": "rx",
-    "message": "Prescription uploaded -- 1 medicines extracted, 1 changes pending",
-    "severity": "info",
-    "timestamp": 1790887941
-  },
-  {
-    "type": "rx",
-    "message": "Prescription uploaded -- 0 medicines extracted, 0 changes pending",
-    "severity": "info",
-    "timestamp": 1790885651
-  },
-  {
-    "type": "rx",
-    "message": "Prescription uploaded -- 0 medicines extracted, 0 changes pending",
-    "severity": "info",
-    "timestamp": 1790885233
   }
 ]

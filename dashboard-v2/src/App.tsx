@@ -28,7 +28,13 @@ interface ServerDoseEntry {
   taken: boolean;
   takenAt?: string;
   missed?: boolean;
+  completelyMissed?: boolean;
+  inSnooze?: boolean;
+  currentRetry?: number;
+  nextRetryTime?: string;
   timeoutMinutes?: number;
+  retryIntervalMinutes?: number;
+  maxRetries?: number;
   notes?: string;
 }
 
@@ -42,7 +48,13 @@ function mapDosesToSlots(doses: ServerDoseEntry[]): MedicineSlot[] {
     taken: d.taken,
     takenAt: d.takenAt,
     missed: d.missed || false,
+    completelyMissed: d.completelyMissed || false,
+    inSnooze: d.inSnooze || false,
+    currentRetry: d.currentRetry || 0,
+    nextRetryTime: d.nextRetryTime,
     timeoutMinutes: Number(d.timeoutMinutes) || 5,
+    retryIntervalMinutes: Number(d.retryIntervalMinutes) || 5,
+    maxRetries: Number(d.maxRetries) || 3,
     presenceConfirmed: d.taken,   // If taken, presence was confirmed
     touchVerified: d.taken,       // If taken, touch was verified
     notes: d.notes,
@@ -58,7 +70,13 @@ function mapSlotsToServerDoses(slots: MedicineSlot[]): ServerDoseEntry[] {
     taken: s.taken,
     takenAt: s.takenAt,
     missed: s.missed || false,
+    completelyMissed: s.completelyMissed || false,
+    inSnooze: s.inSnooze || false,
+    currentRetry: s.currentRetry || 0,
+    nextRetryTime: s.nextRetryTime,
     timeoutMinutes: Number(s.timeoutMinutes) || 5,
+    retryIntervalMinutes: Number(s.retryIntervalMinutes) || 5,
+    maxRetries: Number(s.maxRetries) || 3,
     notes: s.notes,
   }));
 }
@@ -252,7 +270,36 @@ export default function App() {
         setMedicineSlots(prev => prev.map(s => {
           const boxMatches = s.slotNumber === Number(data.box);
           if (boxMatches && !s.taken) {
-            return { ...s, taken: true, takenAt: data.timestamp || new Date().toLocaleTimeString('en-US', { hour12: false }), presenceConfirmed: true, touchVerified: true };
+            return {
+              ...s,
+              taken: true,
+              inSnooze: false,
+              missed: false,
+              completelyMissed: false,
+              takenAt: data.timestamp || new Date().toLocaleTimeString('en-US', { hour12: false }),
+              presenceConfirmed: true,
+              touchVerified: true
+            };
+          }
+          return s;
+        }));
+      } catch { /* malformed SSE */ }
+    });
+
+    es.addEventListener('medicine_snooze', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        setMedicineSlots(prev => prev.map(s => {
+          const boxMatches = s.slotNumber === Number(data.box);
+          if (boxMatches && !s.taken) {
+            return {
+              ...s,
+              inSnooze: true,
+              missed: false,
+              currentRetry: data.currentRetry,
+              maxRetries: data.maxRetries,
+              nextRetryTime: data.nextRetryTime,
+            } as MedicineSlot;
           }
           return s;
         }));
@@ -265,7 +312,12 @@ export default function App() {
         setMedicineSlots(prev => prev.map(s => {
           const boxMatches = s.slotNumber === Number(data.box);
           if (boxMatches && !s.taken) {
-            return { ...s, missed: true } as MedicineSlot;
+            return {
+              ...s,
+              missed: true,
+              completelyMissed: Boolean(data.completelyMissed),
+              inSnooze: false,
+            } as MedicineSlot;
           }
           return s;
         }));

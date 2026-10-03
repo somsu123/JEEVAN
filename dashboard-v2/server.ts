@@ -139,7 +139,14 @@ export interface DoseEntry {
   taken: boolean;
   takenAt?: string;
   missed?: boolean;
+  completelyMissed?: boolean;
+  inSnooze?: boolean;
+  currentRetry?: number;
+  nextRetryTime?: string;
   timeoutMinutes?: number;
+  retryIntervalMinutes?: number;
+  maxRetries?: number;
+  notes?: string;
 }
 
 let inMemoryScheduleDoses: DoseEntry[] = [];
@@ -155,7 +162,7 @@ async function readSchedule(): Promise<DoseEntry[]> {
       const { _id, ...rest } = d;
       return rest as DoseEntry;
     });
-    if (result.length > 0) inMemoryScheduleDoses = result;
+    inMemoryScheduleDoses = result;
     return result;
   } catch {
     return inMemoryScheduleDoses;
@@ -1027,11 +1034,14 @@ setInterval(async () => {
 }, 60_000);
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MEDICINE TIMEOUT & MISSED DOSE WATCHDOG
 // ─────────────────────────────────────────────────────────────────────────────
-// Checks active doses every 10 seconds against current time and slot timeout (1 to 10 min).
-// When timeout is exceeded without intake, automatically marks dose as missed,
-// updates medbox_schedule, appends dose_events & medbox_events in MongoDB, and broadcasts SSE.
+// MEDICINE TIMEOUT & AUTO-REMINDER RETRY WATCHDOG
+// ─────────────────────────────────────────────────────────────────────────────
+// Checks active doses every 10 seconds against current time, slot timeout (1 to 10 min),
+// auto-reminder snooze retry interval (2 to 15 min), and max retry cycles (1 to 4 times).
+// When timeout is exceeded without intake:
+//   - If currentRetry < maxRetries: snoozes and schedules next auto-reminder alarm
+//   - If currentRetry >= maxRetries: marks as COMPLETELY MISSED for the day.
 setInterval(async () => {
   try {
     const schedule = await readSchedule();
@@ -1042,7 +1052,7 @@ setInterval(async () => {
     let scheduleModified = false;
 
     for (const dose of schedule) {
-      if (dose.taken || dose.missed) continue;
+      if (dose.taken || dose.completelyMissed) continue;
       if (!dose.time || !dose.time.includes(":")) continue;
 
       const [h, m] = dose.time.split(":").map(Number);
@@ -1050,58 +1060,114 @@ setInterval(async () => {
 
       const doseMinutes = h * 60 + m;
       const timeout = Math.min(10, Math.max(1, Number(dose.timeoutMinutes) || 5));
+      const retryInterval = Math.min(15, Math.max(2, Number(dose.retryIntervalMinutes) || 5));
+      const maxRetries = Math.min(4, Math.max(1, Number(dose.maxRetries) || 3));
       const expiryMinutes = doseMinutes + timeout;
       const minutesSinceDose = currentMinutes - doseMinutes;
 
       // When the current time exceeds dose scheduled time + timeout (within active 12-hour window)
       if (currentMinutes >= expiryMinutes && minutesSinceDose >= timeout && minutesSinceDose < 720) {
-        console.log(`[TIMEOUT WATCHDOG] ⚠️ Timeout expired for Box ${dose.boxNumber}: "${dose.medicine}" (scheduled ${dose.time}, limit ${timeout}m). Marking as MISSED.`);
-        dose.missed = true;
-        scheduleModified = true;
-
+        dose.currentRetry = (dose.currentRetry || 0) + 1;
         const compIdx = (Number(dose.boxNumber) || 1) - 1;
 
-        // 1. Log to dose_events (history/adherence)
-        await appendDoseEvent({
-          compartment: compIdx,
-          boxNumber: Number(dose.boxNumber) || 1,
-          label: dose.medicine,
-          scheduledTime: dose.time,
-          timeoutMinutes: timeout,
-          takenAt: null,
-          status: "missed",
-          reason: `Timeout limit of ${timeout} minutes exceeded`,
-        });
+        if (dose.currentRetry < maxRetries) {
+          // ── Auto-Reminder Snooze Retry ──────────────────────────────
+          const nextTotalMin = currentMinutes + retryInterval;
+          const nextH = Math.floor(nextTotalMin / 60) % 24;
+          const nextM = nextTotalMin % 60;
+          const nextRetryTimeStr = `${String(nextH).padStart(2, "0")}:${String(nextM).padStart(2, "0")}`;
 
-        // 2. Log to medbox_events
-        await appendMedboxEvent({
-          event: "DOSE_MISSED",
-          boxNumber: Number(dose.boxNumber) || 1,
-          medicine: dose.medicine,
-          dosage: dose.dosage,
-          timeoutMinutes: timeout,
-          timestamp: now.toISOString(),
-          deviceId: "medbox-01",
-        });
+          dose.inSnooze = true;
+          dose.missed = false; // in snooze, not final missed
+          dose.nextRetryTime = nextRetryTimeStr;
+          dose.time = nextRetryTimeStr; // re-arm schedule watchdog for next retry time
+          scheduleModified = true;
 
-        // 3. Broadcast SSE alerts to all connected clients
-        broadcastSSE("medicine_missed", {
-          box: Number(dose.boxNumber) || 1,
-          medicine: dose.medicine,
-          time: dose.time,
-          timeoutMinutes: timeout,
-          timestamp: now.toLocaleTimeString("en-US", { hour12: false }),
-        });
+          console.log(`[TIMEOUT WATCHDOG] ⚠️ Dose timeout for Box ${dose.boxNumber}: "${dose.medicine}". Snoozed (Attempt ${dose.currentRetry}/${maxRetries}). Next auto-reminder at ${nextRetryTimeStr}.`);
 
-        broadcastSSE("dose_event", {
-          compartment: compIdx,
-          label: dose.medicine,
-          status: "missed",
-          takenAt: null,
-        });
+          // 1. Log snooze event
+          await appendMedboxEvent({
+            event: "DOSE_MISSED_SNOOZE",
+            boxNumber: Number(dose.boxNumber) || 1,
+            medicine: dose.medicine,
+            dosage: dose.dosage,
+            retryAttempt: dose.currentRetry,
+            maxRetries: maxRetries,
+            nextRetryTime: nextRetryTimeStr,
+            timestamp: now.toISOString(),
+            deviceId: "medbox-01",
+          });
 
-        // 4. Send caregiver alert
-        sendMissedDoseAlert(dose.medicine, dose.time, dose.dosage).catch(() => { });
+          // 2. Broadcast SSE alerts to all connected clients
+          broadcastSSE("medicine_snooze", {
+            box: Number(dose.boxNumber) || 1,
+            medicine: dose.medicine,
+            currentRetry: dose.currentRetry,
+            maxRetries: maxRetries,
+            nextRetryTime: nextRetryTimeStr,
+            retryIntervalMinutes: retryInterval,
+          });
+
+          broadcastSSE("dose_event", {
+            compartment: compIdx,
+            label: dose.medicine,
+            status: "snoozed",
+            nextRetryTime: nextRetryTimeStr,
+          });
+
+        } else {
+          // ── Completely Missed for Today (Max Retries Reached) ─────────
+          dose.missed = true;
+          dose.completelyMissed = true;
+          dose.inSnooze = false;
+          scheduleModified = true;
+
+          console.log(`[TIMEOUT WATCHDOG] ❌ COMPLETELY MISSED for Box ${dose.boxNumber}: "${dose.medicine}" (Exceeded max ${maxRetries} reminders).`);
+
+          // 1. Log to dose_events (history/adherence)
+          await appendDoseEvent({
+            compartment: compIdx,
+            boxNumber: Number(dose.boxNumber) || 1,
+            label: dose.medicine,
+            scheduledTime: dose.time,
+            timeoutMinutes: timeout,
+            takenAt: null,
+            status: "missed",
+            reason: `Exceeded max ${maxRetries} reminder cycles`,
+          });
+
+          // 2. Log to medbox_events
+          await appendMedboxEvent({
+            event: "DOSE_COMPLETELY_MISSED",
+            boxNumber: Number(dose.boxNumber) || 1,
+            medicine: dose.medicine,
+            dosage: dose.dosage,
+            timeoutMinutes: timeout,
+            timestamp: now.toISOString(),
+            deviceId: "medbox-01",
+          });
+
+          // 3. Broadcast SSE alerts
+          broadcastSSE("medicine_missed", {
+            box: Number(dose.boxNumber) || 1,
+            medicine: dose.medicine,
+            time: dose.time,
+            timeoutMinutes: timeout,
+            completelyMissed: true,
+            timestamp: now.toLocaleTimeString("en-US", { hour12: false }),
+          });
+
+          broadcastSSE("dose_event", {
+            compartment: compIdx,
+            label: dose.medicine,
+            status: "missed",
+            completelyMissed: true,
+            takenAt: null,
+          });
+
+          // 4. Send caregiver alert
+          sendMissedDoseAlert(dose.medicine, dose.time, dose.dosage).catch(() => { });
+        }
       }
     }
 
@@ -1118,10 +1184,15 @@ setInterval(async () => {
           taken: d.taken,
           takenAt: d.takenAt,
           missed: d.missed,
+          completelyMissed: d.completelyMissed,
+          inSnooze: d.inSnooze,
+          currentRetry: d.currentRetry,
+          nextRetryTime: d.nextRetryTime,
           timeoutMinutes: d.timeoutMinutes || 5,
+          retryIntervalMinutes: d.retryIntervalMinutes || 5,
+          maxRetries: d.maxRetries || 3,
         }))
       });
-      console.log(`[TIMEOUT WATCHDOG] ✅ Updated medbox_schedule after marking missed doses.`);
     }
   } catch (err: any) {
     console.error("[TIMEOUT WATCHDOG] Error checking dose timeouts:", err?.message);
@@ -1689,15 +1760,6 @@ function resolveAllFallEventsBySourceLocally(source: string) {
   }
 }
 
-function saveScheduleLocally(doses: DoseEntry[]) {
-  const filePath = path.join(process.cwd(), "data", "schedule.json");
-  try {
-    fs.writeFileSync(filePath, JSON.stringify(doses, null, 2), "utf-8");
-  } catch (err: any) {
-    console.error("Failed to write local schedule file:", err.message);
-  }
-}
-
 function saveMedicinesLocally(medicines: any[]) {
   const filePath = path.join(process.cwd(), "data", "medicines.json");
   let existing: any[] = [];
@@ -1768,163 +1830,315 @@ function saveReportLocally(report: { fileName: string; summary: string; scanDate
   }
 }
 
-/** Helper: build a rich patient data snapshot from all sources (Flask / Firebase / Local files) */
+/** Helper: build a rich patient data snapshot from MongoDB schemas and live BPM telemetry */
 async function buildPatientSnapshot() {
-  const [heartRes, medRes, eventsRes, reportsRes] = await Promise.allSettled([
-    flaskGet("/api/heartrate/history?limit=120"),
-    flaskGet("/api/medicines"),
-    flaskGet("/api/events"),
-    flaskGet("/api/reports"),
-  ]);
+  // 1. Fetch from MongoDB collections
+  let scheduleDocs: any[] = [];
+  let medboxEvents: any[] = [];
+  let doseEvents: any[] = [];
+  let prescriptions: any[] = [];
+  let scannedReports: any[] = [];
+  let medicines: any[] = [];
+  let vitalsLog: any[] = [];
 
-  // Read local file fallbacks
-  let localBpm: any[] = [];
-  try {
-    const p = path.join(process.cwd(), "data", "bpm.json");
-    if (fs.existsSync(p)) localBpm = JSON.parse(fs.readFileSync(p, "utf-8"));
-  } catch { }
-
-  let localMeds: any[] = [];
-  try {
-    const p = path.join(process.cwd(), "data", "medicines.json");
-    if (fs.existsSync(p)) localMeds = JSON.parse(fs.readFileSync(p, "utf-8"));
-  } catch { }
-
-  let localEvents: any[] = [];
-  try {
-    const p = path.join(process.cwd(), "data", "events.json");
-    if (fs.existsSync(p)) localEvents = JSON.parse(fs.readFileSync(p, "utf-8"));
-  } catch { }
-
-  let localReports: any[] = [];
-  try {
-    const p = path.join(process.cwd(), "data", "reports.json");
-    if (fs.existsSync(p)) localReports = JSON.parse(fs.readFileSync(p, "utf-8"));
-  } catch { }
-
-  let localFallEvents: any[] = [];
-  try {
-    const p = path.join(process.cwd(), "data", "fall_events.json");
-    if (fs.existsSync(p)) localFallEvents = JSON.parse(fs.readFileSync(p, "utf-8"));
-  } catch { }
-
-  const bpmHistory: Array<{ bpm: number; timestamp: number }> =
-    heartRes.status === "fulfilled" && heartRes.value.history?.length
-      ? heartRes.value.history
-      : localBpm;
-  const medicines: any[] =
-    medRes.status === "fulfilled" && medRes.value.medicines?.length
-      ? medRes.value.medicines
-      : localMeds;
-  const events: any[] =
-    eventsRes.status === "fulfilled" && Array.isArray(eventsRes.value) && eventsRes.value.length
-      ? eventsRes.value
-      : localEvents;
-  const reports: any[] =
-    reportsRes.status === "fulfilled" && reportsRes.value.reports?.length
-      ? reportsRes.value.reports
-      : localReports;
-
-  // — BPM analytics —
-  const bpmVals = bpmHistory.map((b) => b.bpm || (b as any).value).filter((v) => typeof v === "number" && v > 0);
-  const avgBpm = bpmVals.length ? Math.round(bpmVals.reduce((a, b) => a + b, 0) / bpmVals.length) : null;
-  const maxBpm = bpmVals.length ? Math.max(...bpmVals) : null;
-  const minBpm = bpmVals.length ? Math.min(...bpmVals) : null;
-  const abnormalBpm = bpmVals.filter((v) => v > 100 || v < 50);
-
-  // — Fall analytics (from Firebase and Local files) —
-  let dbFalls: any[] = [];
-  try {
-    dbFalls = await getFallEvents(200);
-  } catch {
-    dbFalls = localFallEvents;
+  if (mongoDb) {
+    try {
+      const [sched, mEvents, dEvents, rx, reports, meds, vLog] = await Promise.all([
+        mongoDb.collection("medbox_schedule").find({}).toArray().catch(() => []),
+        mongoDb.collection("medbox_events").find({}).sort({ loggedAt: -1 }).limit(50).toArray().catch(() => []),
+        mongoDb.collection("dose_events").find({}).sort({ loggedAt: -1 }).limit(50).toArray().catch(() => []),
+        mongoDb.collection("prescriptions").find({}).sort({ createdAt: -1 }).toArray().catch(() => []),
+        mongoDb.collection("scanned_reports").find({}).sort({ createdAt: -1 }).toArray().catch(() => []),
+        mongoDb.collection("medicines").find({}).toArray().catch(() => []),
+        mongoDb.collection("vitals_log").find({}).sort({ timestamp: -1 }).limit(200).toArray().catch(() => []),
+      ]);
+      scheduleDocs = sched;
+      medboxEvents = mEvents;
+      doseEvents = dEvents;
+      prescriptions = rx;
+      scannedReports = reports;
+      medicines = meds;
+      vitalsLog = vLog;
+    } catch (err: any) {
+      console.warn("[DICTATOR] MongoDB snapshot error:", err.message);
+    }
   }
 
-  const allFalls = [
-    ...(dbFalls.length ? dbFalls : localFallEvents),
-    ...events.filter((e) => e.type === "fall"),
+  // If MongoDB is not connected, fallback to in-memory schedule
+  if (!fireReady() && !scheduleDocs.length && inMemoryScheduleDoses.length) {
+    scheduleDocs = inMemoryScheduleDoses;
+  }
+
+  // 2. Fetch live BPM & SpO2 from bpm-server (port 3001)
+  let liveBpmHistory: any[] = [];
+  let liveBpmStatus: any = null;
+  try {
+    const [histRes, statusRes] = await Promise.allSettled([
+      fetch("http://localhost:3001/api/bpm/history?n=300"),
+      fetch("http://localhost:3001/api/bpm/status"),
+    ]);
+    if (histRes.status === "fulfilled" && histRes.value.ok) {
+      const j = await histRes.value.json();
+      liveBpmHistory = j.history || [];
+    }
+    if (statusRes.status === "fulfilled" && statusRes.value.ok) {
+      liveBpmStatus = await statusRes.value.json();
+    }
+  } catch { }
+
+  // 3. Process BPM & SpO2 vitals strictly from MongoDB vitals_log and live telemetry
+  const combinedVitals = [
+    ...liveBpmHistory.map((h: any) => ({
+      bpm: typeof h.bpm === "number" && h.bpm > 0 ? h.bpm : (typeof h.value === "number" && h.value > 0 ? h.value : null),
+      spo2: typeof h.spo2 === "number" && h.spo2 > 0 ? h.spo2 : null,
+      timestamp: h.timestamp || h.ts,
+    })),
+    ...vitalsLog.map((v: any) => ({
+      bpm: typeof v.bpm === "number" && v.bpm > 0 ? v.bpm : null,
+      spo2: typeof v.spo2 === "number" && v.spo2 > 0 ? v.spo2 : null,
+      timestamp: v.timestamp || (v.isoTimestamp ? new Date(v.isoTimestamp).getTime() : Date.now()),
+    })),
   ];
 
-  const activeFallCount = allFalls.filter((f) => f.status === "active").length;
-  const now = Date.now();
-  const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
-  const recentFalls = allFalls.filter((f) => {
-    const ts = f.isoTimestamp
-      ? new Date(f.isoTimestamp).getTime()
-      : f.timestamp * 1000;
-    return ts >= thirtyDaysAgo;
+  const bpmVals = combinedVitals
+    .map((v) => v.bpm)
+    .filter((b): b is number => typeof b === "number" && b >= 35 && b <= 220);
+
+  const spo2Vals = combinedVitals
+    .map((v) => v.spo2)
+    .filter((s): s is number => typeof s === "number" && s >= 60 && s <= 100);
+
+  // Purely dynamic calculations — ZERO HARDCODED FALLBACK NUMBERS
+  const avgBpm = bpmVals.length
+    ? Math.round(bpmVals.reduce((a, b) => a + b, 0) / bpmVals.length)
+    : (typeof liveBpmStatus?.lastBpm === "number" && liveBpmStatus.lastBpm > 0 ? liveBpmStatus.lastBpm : null);
+  const maxBpm = bpmVals.length
+    ? Math.max(...bpmVals)
+    : (typeof liveBpmStatus?.lastBpm === "number" && liveBpmStatus.lastBpm > 0 ? liveBpmStatus.lastBpm : null);
+  const minBpm = bpmVals.length
+    ? Math.min(...bpmVals)
+    : (typeof liveBpmStatus?.lastBpm === "number" && liveBpmStatus.lastBpm > 0 ? liveBpmStatus.lastBpm : null);
+  const avgSpo2 = spo2Vals.length
+    ? Math.round(spo2Vals.reduce((a, b) => a + b, 0) / spo2Vals.length)
+    : (typeof liveBpmStatus?.lastSpo2 === "number" && liveBpmStatus.lastSpo2 > 0 ? liveBpmStatus.lastSpo2 : null);
+  const currentBpm = typeof liveBpmStatus?.lastBpm === "number" && liveBpmStatus.lastBpm > 0
+    ? liveBpmStatus.lastBpm
+    : (bpmVals.length ? bpmVals[0] : null);
+  const currentSpo2 = typeof liveBpmStatus?.lastSpo2 === "number" && liveBpmStatus.lastSpo2 > 0
+    ? liveBpmStatus.lastSpo2
+    : (spo2Vals.length ? spo2Vals[0] : null);
+  const abnormalBpmCount = bpmVals.filter((v) => v > 100 || v < 55).length;
+  const abnormalSpo2Count = spo2Vals.filter((v) => v < 92).length;
+
+  // 4. Process Medicine Box & Schedule Analytics purely from medbox_schedule
+  const scheduledDoses = scheduleDocs.map((d: any) => ({
+    boxNumber: d.boxNumber,
+    medicine: d.medicine || d.name || "Medicine",
+    dosage: d.dosage || "",
+    time: d.time || "",
+    timeoutMinutes: typeof d.timeoutMinutes === "number" ? d.timeoutMinutes : 5,
+    taken: Boolean(d.taken),
+    takenAt: d.takenAt || null,
+    missed: Boolean(d.missed),
+  }));
+
+  const dosesTaken = scheduledDoses.filter((d) => d.taken).length;
+  const dosesMissed = scheduledDoses.filter((d) => d.missed).length;
+  const totalSlots = scheduledDoses.length;
+  const dosesPending = scheduledDoses.filter((d) => !d.taken && !d.missed).length;
+  const adherencePct = (dosesTaken + dosesMissed) > 0
+    ? Math.round((dosesTaken / (dosesTaken + dosesMissed)) * 100)
+    : (totalSlots > 0 ? (dosesTaken > 0 ? 100 : 0) : null);
+
+  // 5. Process Prescriptions & Scanned Clinical Reports purely from MongoDB
+  const allPrescriptionMeds: any[] = [];
+  prescriptions.forEach((p: any) => {
+    if (Array.isArray(p.medicines)) {
+      p.medicines.forEach((m: any) => {
+        allPrescriptionMeds.push({
+          ...m,
+          prescriptionNumber: p.prescriptionNumber || null,
+          date: p.date || p.createdAt || null,
+        });
+      });
+    }
   });
 
+  const parsedReports = scannedReports.map((r: any) => ({
+    fileName: r.fileName || "Clinical Lab Report",
+    scanDate: r.scanDate || r.createdAt || "Recent",
+    overview: r.overview || r.summary || "",
+    metrics: r.metrics || [],
+    actions: r.actions || [],
+    doctorQuestions: r.doctorQuestions || [],
+  }));
+
   return {
-    bpmHistory,
-    medicines,
-    events,
-    reports,
+    vitals: {
+      avgBpm,
+      maxBpm,
+      minBpm,
+      avgSpo2,
+      currentBpm,
+      currentSpo2,
+      abnormalBpmCount,
+      abnormalSpo2Count,
+      totalReadings: bpmVals.length,
+    },
+    medbox: {
+      scheduledDoses,
+      totalSlots,
+      dosesTaken,
+      dosesMissed,
+      dosesPending,
+      adherencePct,
+      recentEvents: medboxEvents.slice(0, 8),
+    },
+    prescriptions: {
+      totalPrescriptions: prescriptions.length,
+      allMedicines: allPrescriptionMeds.length ? allPrescriptionMeds : medicines,
+    },
+    clinicalReports: parsedReports,
     analytics: {
       avgBpm,
       maxBpm,
       minBpm,
-      abnormalBpmCount: abnormalBpm.length,
-      totalFalls: allFalls.length,
-      activeFalls: activeFallCount,
-      recentFalls30Days: recentFalls.length,
+      avgSpo2,
+      currentBpm,
+      currentSpo2,
+      totalSlots,
+      dosesTaken,
+      dosesMissed,
+      dosesPending,
+      adherencePct,
+      abnormalBpmCount,
+      totalPrescriptions: prescriptions.length,
+      totalReports: parsedReports.length,
     },
   };
 }
 
-/** Helper: build the clinical summary prompt */
+/** Helper: build the clinical summary prompt for Ollama */
 function buildDictatorPrompt(snap: Awaited<ReturnType<typeof buildPatientSnapshot>>): string {
-  const { analytics, medicines, reports, events } = snap;
+  const { vitals, medbox, prescriptions, clinicalReports } = snap;
 
-  const medLines = medicines.length
-    ? medicines
-      .map((m) => `${m.name}${m.dosage ? " " + m.dosage : ""}${m.times?.length ? " at " + m.times.join(", ") : ""}${m.purpose ? " (" + m.purpose + ")" : ""}`)
-      .join("; ")
-    : "No prescriptions found in patient records.";
+  const vitalsText = vitals.avgBpm !== null
+    ? `Average heart rate recorded in MongoDB is ${vitals.avgBpm} BPM (observed range: ${vitals.minBpm} to ${vitals.maxBpm} BPM) with an average SpO2 of ${vitals.avgSpo2 ?? "normal"} percent. Current live pulse is ${vitals.currentBpm ?? vitals.avgBpm} BPM. ${vitals.abnormalBpmCount > 0 ? `${vitals.abnormalBpmCount} anomalous readings were logged.` : "Cardiac rhythm and pulse stability are steady."}`
+    : "No heart rate or SpO2 telemetry readings are currently stored in MongoDB. Telemetry sensors are awaiting transmission.";
 
-  const reportLines = reports.slice(0, 3).length
-    ? reports
-      .slice(0, 3)
-      .map((r: any) => `[${r.scanDate || "Unknown date"}] ${r.fileName}: ${(r.overview || r.summary || "").slice(0, 200)}`)
-      .join("\n")
-    : "No scanned reports available.";
+  const medboxText = medbox.totalSlots > 0
+    ? `The smart medicine box has ${medbox.totalSlots} configured dose slot${medbox.totalSlots === 1 ? "" : "s"} in MongoDB with 1 to 10 minute timeout supervision. Today, ${medbox.dosesTaken} dose${medbox.dosesTaken === 1 ? "" : "s"} have been taken and ${medbox.dosesMissed} missed, achieving a ${medbox.adherencePct ?? 100} percent medication adherence rate.`
+    : "No medicine box schedule or slots are currently registered in MongoDB.";
 
-  const recentEvents = events.slice(0, 5).map((e: any) => e.message || "").filter(Boolean).join("; ") || "No recent events.";
+  const doseDetails = medbox.scheduledDoses.length
+    ? medbox.scheduledDoses.map((d) =>
+      `Box ${d.boxNumber} (${d.medicine} ${d.dosage} at ${d.time}): ${d.taken ? `Taken at ${d.takenAt || "scheduled time"}` : (d.missed ? `Missed after ${d.timeoutMinutes} minute timeout` : `Pending with ${d.timeoutMinutes}m timeout`)}`
+    ).join("; ")
+    : "None";
 
-  const bpmSummary = analytics.avgBpm !== null
-    ? `Average ${analytics.avgBpm} BPM (Max ${analytics.maxBpm}, Min ${analytics.minBpm}). ${analytics.abnormalBpmCount} abnormal readings detected.`
-    : "No heart rate data available in records.";
+  const rxDetails = prescriptions.allMedicines.length
+    ? prescriptions.allMedicines.slice(0, 5).map((m: any) => `${m.name}${m.dosage ? " " + m.dosage : ""}${m.frequency ? " (" + m.frequency + ")" : ""}${m.suggestedTime ? " at " + m.suggestedTime : ""}`).join(", ")
+    : "No prescription records found in the database.";
 
-  return `You are Mitra, a senior clinical AI assistant briefing a physician. Generate a professional, structured, doctor-oriented verbal summary of the following patient data. Be factual, concise, and use natural spoken English. Maximum 8 sentences. Do NOT use markdown, bullet points, or headers. Do NOT hallucinate — if data is missing, say so clearly.
+  const reportDetails = clinicalReports.length
+    ? clinicalReports.slice(0, 2).map((r: any) => `${r.fileName}: ${r.overview ? r.overview.slice(0, 140) : "Clinical metrics in normal range"}`).join("; ")
+    : "No scanned lab reports found in the database.";
 
-PATIENT: Use only identity and history explicitly present in the stored records. Do not assume an age, diagnosis, or identity.
+  return `You are Mitra, a clinical AI voice assistant for JEEVAN elder care.
+Generate a spoken clinical briefing based ONLY on the actual MongoDB data below. If records are empty, explicitly state that the database is freshly initialized and awaiting data.
 
-HEART RATE (last 120 readings): ${bpmSummary}
+DATABASE STATE (FROM MONGODB):
+1. Vitals & Heart Rate Telemetry: ${vitalsText}
+2. Smart Medicine Box & Adherence: ${medboxText}
+   Slot Details: ${doseDetails}
+3. Prescriptions & Active Regimen: ${rxDetails}
+4. Clinical Lab Reports: ${reportDetails}
 
-FALL EVENTS: ${analytics.recentFalls30Days} fall(s) in the last 30 days. ${analytics.activeFalls} currently active/unresolved. ${analytics.totalFalls} total recorded falls.
-
-CURRENT MEDICATIONS: ${medLines}
-
-RECENT LAB REPORTS:
-${reportLines}
-
-RECENT SYSTEM EVENTS: ${recentEvents}
-
-Provide the verbal clinical briefing now. Begin with "Doctor," and end with a recommendation for the physician's attention.`;
+INSTRUCTIONS FOR AUDIO BRIEFING:
+- Speak in natural, fluent spoken English.
+- Output MUST be 3 to 5 concise sentences suitable for spoken audio playback.
+- Strictly cover: (1) Average daily BPM and SpO2 if present in records or state awaiting telemetry, (2) Medicines taken and missed in the smart medicine box with adherence rate, and (3) Active prescription instructions and clinical lab report summary from MongoDB.
+- DO NOT use any markdown characters (no asterisks, no bullets, no hashes, no brackets, no bolding).
+- DO NOT invent, hallucinate, or assume fake data if records are empty.
+- DO NOT mention falls, fall detection, motion sensors, or camera systems under any circumstances.
+- Begin with "Good day, here is the live clinical update." and finish with an encouraging doctor recommendation.`;
 }
+
+/** Helper: build doctor Q&A prompt grounded strictly in MongoDB schemas */
+function buildQAPrompt(snap: Awaited<ReturnType<typeof buildPatientSnapshot>>, question: string): string {
+  const { vitals, medbox, prescriptions, clinicalReports } = snap;
+
+  const doseDetails = medbox.scheduledDoses.length
+    ? medbox.scheduledDoses.map((d) =>
+      `Box ${d.boxNumber} (${d.medicine} ${d.dosage} at ${d.time}): ${d.taken ? `Taken at ${d.takenAt || "on time"}` : (d.missed ? `Missed after ${d.timeoutMinutes}m timeout` : `Pending with ${d.timeoutMinutes}m timeout`)}`
+    ).join("; ")
+    : "No slots configured in database.";
+
+  const rxDetails = prescriptions.allMedicines.length
+    ? prescriptions.allMedicines.map((m: any) =>
+      `${m.name} ${m.dosage || ""} - ${m.frequency || "daily"}${m.suggestedTime ? ` at ${m.suggestedTime}` : ""}`
+    ).join("; ")
+    : "No prescriptions in database.";
+
+  const reportDetails = clinicalReports.length
+    ? clinicalReports.map((r: any) =>
+      `Report [${r.fileName}]: ${r.overview} Metrics: ${(r.metrics || []).map((m: any) => `${m.name}: ${m.value} (${m.status})`).join(", ")} Actions: ${(r.actions || []).join(", ")}`
+    ).join("\n")
+    : "No lab reports in database.";
+
+  const vitalsSummary = vitals.avgBpm !== null
+    ? `Average ${vitals.avgBpm} BPM (Range ${vitals.minBpm}-${vitals.maxBpm} BPM), Average SpO2 ${vitals.avgSpo2 ?? "N/A"}%, Current Pulse ${vitals.currentBpm ?? vitals.avgBpm} BPM. Abnormal readings: ${vitals.abnormalBpmCount}.`
+    : "No vitals readings recorded in MongoDB yet.";
+
+  const medboxSummary = medbox.totalSlots > 0
+    ? `${medbox.dosesTaken} of ${medbox.totalSlots} doses taken (${medbox.adherencePct ?? 100}% adherence). ${medbox.dosesMissed} missed.`
+    : "No active medicine schedule in MongoDB.";
+
+  return `You are Mitra, an intelligent AI Voice Assistant for JEEVAN smart elder care.
+Answer the user question accurately using ONLY the live patient telemetry and MongoDB records below.
+
+DATABASE STATE (MONGODB):
+- Heart Rate (BPM) & SpO2: ${vitalsSummary}
+- Medicine Box & Adherence: ${medboxSummary}
+- Medbox Slots: ${doseDetails}
+- Prescriptions: ${rxDetails}
+- Clinical Lab Reports: ${reportDetails}
+
+RULES:
+- Answer in 2 to 4 concise, clear sentences in spoken conversational English.
+- DO NOT use markdown symbols (no asterisks, no bullets, no hashes).
+- DO NOT invent data if MongoDB is empty; if data is not recorded, state: "Information is currently not recorded in the database."
+- DO NOT mention falls, fall sensors, or cameras under any circumstances. Strictly focus on medicine box, heart rate / SpO2 vitals, prescriptions, and lab test reports.
+
+QUESTION: ${question.trim()}
+
+Answer:`;
+}
+
 
 // POST /api/ai-dictator/trigger — Local AI clinical summary (Ollama text model)
 app.post("/api/ai-dictator/trigger", async (_req, res) => {
   try {
     if (!(await isOllamaReady())) return res.status(503).json({ error: "Local AI (Ollama) not running." });
-    console.log("[DICTATOR] Compiling patient data from MongoDB...");
+    console.log("[DICTATOR] Compiling patient telemetry & medication data from MongoDB...");
     const snap = await buildPatientSnapshot();
     const prompt = buildDictatorPrompt(snap);
-    console.log("[DICTATOR] Sending to Ollama text model...");
-    const { text: summary, model: usedModel } = await generateWithText(prompt);
-    if (!summary) throw new Error("Ollama returned an empty summary.");
-    console.log(`[DICTATOR] Summary via ${usedModel}: ${summary.slice(0, 120)}...`);
-    return res.json({ success: true, summary, patientName: null, analytics: snap.analytics });
+    console.log("[DICTATOR] Sending clinical snapshot to Ollama text model...");
+    const { text: rawSummary, model: usedModel } = await generateWithText(prompt);
+    if (!rawSummary) throw new Error("Ollama returned an empty summary.");
+    
+    // Clean any stray markdown for voice playback
+    const summary = rawSummary.replace(/[*#_`[\]]/g, "").trim();
+    console.log(`[DICTATOR] Summary generated via ${usedModel}: ${summary.slice(0, 120)}...`);
+    return res.json({
+      success: true,
+      summary,
+      analytics: snap.analytics,
+      vitals: snap.vitals,
+      medbox: snap.medbox,
+      prescriptions: snap.prescriptions,
+      clinicalReports: snap.clinicalReports,
+    });
   } catch (err: any) {
     console.error("[DICTATOR] Summary generation failed:", err.message);
     return res.status(500).json({ error: `AI Dictator failed: ${err.message}` });
@@ -1939,30 +2153,18 @@ app.post("/api/ai-dictator/ask", async (req, res) => {
     if (!(await isOllamaReady())) return res.status(503).json({ error: "Local AI (Ollama) not running." });
 
     const snap = await buildPatientSnapshot();
-    const { analytics, medicines, reports, events } = snap;
-    const medLines = medicines.length
-      ? medicines.map((m: any) => `${m.name} ${m.dosage || ""} -- ${m.purpose || "purpose unknown"}`).join("; ")
-      : "None on record.";
-    const recentReportSummaries = reports.slice(0, 5).map((r: any) => `${r.fileName} (${r.scanDate || "?"}): ${(r.overview || r.summary || "").slice(0, 300)}`).join("\n");
-    const recentEvents = events.slice(0, 10).map((e: any) => `[${e.type}] ${e.message}`).join("; ");
+    const qaPrompt = buildQAPrompt(snap, question);
 
-    const qaPrompt = `You are Mitra, a clinical AI for ElderCare. A physician is asking about the patient represented by the records below. Do not assume identity or age.
-Answer ONLY from the patient data below. If unavailable, say: "Information not available in patient records." 2-4 sentences, factual, professional.
-
-PATIENT DATA:
-Heart Rate: Avg ${analytics.avgBpm ?? "N/A"} BPM, Max ${analytics.maxBpm ?? "N/A"}, Min ${analytics.minBpm ?? "N/A"}. Abnormal: ${analytics.abnormalBpmCount}.
-Falls (last 30d): ${analytics.recentFalls30Days}. Total: ${analytics.totalFalls}. Active: ${analytics.activeFalls}.
-Medications: ${medLines}
-Recent Reports:\n${recentReportSummaries || "No reports."}
-Recent Events: ${recentEvents || "None."}
-
-QUESTION: ${question.trim()}
-
-Answer:`;
-
-    const { text: answer, model: usedModel } = await generateWithText(qaPrompt);
-    console.log(`[DICTATOR/ASK] Answered via ${usedModel}`);
-    return res.json({ success: true, answer: answer || "Information not available in patient records." });
+    const { text: rawAnswer, model: usedModel } = await generateWithText(qaPrompt);
+    const answer = (rawAnswer || "Information not available in patient records.").replace(/[*#_`[\]]/g, "").trim();
+    console.log(`[DICTATOR/ASK] Answered via ${usedModel}: ${answer.slice(0, 100)}...`);
+    return res.json({
+      success: true,
+      answer,
+      analytics: snap.analytics,
+      vitals: snap.vitals,
+      medbox: snap.medbox,
+    });
   } catch (err: any) {
     console.error("[DICTATOR/ASK] Q&A failed:", err.message);
     return res.status(500).json({ error: `Q&A failed: ${err.message}` });
@@ -2824,6 +3026,8 @@ app.post("/api/rx/confirm/:changeId", async (req, res) => {
     customMinute,
     customTime,
     timeoutMinutes,
+    retryIntervalMinutes,
+    maxRetries,
     proposedLabel,
     extractedMed,
     prescriptionId,
@@ -2836,6 +3040,8 @@ app.post("/api/rx/confirm/:changeId", async (req, res) => {
     customMinute?: number;
     customTime?: string; // e.g. "01:35"
     timeoutMinutes?: number;
+    retryIntervalMinutes?: number;
+    maxRetries?: number;
     proposedLabel?: string;
     extractedMed?: any;
     prescriptionId?: string;
@@ -3061,6 +3267,9 @@ app.post("/api/rx/confirm/:changeId", async (req, res) => {
     const currentSchedule = await readSchedule();
     const formattedTime = `${String(targetHour).padStart(2, "0")}:${String(targetMinute).padStart(2, "0")}`;
     const parsedTimeout = Math.min(10, Math.max(1, Number(timeoutMinutes) || Number(change.timeoutMinutes) || 5));
+    const parsedRetryInterval = Math.min(15, Math.max(2, Number(retryIntervalMinutes) || Number((change as any).retryIntervalMinutes) || 5));
+    const parsedMaxRetries = Math.min(4, Math.max(1, Number(maxRetries) || Number((change as any).maxRetries) || 3));
+
     const newDose: DoseEntry = {
       boxNumber: comp + 1, // 1-based index (0 -> 1, 1 -> 2, etc.)
       medicine: change.extractedMed?.name || change.proposedLabel.split(" - ")[0],
@@ -3068,7 +3277,12 @@ app.post("/api/rx/confirm/:changeId", async (req, res) => {
       time: formattedTime,
       taken: false,
       missed: false,
+      completelyMissed: false,
+      inSnooze: false,
+      currentRetry: 0,
       timeoutMinutes: parsedTimeout,
+      retryIntervalMinutes: parsedRetryInterval,
+      maxRetries: parsedMaxRetries,
     };
     const updatedSchedule = currentSchedule.filter(d => d.boxNumber !== newDose.boxNumber);
     if (change.proposedLabel && change.proposedLabel !== "(empty)") {
@@ -3086,7 +3300,13 @@ app.post("/api/rx/confirm/:changeId", async (req, res) => {
         taken: d.taken,
         takenAt: d.takenAt,
         missed: d.missed,
+        completelyMissed: d.completelyMissed,
+        inSnooze: d.inSnooze,
+        currentRetry: d.currentRetry,
+        nextRetryTime: d.nextRetryTime,
         timeoutMinutes: d.timeoutMinutes || 5,
+        retryIntervalMinutes: d.retryIntervalMinutes || 5,
+        maxRetries: d.maxRetries || 3,
       }))
     });
 

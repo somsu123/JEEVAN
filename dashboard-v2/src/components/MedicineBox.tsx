@@ -19,6 +19,7 @@ import {
   Package,
   Trash2,
   Timer,
+  RefreshCw,
 } from 'lucide-react';
 import { MedicineSlot, MedboxStatus, MedboxDeviceState } from '../types';
 
@@ -35,16 +36,22 @@ interface MedicineBoxProps {
 }
 
 // ─── Countdown hook ───────────────────────────────────────────────────────────
-function useCountdown(scheduledTime: string, taken: boolean, missed: boolean): string {
+function useCountdown(scheduledTime?: string, taken?: boolean, missed?: boolean): string {
   const [countdown, setCountdown] = useState('');
 
   useEffect(() => {
     if (taken)  { setCountdown('Taken ✓'); return; }
     if (missed) { setCountdown('Missed'); return; }
+    if (!scheduledTime || typeof scheduledTime !== 'string' || !scheduledTime.includes(':')) {
+      setCountdown('--:--');
+      return;
+    }
 
     const tick = () => {
       const now = new Date();
-      const [h, m] = scheduledTime.split(':').map(Number);
+      const parts = scheduledTime.split(':');
+      const h = Number(parts[0]) || 0;
+      const m = Number(parts[1]) || 0;
       const target = new Date(now);
       target.setHours(h, m, 0, 0);
       if (target <= now) target.setDate(target.getDate() + 1);
@@ -62,8 +69,13 @@ function useCountdown(scheduledTime: string, taken: boolean, missed: boolean): s
   return countdown;
 }
 
-function formatTime12(time24: string): string {
-  const [h, m] = time24.split(':').map(Number);
+function formatTime12(time24?: string | null): string {
+  if (!time24 || typeof time24 !== 'string' || !time24.includes(':')) {
+    return time24 || '--:--';
+  }
+  const parts = time24.split(':');
+  const h = Number(parts[0]) || 0;
+  const m = Number(parts[1]) || 0;
   const period = h >= 12 ? 'PM' : 'AM';
   const h12 = h % 12 || 12;
   return `${h12}:${String(m).padStart(2, '0')} ${period}`;
@@ -79,12 +91,13 @@ function formatUptime(seconds: number): string {
 
 // ─── Device State Badge ───────────────────────────────────────────────────────
 const STATE_CONFIG: Record<MedboxDeviceState, { label: string; color: string; pulse: boolean }> = {
-  IDLE:       { label: 'Idle / Ready',       color: 'bg-slate-100 text-slate-700 border-slate-200',         pulse: false },
-  REMINDER:   { label: 'Dose Reminder',      color: 'bg-amber-50 text-amber-800 border-amber-300 font-bold', pulse: true  },
-  DISPENSING: { label: 'Dispensing Now',     color: 'bg-blue-50 text-blue-700 border-blue-300 font-bold',   pulse: true  },
-  CONFIRMED:  { label: 'Dose Taken',         color: 'bg-emerald-50 text-emerald-700 border-emerald-300',   pulse: false },
-  MISSED:     { label: 'Dose Missed',        color: 'bg-rose-50 text-rose-700 border-rose-300',             pulse: false },
-  UNKNOWN:    { label: 'Standby',            color: 'bg-slate-100 text-slate-500 border-slate-200',         pulse: false },
+  IDLE:       { label: 'Idle / Ready',          color: 'bg-slate-100 text-slate-700 border-slate-200',         pulse: false },
+  REMINDER:   { label: 'Dose Reminder',         color: 'bg-amber-50 text-amber-800 border-amber-300 font-bold', pulse: true  },
+  DISPENSING: { label: 'Dispensing Now',        color: 'bg-blue-50 text-blue-700 border-blue-300 font-bold',   pulse: true  },
+  CONFIRMED:  { label: 'Dose Taken',            color: 'bg-emerald-50 text-emerald-700 border-emerald-300',   pulse: false },
+  MISSED:     { label: 'Dose Missed',           color: 'bg-rose-50 text-rose-700 border-rose-300',             pulse: false },
+  SNOOZE:     { label: 'Auto-Reminder Snooze',  color: 'bg-purple-50 text-purple-700 border-purple-300 font-bold', pulse: true },
+  UNKNOWN:    { label: 'Standby',               color: 'bg-slate-100 text-slate-500 border-slate-200',         pulse: false },
 };
 
 function StateBadge({ state }: { state: MedboxDeviceState }) {
@@ -211,12 +224,14 @@ function BoxCard({
     'from-violet-600 to-purple-600',
     'from-amber-600 to-orange-600',
   ];
-  const gradient = boxColors[(slot.slotNumber - 1) % boxColors.length];
+  const gradient = boxColors[Math.max(0, (slot?.slotNumber || 1) - 1) % boxColors.length];
 
   // Status badge config
-  type SlotStatus = 'TAKEN' | 'MISSED' | 'DISPENSING' | 'PENDING';
+  type SlotStatus = 'TAKEN' | 'MISSED' | 'SNOOZED' | 'DISPENSING' | 'PENDING';
   const status: SlotStatus = slot.taken
     ? 'TAKEN'
+    : (slot as any).inSnooze
+    ? 'SNOOZED'
     : missed
     ? 'MISSED'
     : isDispensing
@@ -225,7 +240,8 @@ function BoxCard({
 
   const statusLabels: Record<SlotStatus, string> = {
     TAKEN: 'Taken ✓',
-    MISSED: 'Missed ✗',
+    MISSED: (slot as any).completelyMissed ? 'Completely Missed ✗' : 'Missed ✗',
+    SNOOZED: `Auto-Reminder ${(slot as any).currentRetry || 1}/${(slot as any).maxRetries || 3}`,
     DISPENSING: 'Open Now',
     PENDING: 'Scheduled',
   };
@@ -233,6 +249,7 @@ function BoxCard({
   const statusStyles: Record<SlotStatus, string> = {
     TAKEN:      'bg-emerald-50 text-emerald-700 border-emerald-200',
     MISSED:     'bg-rose-50 text-rose-700 border-rose-200',
+    SNOOZED:    'bg-purple-50 text-purple-700 border-purple-300 ring-2 ring-purple-500/20',
     DISPENSING: 'bg-blue-50 text-blue-700 border-blue-300 ring-2 ring-blue-500/20 animate-pulse',
     PENDING:    'bg-slate-100 text-slate-600 border-slate-200',
   };
@@ -308,20 +325,30 @@ function BoxCard({
           </div>
         </div>
 
-        {/* Time + countdown + timeout badge */}
-        <div className="flex items-center justify-between text-xs py-2 px-3.5 rounded-2xl bg-slate-50 border border-slate-100 flex-wrap gap-2">
-          <div className="flex items-center gap-2 text-slate-800 font-semibold">
-            <Clock className="h-4 w-4 text-slate-500" />
-            <span>{formatTime12(slot.scheduledTime)}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-blue-700 font-bold bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100 flex items-center gap-1">
-              <Timer className="h-3 w-3 text-blue-600" /> {slot.timeoutMinutes || 5}m limit
-            </span>
+        {/* Time + countdown + timeout + retry badge */}
+        <div className="space-y-2 py-2.5 px-3.5 rounded-2xl bg-slate-50 border border-slate-100 text-xs">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-2 text-slate-800 font-semibold">
+              <Clock className="h-4 w-4 text-slate-500" />
+              <span>{formatTime12(slot.scheduledTime)}</span>
+            </div>
             <span className={`font-semibold text-xs ${
-              slot.taken ? 'text-emerald-700' : missed ? 'text-rose-600' : 'text-blue-700'
+              slot.taken ? 'text-emerald-700' : (slot as any).inSnooze ? 'text-purple-700 font-bold' : missed ? 'text-rose-600' : 'text-blue-700'
             }`}>
-              {slot.taken && slot.takenAt ? `at ${slot.takenAt}` : countdown}
+              {slot.taken && slot.takenAt
+                ? `at ${slot.takenAt}`
+                : (slot as any).inSnooze && (slot as any).nextRetryTime
+                ? `Retry at ${formatTime12((slot as any).nextRetryTime)}`
+                : countdown}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap pt-1 border-t border-slate-200/60 text-[10px]">
+            <span className="text-blue-700 font-bold bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100 flex items-center gap-1">
+              <Timer className="h-3 w-3 text-blue-600" /> {slot.timeoutMinutes || 5}m intake
+            </span>
+            <span className="text-purple-700 font-bold bg-purple-50 px-2 py-0.5 rounded-md border border-purple-100 flex items-center gap-1">
+              <RefreshCw className="h-3 w-3 text-purple-600" /> {slot.retryIntervalMinutes || 5}m retry ({(slot as any).maxRetries || 3}x max)
             </span>
           </div>
         </div>
@@ -424,6 +451,8 @@ function AddSlotForm({ onAdd, onClose }: {
   const [dosage, setDosage] = useState('');
   const [time, setTime] = useState('08:00');
   const [timeoutMinutes, setTimeoutMinutes] = useState<number>(5);
+  const [retryIntervalMinutes, setRetryIntervalMinutes] = useState<number>(5);
+  const [maxRetries, setMaxRetries] = useState<number>(3);
   const [box, setBox] = useState<1 | 2 | 3 | 4>(1);
   const [notes, setNotes] = useState('');
 
@@ -436,6 +465,8 @@ function AddSlotForm({ onAdd, onClose }: {
       dosage: dosage.trim() || '—',
       scheduledTime: time,
       timeoutMinutes,
+      retryIntervalMinutes,
+      maxRetries,
       notes
     });
     onClose();
@@ -443,7 +474,7 @@ function AddSlotForm({ onAdd, onClose }: {
 
   return (
     <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-7 w-full max-w-md shadow-2xl space-y-5">
+      <div className="bg-white border border-slate-200 rounded-3xl p-6 sm:p-7 w-full max-w-md shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto custom-scrollbar">
         <div className="flex items-center justify-between pb-3 border-b border-slate-100">
           <h3 className="text-lg font-bold text-slate-800 flex items-center gap-3">
             <div className="p-2.5 rounded-2xl bg-blue-50 text-blue-600 border border-blue-100">
@@ -504,11 +535,11 @@ function AddSlotForm({ onAdd, onClose }: {
             />
           </div>
 
-          {/* Timeout Timer (1 to 10 min) */}
-          <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-2.5">
+          {/* Timeout Window & Auto-Reminder Engine */}
+          <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
             <div className="flex items-center justify-between text-xs">
               <label className="font-semibold text-slate-700 flex items-center gap-1.5">
-                <Timer className="h-3.5 w-3.5 text-blue-600" /> Timeout Timer:
+                <Timer className="h-3.5 w-3.5 text-blue-600" /> Intake Timeout Window:
               </label>
               <span className="font-bold text-blue-800 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200">
                 {timeoutMinutes} min
@@ -527,20 +558,58 @@ function AddSlotForm({ onAdd, onClose }: {
               />
               <span className="text-[11px] font-bold text-slate-400">10m</span>
             </div>
-            <div className="flex items-center gap-1 flex-wrap pt-1">
-              {[1, 2, 3, 5, 10].map(mins => (
-                <button
-                  key={mins}
-                  type="button"
-                  onClick={() => setTimeoutMinutes(mins)}
-                  className={`px-2 py-0.5 rounded-lg text-xs font-bold border transition cursor-pointer ${
-                    timeoutMinutes === mins ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-700 border-slate-200 hover:bg-blue-50'
-                  }`}
-                >{mins}m</button>
-              ))}
+
+            {/* Auto-Reminder Retry Interval */}
+            <div className="pt-2 border-t border-slate-200/70 space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <label className="font-semibold text-slate-700 flex items-center gap-1.5">
+                  <Clock className="h-3.5 w-3.5 text-purple-600" /> Auto-Reminder Interval:
+                </label>
+                <span className="font-bold text-purple-800 bg-purple-50 px-2 py-0.5 rounded-md border border-purple-200">
+                  {retryIntervalMinutes} min
+                </span>
+              </div>
+              <div className="flex items-center gap-2.5">
+                <span className="text-[11px] font-bold text-slate-400">2m</span>
+                <input
+                  type="range"
+                  min="2"
+                  max="15"
+                  step="1"
+                  value={retryIntervalMinutes}
+                  onChange={e => setRetryIntervalMinutes(Number(e.target.value))}
+                  className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-purple-600"
+                />
+                <span className="text-[11px] font-bold text-slate-400">15m</span>
+              </div>
             </div>
-            <p className="text-[10px] text-slate-500">
-              Auto-marks missed if dose is not taken within {timeoutMinutes}m of scheduled time.
+
+            {/* Max Retries */}
+            <div className="pt-2 border-t border-slate-200/70 space-y-1.5">
+              <div className="flex items-center justify-between text-xs">
+                <label className="font-semibold text-slate-700 flex items-center gap-1.5">
+                  <RefreshCw className="h-3.5 w-3.5 text-emerald-600" /> Max Reminders:
+                </label>
+                <span className="font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                  {maxRetries} times
+                </span>
+              </div>
+              <div className="grid grid-cols-4 gap-1.5">
+                {[1, 2, 3, 4].map(r => (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() => setMaxRetries(r)}
+                    className={`py-1 text-xs font-bold rounded-lg border transition ${
+                      maxRetries === r ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-700 border-slate-200 hover:bg-emerald-50'
+                    }`}
+                  >{r}x</button>
+                ))}
+              </div>
+            </div>
+
+            <p className="text-[10px] text-slate-500 leading-relaxed">
+              If not taken within {timeoutMinutes}m, alarm stops &amp; lid stays closed. Re-alarms every {retryIntervalMinutes}m (up to {maxRetries}x) before being completely missed.
             </p>
           </div>
 
@@ -571,8 +640,8 @@ function AddSlotForm({ onAdd, onClose }: {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function MedicineBox({
-  slots,
-  lidOpen,
+  slots = [],
+  lidOpen = false,
   medboxStatus,
   onMarkTaken,
   onMarkMissed,
@@ -582,10 +651,12 @@ export default function MedicineBox({
 }: MedicineBoxProps) {
   const [showAddForm, setShowAddForm] = useState(false);
 
-  const takenCount  = slots.filter(s => s.taken).length;
-  const missedCount = slots.filter(s => (s as any).missed).length;
-  const adherencePct = slots.length > 0
-    ? Math.round((takenCount / slots.length) * 100)
+  const safeSlots = Array.isArray(slots) ? slots.filter(Boolean) : [];
+  const takenCount  = safeSlots.filter(s => s?.taken).length;
+  const missedCount = safeSlots.filter(s => (s as any)?.missed).length;
+  const pendingCount = Math.max(0, safeSlots.length - takenCount - missedCount);
+  const adherencePct = safeSlots.length > 0
+    ? Math.round((takenCount / safeSlots.length) * 100)
     : 0;
 
   const handleAddSlot = (partial: Omit<MedicineSlot, 'id' | 'taken' | 'presenceConfirmed' | 'touchVerified'>) => {
@@ -596,7 +667,7 @@ export default function MedicineBox({
       touchVerified: false,
       ...partial,
     };
-    onUpdateSlots([...slots, newSlot]);
+    onUpdateSlots([...safeSlots, newSlot]);
   };
 
   return (
@@ -649,7 +720,7 @@ export default function MedicineBox({
           <div className="flex items-center gap-3 text-xs">
             <span className="text-emerald-700 font-semibold">✓ {takenCount} taken</span>
             {missedCount > 0 && <span className="text-rose-600 font-semibold">✗ {missedCount} missed</span>}
-            <span className="text-slate-500 font-medium">◯ {slots.length - takenCount - missedCount} pending</span>
+            <span className="text-slate-500 font-medium">◯ {pendingCount} pending</span>
             <span className="text-slate-800 font-bold text-sm bg-slate-100 px-3 py-1 rounded-xl">{adherencePct}%</span>
           </div>
         </div>
@@ -661,11 +732,11 @@ export default function MedicineBox({
           {missedCount > 0 && (
             <div
               className="h-full bg-gradient-to-r from-rose-500 to-rose-600 transition-all duration-700"
-              style={{ width: `${slots.length > 0 ? (missedCount / slots.length) * 100 : 0}%` }}
+              style={{ width: `${safeSlots.length > 0 ? (missedCount / safeSlots.length) * 100 : 0}%` }}
             />
           )}
         </div>
-        {takenCount === slots.length && slots.length > 0 && (
+        {takenCount === safeSlots.length && safeSlots.length > 0 && (
           <p className="text-emerald-700 font-semibold text-xs flex items-center gap-1.5">
             🎉 All scheduled doses complete for today!
           </p>
@@ -683,11 +754,11 @@ export default function MedicineBox({
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
             <Activity className="h-4 w-4 text-blue-600" />
-            Physical Compartments ({slots.length})
+            Physical Compartments ({safeSlots.length})
           </h3>
         </div>
 
-        {slots.length === 0 ? (
+        {safeSlots.length === 0 ? (
           <div className="text-center py-14 text-slate-400 bg-white border border-dashed border-slate-200 rounded-3xl shadow-xs">
             <Pill className="h-10 w-10 mx-auto mb-3 text-slate-300" />
             <p className="text-base font-semibold text-slate-700">No slots configured yet.</p>
@@ -695,7 +766,7 @@ export default function MedicineBox({
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-            {slots.map(slot => (
+            {safeSlots.map(slot => (
               <BoxCard
                 key={slot.id}
                 slot={slot}
