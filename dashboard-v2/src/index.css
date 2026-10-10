@@ -1,0 +1,150 @@
+/* Google Fonts - Highly legible, open humanist typography for elderly accessibility */
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap');
+
+@import "tailwindcss";
+
+/* ─── JEEVAN Soft & Gentle Accessible Theme System (Elderly-Friendly & Low Strain) ─── */
+
+:root {
+  --font-headline: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-label: 'Plus Jakarta Sans', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  /* Soothing, low-contrast neutral palette (No harsh black/white glare) */
+  --bg-main: #F8FAFC;
+  --bg-card: #FFFFFF;
+  --bg-subtle: #F1F5F9;
+  --text-primary: #1E293B;      /* Gentle Charcoal Slate - easy on elderly eyes */
+  --text-secondary: #475569;    /* Soft Slate Body */
+  --text-muted: #64748B;        /* Muted cool slate for secondary metadata */
+  --border-subtle: #E2E8F0;     /* Soft warm divider */
+
+  /* Gentle, soothing medical accent tones */
+  --accent-primary: #3B82F6;    /* Friendly calming Blue */
+  --accent-emerald: #10B981;    /* Soothing Sage/Emerald */
+  --accent-amber: #F59E0B;      /* Warm gentle Amber */
+  --accent-rose: #F43F5E;       /* Soft Coral Rose */
+}
+
+body {
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: var(--bg-main);
+  color: var(--text-secondary);
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+/* ─── Subtle Soft Grid Pattern ─────────────────────────────────────────── */
+.bg-grid-pattern {
+  background-size: 36px 36px;
+  background-image: linear-gradient(to right, rgba(100, 116, 139, 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(100, 116, 139, 0.04) 1px, transparent 1px);
+  mask-image: radial-gradient(circle at center, black 65%, transparent 95%);
+  -webkit-mask-image: radial-gradient(circle at center, black 65%, transparent 95%);
+}
+
+/* ─── Soft Elevation & Gentle Cards ─────────────────────────────────────── */
+.glass-card {
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  box-shadow: 0 2px 8px -2px rgba(100, 116, 139, 0.06), 0 1px 3px -1px rgba(100, 116, 139, 0.04);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: 20px;
+}
+
+.glass-card:hover {
+  border-color: #CBD5E1;
+  box-shadow: 0 8px 20px -4px rgba(100, 116, 139, 0.1), 0 2px 6px -2px rgba(100, 116, 139, 0.05);
+}
+
+.glass-panel {
+  background: #FFFFFF;
+  border-top: 1px solid #E2E8F0;
+  box-shadow: 0 -4px 16px -2px rgba(100, 116, 139, 0.04);
+}
+
+/* ─── Typography Utilities ────────────────────────────────────────────────── */
+.font-headline { font-family: var(--font-headline); letter-spacing: -0.015em; }
+.font-body { font-family: var(--font-body); }
+.font-label { font-family: var(--font-label); }
+.font-mono { font-family: var(--font-mono); }
+
+/* ─── Pulse Animations ────────────────────────────────────────────────────── */
+@keyframes float {
+  0% { transform: translateY(0px); }
+  50% { transform: translateY(-4px); }
+  100% { transform: translateY(0px); }
+}
+
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.88; transform: scale(0.99); }
+}
+
+@keyframes pulse-dot {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.35); }
+  70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+}
+
+@keyframes pulse-red {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.35); }
+  70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(244, 63, 94, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(244, 63, 94, 0); }
+}
+
+@keyframes glow-blue {
+  0%, 100% { box-shadow: 0 0 14px rgba(59, 130, 246, 0.12); }
+  50% { box-shadow: 0 0 22px rgba(59, 130, 246, 0.2); }
+}
+
+.animate-float { animation: float 6s ease-in-out infinite; }
+.animate-pulse-soft { animation: pulse-soft 3s ease-in-out infinite; }
+.pulse-emerald { animation: pulse-dot 2s infinite cubic-bezier(0.4, 0, 0.2, 1); }
+.pulse-red-dot { animation: pulse-red 1.8s infinite cubic-bezier(0.4, 0, 0.2, 1); }
+.glow-blue { animation: glow-blue 4s ease-in-out infinite; }
+
+/* ─── Light Custom Scrollbar ──────────────────────────────────────────────── */
+.custom-scrollbar::-webkit-scrollbar { width: 7px; height: 7px; }
+.custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+  border-radius: 999px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #94A3B8;
+}
+
+/* ─── Ambient Light Glows (Gentle & Calming) ──────────────────────────────── */
+.orb-emerald {
+  position: absolute;
+  width: 500px;
+  height: 500px;
+  background: radial-gradient(circle, rgba(16, 185, 129, 0.04), transparent 70%);
+  border-radius: 50%;
+  pointer-events: none;
+  filter: blur(70px);
+}
+
+.orb-indigo {
+  position: absolute;
+  width: 450px;
+  height: 450px;
+  background: radial-gradient(circle, rgba(59, 130, 246, 0.04), transparent 70%);
+  border-radius: 50%;
+  pointer-events: none;
+  filter: blur(70px);
+}
+
+.orb-rose {
+  position: absolute;
+  width: 400px;
+  height: 400px;
+  background: radial-gradient(circle, rgba(244, 63, 94, 0.03), transparent 70%);
+  border-radius: 50%;
+  pointer-events: none;
+  filter: blur(70px);
+}

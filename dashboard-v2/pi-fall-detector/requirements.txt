@@ -1,0 +1,4 @@
+# Raspberry Pi Fall Detector Requirements
+opencv-python>=4.8.0
+mediapipe>=0.10.0
+requests>=2.31.0
