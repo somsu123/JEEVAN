@@ -1,4 +1,4 @@
-# ElderCare AI Voice Assistant — Hardware Guide
+# JEEVAN (Joint Elderly Evaluation Vital Assistance Network) — AI Voice Assistant Hardware Guide
 
 ## Your Hardware
 | # | Component | Role |
@@ -14,8 +14,8 @@
 ## Two AI Systems — How They Coexist
 
 ### System A: ESP32-S3 Hardware (Physical Device)
-- **File**: `D:\Elder--Care\hardware\voice_assistant\voice_assistant.ino`
-- **What it does**: Physical voice assistant device near the elder
+- **File**: `firmware/voice_assistant/voice_assistant.ino` (or `hardware/voice_assistant/voice_assistant.ino`)
+- **What it does**: Physical voice assistant device for the elder
   - Press BOOT button → speak a question
   - INMP441 records 4 seconds of audio
   - Sends WAV to dashboard server → Local AI (Whisper + Ollama) answers
@@ -23,7 +23,7 @@
   - OLED shows: IDLE / LISTENING / THINKING / SPEAKING
 
 ### System B: Python Assistant on PC
-- **File**: `D:\Elder--Care\ai_assistant\main_assistant.py`
+- **File**: `ai_assistant/main_assistant.py`
 - **What it does**: Richer PC-based assistant with:
   - Ollama LLM (offline AI)
   - Medicine reminders and scheduling

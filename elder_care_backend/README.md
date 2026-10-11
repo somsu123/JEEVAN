@@ -1,57 +1,57 @@
-# ElderCare Backend Suite
+# JEEVAN (Joint Elderly Evaluation Vital Assistance Network) — Backend Suite
 
-Central IoT and AI backend services for the ElderCare / JEEVAN monitoring platform.
+Central IoT and AI backend services for the **JEEVAN (Joint Elderly Evaluation Vital Assistance Network)** monitoring platform.
 
-This repository contains the backend server services that power real-time health telemetry, medicine schedules, fall event logs, and voice assistance.
-
----
-
-## ??? Architecture & Modules
-
-```
-elder-care-backend/
-+-- backend/                   # Central Flask REST API & MongoDB Atlas database layer
-�   +-- app.py                 # Main Flask server (port 5000)
-�   +-- database.py            # MongoDB Atlas interface (collections: system_state, fall_logs, medicines, etc.)
-�   +-- whisper_sidecar.py     # Local Whisper audio transcription bridge
-�   +-- clear_mongo.py         # MongoDB reset utility
-�   +-- test_atlas.py          # Atlas connectivity test
-�   +-- test_tts.py            # TTS diagnostic script
-�
-+-- bpm-server/                # Real-time WebSocket server for vitals
-�   +-- server.js              # Node.js WebSocket & HTTP server (port 3001)
-�   +-- bpmStore.js            # In-memory vitals ring buffer & statistics
-�   +-- validation.js          # Payload validation logic
-�   +-- package.json           # WebSocket dependencies
-�
-+-- ai_assistant/              # Intelligent Voice Assistant module
-�   +-- main_assistant.py      # Voice interaction & vocal status updates
-�   +-- README_HARDWARE.md     # Hardware integration details
-�
-+-- tools/                     # Hardware & API contract testing tools
-�   +-- test_medbox_api.py     # End-to-end tests for smart medicine box endpoints
-�
-+-- medicines.json             # Seed medication data
-+-- requirements.txt           # Python dependencies
-+-- .env.example               # Template environment configuration
-+-- start_backend.bat          # 1-click startup script for all services
-```
+This directory contains the backend server services that power real-time health telemetry, medicine schedules, fall event logs, and voice assistance.
 
 ---
 
-## ??? Prerequisites
+## 🏗️ Architecture & Modules
+
+```
+elder_care_backend/
+├── backend/                   # Central Flask REST API & MongoDB database layer
+│   ├── app.py                 # Main Flask server (port 5000)
+│   ├── database.py            # MongoDB Atlas interface (collections: system_state, fall_logs, medicines, etc.)
+│   ├── whisper_sidecar.py     # Local Whisper audio transcription bridge
+│   ├── clear_mongo.py         # MongoDB reset utility
+│   ├── test_atlas.py          # Atlas connectivity test
+│   └── test_tts.py            # TTS diagnostic script
+│
+├── bpm-server/                # Real-time WebSocket server for vitals
+│   ├── server.js              # Node.js WebSocket & HTTP server (port 3001)
+│   ├── bpmStore.js            # In-memory vitals ring buffer & statistics
+│   ├── validation.js          # Payload validation logic
+│   └── package.json           # WebSocket dependencies
+│
+├── ai_assistant/              # Intelligent Voice Assistant module
+│   ├── main_assistant.py      # Voice interaction & vocal status updates
+│   └── README_HARDWARE.md     # Hardware integration details
+│
+├── tools/                     # Hardware & API contract testing tools
+│   └── test_medbox_api.py     # End-to-end tests for smart medicine box endpoints
+│
+├── medicines.json             # Seed medication data
+├── requirements.txt           # Python dependencies
+├── .env.example               # Template environment configuration
+└── start_backend.bat          # 1-click startup script for all backend services
+```
+
+---
+
+## 🛠️ Prerequisites
 
 1. **Python 3.11** (required for `pyttsx3` and legacy voice modules)
 2. **Node.js** (v18+ recommended)
-3. **MongoDB Atlas** account or local MongoDB instance
+3. **MongoDB Community Edition** or **MongoDB Atlas** account (Database name: `JEEVAN`)
 
 ---
 
-## ?? Setup & Installation
+## ⚙️ Setup & Installation
 
 ### 1. Configure Environment Variables
 
-Copy `.env.example` to `.env` in the root (or configure inside `backend/`):
+Copy `.env.example` to `.env` in the root:
 
 ```bash
 copy .env.example .env
@@ -59,7 +59,7 @@ copy .env.example .env
 
 Fill in your MongoDB connection string in `.env`:
 ```env
-MONGO_URI="mongodb+srv://<username>:<password>@cluster0.mongodb.net/JEEVAN"
+MONGO_URI="mongodb://localhost:27017"
 PORT=5000
 ```
 
@@ -79,7 +79,7 @@ cd ..
 
 ---
 
-## ? Running the Backend
+## 🚀 Running the Backend
 
 You can run all services automatically by launching:
 ```powershell
@@ -106,7 +106,7 @@ py -3.11 ai_assistant\main_assistant.py
 
 ---
 
-## ?? Key REST Endpoints (Flask API - Port 5000)
+## 🌐 Key REST Endpoints (Flask API - Port 5000)
 
 | Endpoint | Method | Description |
 |---|---|---|

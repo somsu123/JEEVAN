@@ -1,4 +1,4 @@
-# JEEVAN Smart Medicine Box Firmware (ESP32)
+# JEEVAN (Joint Elderly Evaluation Vital Assistance Network) — Smart Medicine Box Firmware (ESP32)
 
 Complete production firmware for the **JEEVAN Smart Medicine Box** featuring ultrasonic patient-proximity detection (15–20 cm), 1× shared SG90 servo lid actuation, 4× compartment visual LEDs, push button intake confirmation, 16x2 I2C LCD status reporting, and bidirectional synchronization with the JEEVAN Dashboard.
 

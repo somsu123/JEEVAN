@@ -1,7 +1,7 @@
-# BPM Smart Bracelet — Complete Setup Guide
+# JEEVAN (Joint Elderly Evaluation Vital Assistance Network) — BPM Smart Bracelet Setup Guide
 
 > **Real-time WiFi Heart Rate Monitoring System**
-> ESP32 + MAX30102 → Node.js Backend → React Dashboard
+> ESP32 + MAX30102 → Node.js Backend → JEEVAN React Dashboard
 
 ---
 

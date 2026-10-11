@@ -1,8 +1,8 @@
-# ElderCare Dashboard v2
+# JEEVAN Dashboard v2
 
-**Unified 360° elderly care IoT monitoring dashboard** built with React 19 + TypeScript + Tailwind CSS v4 + Local AI (Ollama + Whisper).
+**Unified 360° elderly care IoT monitoring dashboard** for **JEEVAN (Joint Elderly Evaluation Vital Assistance Network)**, built with React 19 + TypeScript + Tailwind CSS v4 + Local AI (Ollama + Whisper).
 
-Connects to `D:\JEEVAN\backend` (Flask/MongoDB/ESP32 backend).
+Connects to `d:\JEEVAN\backend` (Flask/MongoDB/ESP32 backend) and `d:\JEEVAN\bpm-server` (Node.js WebSocket vitals server).
 
 ---
 
@@ -11,7 +11,7 @@ Connects to `D:\JEEVAN\backend` (Flask/MongoDB/ESP32 backend).
 ```
 dashboard-v2/
 ├── server.ts            ← Node/Express bridge (port 5050)
-│   ├── /api/vitals      → Proxies Flask /api/state
+│   ├── /api/vitals      → Proxies Flask /api/state & BPM WebSocket
 │   ├── /api/fall-event  → Receives Pi/bracelet fall events
 │   ├── /api/medicine-*  → Proxies Flask /api/medicine + /api/schedule
 │   ├── /api/voice-chat  → Local AI voice assistant (MITRA via Ollama)
@@ -39,7 +39,7 @@ dashboard-v2/
 
 ## Quick Start
 
-### 1. Start existing ElderCare backend
+### 1. Start existing JEEVAN backend
 ```bash
 py -3.11 backend\app.py          # Flask on port 5000
 ```
@@ -73,10 +73,10 @@ BACKEND_URL=http://<your-pc-ip>:5050 python pi-fall-detector/fall_detector.py
 
 | Module | Status | Connected To |
 |--------|--------|-------------|
-| Live Vitals Telemetry | ✅ | ESP32 bracelet → Flask → Node bridge |
+| Live Vitals Telemetry | ✅ | ESP32 bracelet → Flask / WS → Node bridge |
 | BPM Sparkline (60-pt) | ✅ | App.tsx 1s timer + hardware poll |
-| Fall Detection (Camera) | ✅ | Pi MediaPipe → /api/fall-event |
-| Fall Detection (Bracelet) | ✅ | braclet_bpm.ino → /api/fall-event |
+| Fall Detection (Camera) | ✅ | Pi / Webcam MediaPipe → /api/fall-event |
+| Fall Detection (Bracelet) | ✅ | fall_bracelet.ino → /api/fall-event |
 | Medicine Reminder Box | ✅ | medicine_box.ino → Flask → Node |
 | AI Voice Assistant (MITRA) | ✅ | faster-whisper + Ollama |
 | Clinical Report Scanner | ✅ | TF.js + Ollama Vision |

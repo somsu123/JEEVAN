@@ -1,6 +1,6 @@
-# ElderCare MongoDB Fall Detector Schema Specifications
+# JEEVAN (Joint Elderly Evaluation Vital Assistance Network) — MongoDB Fall Detector Schema Specifications
 
-This document defines the official schema used to log and store fall events inside the local **MongoDB** database (`eldercare_db`) under the **`fall_logs`** collection.
+This document defines the official schema used to log and store fall events inside the local **MongoDB** database (`JEEVAN`) under the **`fall_logs`** collection.
 
 In MongoDB, document structures are dynamic (schemaless), but keeping a standardized schema guarantees that your dashboard, AI voice assistant, and Python analytics scripts can reliably query historic detections.
 
@@ -64,7 +64,7 @@ from pymongo import MongoClient
 
 # Connect to local MongoDB
 client = MongoClient("mongodb://localhost:27017")
-db = client["eldercare_db"]
+db = client["JEEVAN"]
 logs_col = db["fall_logs"]
 
 # Auto-delete logs after 7 days (604800 seconds) to conserve storage
