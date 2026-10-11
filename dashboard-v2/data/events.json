@@ -3,6 +3,36 @@
     "type": "rx",
     "message": "Schedule confirmed — compartment 1: \"Cap. Rozad\"",
     "severity": "info",
+    "timestamp": 1791720369
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 0: \"Tab. Petril Plus\"",
+    "severity": "info",
+    "timestamp": 1791720342
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 0: \"Tab. Petril Plus\"",
+    "severity": "info",
+    "timestamp": 1791720298
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 1: \"Cap. Rozad\"",
+    "severity": "info",
+    "timestamp": 1791720110
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 2: \"Tab. Ambulax\"",
+    "severity": "info",
+    "timestamp": 1791719539
+  },
+  {
+    "type": "rx",
+    "message": "Schedule confirmed — compartment 1: \"Cap. Rozad\"",
+    "severity": "info",
     "timestamp": 1791714822
   },
   {
@@ -568,35 +598,5 @@
     "message": "Schedule confirmed — compartment 1: \"paracetamol - 1tab\"",
     "severity": "info",
     "timestamp": 1790990883
-  },
-  {
-    "type": "rx",
-    "message": "Schedule confirmed — compartment 1: \"Amoxirillin - 500mg\"",
-    "severity": "info",
-    "timestamp": 1790990326
-  },
-  {
-    "type": "rx",
-    "message": "Prescription uploaded -- 1 medicines extracted, 1 changes pending",
-    "severity": "info",
-    "timestamp": 1790990308
-  },
-  {
-    "type": "rx",
-    "message": "Schedule confirmed — compartment 0: \"Paracetamol - 1 tab\"",
-    "severity": "info",
-    "timestamp": 1790990269
-  },
-  {
-    "type": "rx",
-    "message": "Prescription uploaded -- 1 medicines extracted, 0 changes pending",
-    "severity": "info",
-    "timestamp": 1790989370
-  },
-  {
-    "type": "rx",
-    "message": "Schedule confirmed — compartment 0: \"Amoxirillin - 500mg\"",
-    "severity": "info",
-    "timestamp": 1790986666
   }
 ]

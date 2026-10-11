@@ -117,7 +117,7 @@ export default function App() {
                   </span>
                 </div>
                 <p className="text-xs sm:text-sm text-rose-200 mt-0.5">
-                  Lid opened automatically. ONLY Slot 1 LED is blinking repeatedly — box closes ONLY upon pressing the physical Confirm Button (D4).
+                  Smart Medicine Box SG90 servo lid triggered automatically to open Compartment 1 (Overlapping Emergency Slot).
                 </p>
               </div>
             </div>

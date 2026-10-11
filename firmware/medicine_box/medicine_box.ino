@@ -197,22 +197,6 @@ unsigned long lastDebounceMs = 0;
 #define DEBOUNCE_DELAY_MS 50
 
 // ─────────────────────────────────────────────────────────────────────────────────
-//  FORWARD DECLARATIONS
-// ─────────────────────────────────────────────────────────────────────────────────
-void openLid();
-void closeLid();
-void setCompartmentLed(int comp, bool on);
-void turnOffAllLeds();
-void triggerEmergencyDispense(int comp = 0, const char* label = "Emergency Med");
-void confirmDoseAndCloseLid(const char* source = "Confirmation Button");
-void checkEmergencyDispense();
-void queueMedboxEvent(const char* eventType, int compIndex, const char* medicineName, const char* doseStr, int retryAttempt = 0, int maxRetries = 0, const char* nextRetryTime = "");
-void queueDoseTakenEvent(int compIndex, const char* medicineName, const char* doseStr);
-void triggerRemoteOpen(int comp = 0);
-void handleCloseLid();
-void handleConfirmDose();
-
-// ─────────────────────────────────────────────────────────────────────────────────
 //  3. FULLY NON-BLOCKING AUDIO ENGINE (BUZZER)
 // ─────────────────────────────────────────────────────────────────────────────────
 enum BuzzerMode {
@@ -288,7 +272,7 @@ void updateBuzzer() {
         bool newState = !buzzerPhysicalState;
         setBuzzerHardware(newState);
         digitalWrite(STATUS_LED_PIN, newState ? HIGH : LOW);
-        if (!emergencyDispenseActive && activeCompartment >= 0 && activeCompartment < NUM_COMPARTMENTS) {
+        if (activeCompartment >= 0 && activeCompartment < NUM_COMPARTMENTS) {
           digitalWrite(ledPins[activeCompartment], newState ? HIGH : LOW);
         }
       }
@@ -520,22 +504,32 @@ void turnOffAllLeds() {
   }
 }
 
-// Non-blocking Remote Open Lid:
-// Opens lid automatically, blinks strictly only that single compartment LED, and closes ONLY on confirmation button
-void triggerRemoteOpen(int comp) {
-  int safeComp = (comp >= 0 && comp < NUM_COMPARTMENTS) ? comp : 0;
-  Serial.printf("\n[REMOTE] 🔓 Remote Open request received for Slot %d! (Box will close ONLY on confirm button)\n", safeComp + 1);
-  triggerEmergencyDispense(safeComp, "Remote Open");
+// Non-blocking Caregiver Remote Open Lid
+void triggerRemoteOpen() {
+  Serial.println(F("\n[REMOTE] 🔓 Caregiver Remote Lid Open request received from Dashboard!"));
+  printLcdStatus("Remote Open", "Caregiver Req", 3000);
+  openLid();
+  for (int i = 0; i < NUM_COMPARTMENTS; i++) digitalWrite(ledPins[i], HIGH);
+
+  remoteOpenActive = true;
+  remoteOpenCloseMs = millis() + 3000;
 }
 
 void checkRemoteOpenTimeout() {
-  // Remote open does NOT auto-close; closure is strictly controlled by the physical confirm button
+  if (!remoteOpenActive) return;
+  if (millis() >= remoteOpenCloseMs) {
+    remoteOpenActive = false;
+    closeLid();
+    turnOffAllLeds();
+    Serial.println(F("[REMOTE] 🔒 Remote open complete. Lid closed."));
+    printLcdStatus("Remote Open Done", "Closed", 1500);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────
 //  4b. DOSE-TAKEN & MISSED EVENT QUEUE (PORT 5050)
 // ─────────────────────────────────────────────────────────────────────────────────
-void queueMedboxEvent(const char* eventType, int compIndex, const char* medicineName, const char* doseStr, int retryAttempt, int maxRetries, const char* nextRetryTime) {
+void queueMedboxEvent(const char* eventType, int compIndex, const char* medicineName, const char* doseStr, int retryAttempt = 0, int maxRetries = 0, const char* nextRetryTime = "") {
   queuedEvent.pending = true;
   strncpy(queuedEvent.event, eventType, sizeof(queuedEvent.event) - 1);
   queuedEvent.event[sizeof(queuedEvent.event) - 1] = '\0';
@@ -583,15 +577,9 @@ void queueDoseTakenEvent(int compIndex, const char* medicineName, const char* do
 // ─────────────────────────────────────────────────────────────────────────────────
 //  4c. EMERGENCY MEDICATION DISPENSE (LID OPENS, ONLY SINGLE SLOT BLINKS UNTIL BUTTON PRESSED)
 // ─────────────────────────────────────────────────────────────────────────────────
-void triggerEmergencyDispense(int comp, const char* label) {
-  // Slot 1 (0-indexed: 0) is selected as the emergency BPM medicine slot
+void triggerEmergencyDispense(int comp = 0, const char* label = "Emergency Med") {
+  // Slot 1 (0-indexed: 0) is selected as the designated emergency BPM medicine slot
   int safeComp = (comp >= 0 && comp < NUM_COMPARTMENTS) ? comp : 0;
-
-  // If already active for this compartment, don't restart or re-chime
-  if (emergencyDispenseActive && emergencyCompartment == safeComp) {
-    return;
-  }
-
   Serial.printf("\n[EMERGENCY] 🚨 Emergency BPM Medication Triggered for Slot %d!\n", safeComp + 1);
   Serial.println(F("[EMERGENCY] 🔓 Opening SG90 servo lid automatically (90°)."));
   Serial.printf("[EMERGENCY] 💡 ONLY Slot %d LED (D%d) will blink repeatedly. All other slots strictly OFF.\n",
@@ -601,19 +589,14 @@ void triggerEmergencyDispense(int comp, const char* label) {
   emergencyDispenseActive = true;
   emergencyCompartment = safeComp;
   lastEmergencyBlinkMs = millis();
-  emergencyBlinkState = false;
-
-  // Cancel any conflicting display timers or routine states
-  remoteOpenActive = false;
-  assignedSlotActive = false;
-  currentState = STATE_IDLE;
-  activeCompartment = -1;
+  emergencyBlinkState = true;
 
   // 1. Open SG90 servo lid automatically (90°)
   openLid();
 
-  // 2. Turn off all LEDs first so NO other slot LED is on
+  // 2. Turn off all other slot LEDs and turn ON only the single emergency slot's LED initially
   turnOffAllLeds();
+  digitalWrite(ledPins[emergencyCompartment], HIGH);
 
   // 3. LCD display shows emergency intake prompt
   char line1[17];
@@ -626,30 +609,11 @@ void triggerEmergencyDispense(int comp, const char* label) {
   triggerDoubleChime();
 }
 
-void confirmDoseAndCloseLid(const char* source) {
-  Serial.printf("[CONFIRM] ✅ Dose confirmed from %s! Closing lid.\n", source ? source : "Button");
-
-  emergencyDispenseActive = false;
-  closeLid();        // Box gets closed ONLY after pressing the confirmation button (0°)
-  turnOffAllLeds();  // Immediately turn OFF all LEDs
-
-  char l1[17];
-  char l2[17];
-  snprintf(l1, sizeof(l1), "Dose Confirmed!");
-  snprintf(l2, sizeof(l2), "Slot %d | Closed", emergencyCompartment + 1);
-  printLcdStatus(l1, l2, 3500);
-
-  // Queue DOSE_TAKEN event to report to dashboard
-  queueMedboxEvent("DOSE_TAKEN", emergencyCompartment, "Emergency Cardiac Dose", "1 dose");
-  triggerShortBeep();
-}
-
 void checkEmergencyDispense() {
   if (!emergencyDispenseActive) return;
 
-  // 1. Strictly ONLY the single designated slot's LED blinks repeatedly (all other slots strictly OFF)
-  // Fast 120ms toggle so it blinks multiple times rapidly (over 4 Hz) to draw patient's focus
-  if (millis() - lastEmergencyBlinkMs >= 120) {
+  // 1. Strictly ONLY the single designated slot's LED blinks repeatedly (all other slots remain OFF)
+  if (millis() - lastEmergencyBlinkMs >= 250) {
     lastEmergencyBlinkMs = millis();
     emergencyBlinkState = !emergencyBlinkState;
 
@@ -665,15 +629,28 @@ void checkEmergencyDispense() {
   // 2. The box will get closed AFTER ONLY pressing the confirm button present in the medicine box
   int buttonVal = digitalRead(BUTTON_PIN);
   if (buttonVal == LOW) {
+    Serial.printf("[BUTTON] ✅ Confirm button pressed! Closing box and confirming Slot %d.\n", emergencyCompartment + 1);
+
+    emergencyDispenseActive = false;
+    closeLid();       // Box gets closed ONLY after pressing the physical confirm button (0°)
+    turnOffAllLeds();  // Immediately turn OFF all LEDs
+
     // Clean release debounce
     delay(50);
-    if (digitalRead(BUTTON_PIN) == LOW) {
-      while (digitalRead(BUTTON_PIN) == LOW) {
-        delay(10);
-      }
-      delay(50);
-      confirmDoseAndCloseLid("Physical Button D4");
+    while (digitalRead(BUTTON_PIN) == LOW) {
+      delay(10);
     }
+    delay(50);
+
+    char l1[17];
+    char l2[17];
+    snprintf(l1, sizeof(l1), "Dose Confirmed!");
+    snprintf(l2, sizeof(l2), "Slot %d | Closed", emergencyCompartment + 1);
+    printLcdStatus(l1, l2, 3500);
+
+    // Queue DOSE_TAKEN event to report to dashboard
+    queueMedboxEvent("DOSE_TAKEN", emergencyCompartment, "Emergency Cardiac Dose", "1 dose");
+    triggerShortBeep();
   }
 }
 
@@ -681,7 +658,6 @@ void checkEmergencyDispense() {
 //  5. CAREGIVER SLOT ASSIGNMENT (DISPLAY ONLY — LID REMAINS CLOSED)
 // ─────────────────────────────────────────────────────────────────────────────────
 void triggerSlotAssigned(int comp, const char* label, const char* dosage, const char* timeStr) {
-  if (emergencyDispenseActive) return; // Do not interrupt active emergency dispense!
   if (comp < 0 || comp >= NUM_COMPARTMENTS) {
     Serial.printf("[ASSIGN] ⚠️ Compartment %d out of range (0..3).\n", comp);
     return;
@@ -1109,7 +1085,7 @@ void sendHeartbeat() {
         int comp = respDoc["compartment"] | 0;
         const char* label = respDoc["label"] | "Emergency Med";
         triggerEmergencyDispense(comp, label);
-      } else if (respDoc.containsKey("assignedSlot") && !emergencyDispenseActive) {
+      } else if (respDoc.containsKey("assignedSlot")) {
         JsonObject slotObj = respDoc["assignedSlot"];
         int comp = slotObj["compartment"] | 0;
         const char* label = slotObj["label"] | "";
@@ -1119,13 +1095,13 @@ void sendHeartbeat() {
       } else {
         bool remoteOpen = respDoc["remoteOpen"] | false;
         if (remoteOpen) {
-          int comp = respDoc["compartment"] | 0;
-          triggerEmergencyDispense(comp, "Caregiver Open");
+          int comp = respDoc["compartment"] | -1;
+          if (comp >= 0 && comp < NUM_COMPARTMENTS) {
+            triggerEmergencyDispense(comp, "Emergency Med");
+          } else {
+            triggerRemoteOpen();
+          }
         }
-      }
-
-      if (respDoc.containsKey("remoteClose") && respDoc["remoteClose"].as<bool>() == true) {
-        confirmDoseAndCloseLid("Dashboard Remote Close");
       }
     }
   } else {
@@ -1282,18 +1258,6 @@ void handleAssignCompartment() {
   server.send(200, "application/json", resp);
 }
 
-void handleCloseLid() {
-  confirmDoseAndCloseLid("Dashboard Close Command");
-  server.sendHeader("Access-Control-Allow-Origin", "*");
-  server.send(200, "application/json", "{\"status\":\"ok\",\"lidOpen\":false}");
-}
-
-void handleConfirmDose() {
-  confirmDoseAndCloseLid("Dashboard Confirm Command");
-  server.sendHeader("Access-Control-Allow-Origin", "*");
-  server.send(200, "application/json", "{\"status\":\"ok\",\"confirmed\":true,\"lidOpen\":false}");
-}
-
 // ─────────────────────────────────────────────────────────────────────────────────
 //  10. BULLETPROOF WIFI ENGINE
 // ─────────────────────────────────────────────────────────────────────────────────
@@ -1422,12 +1386,6 @@ void setup() {
   server.on("/api/compartment/assign", HTTP_OPTIONS, handleCORS);
   server.on("/api/compartment/assign", HTTP_POST, handleAssignCompartment);
 
-  server.on("/api/lid/close", HTTP_OPTIONS, handleCORS);
-  server.on("/api/lid/close", HTTP_POST, handleCloseLid);
-
-  server.on("/api/dose/confirm", HTTP_OPTIONS, handleCORS);
-  server.on("/api/dose/confirm", HTTP_POST, handleConfirmDose);
-
   server.begin();
   Serial.println(F("[HTTP] ESP32 Web Server started on port 80"));
 }
@@ -1446,18 +1404,6 @@ void loop() {
 
   // 4. Emergency Dispense (Continuous blinking LED & instant physical button detection)
   checkEmergencyDispense();
-
-  // 4b. Physical confirmation button closes lid whenever lid is open
-  if (lidOpen && digitalRead(BUTTON_PIN) == LOW) {
-    delay(50);
-    if (digitalRead(BUTTON_PIN) == LOW) {
-      while (digitalRead(BUTTON_PIN) == LOW) {
-        delay(10);
-      }
-      delay(50);
-      confirmDoseAndCloseLid("Physical Button D4");
-    }
-  }
 
   // 5. Check Non-blocking Remote Open duration (closes after 3s)
   checkRemoteOpenTimeout();

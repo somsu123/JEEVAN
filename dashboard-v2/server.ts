@@ -1609,9 +1609,7 @@ app.post("/api/hardware/heartbeat", (req, res) => {
     response.label = "EMERGENCY DOSE";
     console.log(`[HEARTBEAT] Served EMERGENCY trigger to medbox for compartment ${emergencyCompartment} (LED blinking armed).`);
   } else if (remoteOpenFlag) {
-    console.log(`[HEARTBEAT] Served remote lid-open request to medbox for Slot 1.`);
-    response.remoteOpen = true;
-    response.compartment = 0; // Strictly Slot 1
+    console.log(`[HEARTBEAT] Served remote lid-open request to medbox. Resetting flag.`);
     remoteOpenFlag = false;
   }
   if (pendingCompartmentAssign && (Date.now() - pendingCompartmentAssign.timestamp < 30_000)) {
@@ -1775,17 +1773,17 @@ app.post(["/api/hardware/remote-open", "/api/medicine-remote-open"], (req, res) 
   };
   if (emergency) {
     emergencySosActive = true;
-    emergencyCompartment = 0; // Strictly Slot 1 for emergency BPM medicine
-    pendingCompartmentAssign = null; // Prevent assignedSlot from overwriting emergency state
-  } else if (typeof compartment === "number") {
+    emergencyCompartment = typeof compartment === "number" ? compartment : 0;
+  }
+  if (typeof compartment === "number") {
     pendingCompartmentAssign = {
       compartment,
-      label: label || "Caregiver Open",
+      label: label || (emergency ? `SOS (${bpm || 0} BPM)` : "Caregiver Open"),
       time: new Date().toLocaleTimeString("en-IN", { hour12: false, timeZone: "Asia/Kolkata" }),
       timestamp: Date.now(),
     };
   }
-  console.log(`[MEDBOX] Remote lid-open request registered${emergency ? ` (EMERGENCY SOS: BPM=${bpm ?? '?'}, Slot 1)` : ''}.`);
+  console.log(`[MEDBOX] Remote lid-open request registered${emergency ? ` (EMERGENCY SOS: BPM=${bpm ?? '?'}, Compartment ${emergencyCompartment})` : ''}.`);
   return res.json({ success: true, message: "Remote open lid request queued.", remoteOpen: true, emergency: Boolean(emergency) });
 });
 
