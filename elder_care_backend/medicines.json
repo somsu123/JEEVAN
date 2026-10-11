@@ -1,0 +1,23 @@
+[
+  {
+    "name": "Paracetamol",
+    "purpose": "Used for treating fever and pain relief",
+    "timing": "08:00",
+    "box_number": 1,
+    "added_date": "default"
+  },
+  {
+    "name": "Metformin",
+    "purpose": "Used for blood sugar control",
+    "timing": "14:00",
+    "box_number": 2,
+    "added_date": "default"
+  },
+  {
+    "name": "Telmisartan",
+    "purpose": "Used for controlling high blood pressure",
+    "timing": "20:00",
+    "box_number": 3,
+    "added_date": "default"
+  }
+]
