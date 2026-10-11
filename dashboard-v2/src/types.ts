@@ -179,3 +179,15 @@ export interface Prescription {
   status: 'pending_review' | 'applied' | 'rejected';
   prescriptionNumber?: string | null;
 }
+
+// ─── Emergency Cardiac SOS ──────────────────────────────────────────────────
+export interface CardiacSosState {
+  active: boolean;
+  type: 'bradycardia' | 'tachycardia' | null;
+  bpm: number;
+  timestamp: string;
+  autoOpened: boolean;
+  designatedSlot: number;
+  dismissed?: boolean;
+}
+

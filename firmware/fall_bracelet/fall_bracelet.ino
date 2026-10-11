@@ -40,7 +40,7 @@
 #define WIFI_PASS "ami bolbona"
 
 // Central Dashboard & Backend Endpoints
-#define DASHBOARD_HOST "10.122.37.135"
+#define DASHBOARD_HOST "10.91.87.135"
 #define DASHBOARD_PORT 5050
 #define FLASK_PORT 5000
 #define DEVICE_ID "bracelet-01"

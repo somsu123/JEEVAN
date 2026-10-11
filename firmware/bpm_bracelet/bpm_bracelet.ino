@@ -26,11 +26,11 @@
 #include "esp_system.h"
 #include "esp_task_wdt.h"
 #include "esp_wifi.h"
-#include <Preferences.h>
-#include <ESPmDNS.h>
 #include "heartRate.h"
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <ESPmDNS.h>
+#include <Preferences.h>
 #include <WebSocketsClient.h>
 #include <WiFi.h>
 #include <Wire.h>
@@ -38,14 +38,20 @@
 #include <freertos/semphr.h>
 #include <freertos/task.h>
 
+
 // ────────────────────────────────────────────────────────────────
 //  WiFi / Server Configuration
 // ────────────────────────────────────────────────────────────────
 #define WIFI_SSID "ElderCare "
 #define WIFI_PASS "ami bolbona"
-#define SERVER_MDNS_HOST "bpm-server" // [FIX #1] ESPmDNS queryHost expects a bare host name.
-#define SERVER_WINDOWS_HOST "LAPTOP-RSME6K8B" // Windows native mDNS hostname (A-record)
-#define SERVER_FALLBACK_IP IPAddress(10, 122, 37, 135) // Direct IP fallback when mDNS is blocked/unavailable on Windows
+#define SERVER_MDNS_HOST                                                       \
+  "bpm-server" // [FIX #1] ESPmDNS queryHost expects a bare host name.
+#define SERVER_WINDOWS_HOST                                                    \
+  "LAPTOP-RSME6K8B" // Windows native mDNS hostname (A-record)
+#define SERVER_FALLBACK_IP                                                     \
+  IPAddress(                                                                   \
+      10, 91, 87,                                                              \
+      135) // Direct IP fallback when mDNS is blocked/unavailable on Windows
 #define SERVER_PORT 3001
 #define SERVER_PATH "/ws/esp32"
 
@@ -81,8 +87,8 @@ bool oledFound = false;
 MAX30105 particleSensor;
 WebSocketsClient ws;
 
-#define FINGER_THRESHOLD 8000L  // IR value threshold for finger contact
-#define BEAT_BEEP_MS 80         // Duration of pulse beep/flash in ms
+#define FINGER_THRESHOLD 8000L // IR value threshold for finger contact
+#define BEAT_BEEP_MS 80        // Duration of pulse beep/flash in ms
 #define REPORT_INTERVAL                                                        \
   250 // Send report every 250 ms (4 Hz) for instant dashboard
 
@@ -103,8 +109,10 @@ float lastPeakVal = 200.0f;
 float lastTroughVal = 0.0f;
 float prevFilteredIR = 0.0f;
 uint64_t lastPeakSample = 0;
-uint64_t sampleCount = 0; // [FIX #6] 64-bit monotonically increasing sample timebase.
-const unsigned long REFRACTORY_PERIOD_MS = 300; // Limits max BPM to ~200 (matches 300ms window)
+uint64_t sampleCount =
+    0; // [FIX #6] 64-bit monotonically increasing sample timebase.
+const unsigned long REFRACTORY_PERIOD_MS =
+    300; // Limits max BPM to ~200 (matches 300ms window)
 
 // ── LPF (Moving Average) Variables ──────────────────────────────
 const int LPF_WINDOW = 4;
@@ -167,7 +175,8 @@ SemaphoreHandle_t i2cMutex = nullptr;
 TaskHandle_t fifoTaskHandle = nullptr;
 volatile bool sensorTaskReady = false;
 
-// [FIX #4] Fixed-size lock-free SPSC ring. Core 0 produces; loop/Core 1 consumes.
+// [FIX #4] Fixed-size lock-free SPSC ring. Core 0 produces; loop/Core 1
+// consumes.
 struct SensorSample {
   uint32_t red;
   uint32_t ir;
@@ -177,7 +186,8 @@ struct SensorSample {
 static SensorSample sampleRing[FIFO_RING_SIZE];
 static volatile uint32_t ringHead = 0;
 static volatile uint32_t ringTail = 0;
-static uint64_t sensorSampleSequence = 0; // Producer-only, overflow-safe counter
+static uint64_t sensorSampleSequence =
+    0; // Producer-only, overflow-safe counter
 static bool sensorTaskPendingGap = false; // Producer-only
 static bool sensorErrorHandled = false;   // Loop-only
 
@@ -260,8 +270,9 @@ void resetVitals() {
   lastTroughVal = 0.0f;
   prevFilteredIR = 0.0f;
   // Keep sampleCount monotonic across finger transitions and pipeline resets.
-  lastPeakSample = sampleCount; // [FIX #6] Restart beat intervals at this sample.
-  lastBeatMs = 0;              // [FIX #8] Do not reuse a prior finger's beat.
+  lastPeakSample =
+      sampleCount; // [FIX #6] Restart beat intervals at this sample.
+  lastBeatMs = 0;  // [FIX #8] Do not reuse a prior finger's beat.
   livingTissue = false;
   perfusionPct = 0.0f;
 
@@ -385,7 +396,8 @@ bool pushSensorSample(uint32_t red, uint32_t ir, uint64_t sequence,
 bool popSensorSample(SensorSample &sample) {
   const uint32_t tail = __atomic_load_n(&ringTail, __ATOMIC_RELAXED);
   const uint32_t head = __atomic_load_n(&ringHead, __ATOMIC_ACQUIRE);
-  if (tail == head) return false;
+  if (tail == head)
+    return false;
 
   sample = sampleRing[tail & FIFO_RING_MASK];
   __atomic_store_n(&ringTail, tail + 1U, __ATOMIC_RELEASE);
@@ -396,7 +408,8 @@ void processSample(uint32_t red, uint32_t ir, uint64_t sequence,
                    bool gapBefore) {
   static uint16_t fingerOffCount = 0;
   sampleCount = sequence;
-  if (gapBefore) { // Preserve running BPM/SpO2 across temporary ring buffer resyncs
+  if (gapBefore) { // Preserve running BPM/SpO2 across temporary ring buffer
+                   // resyncs
     lastPeakSample = sampleCount;
     __atomic_add_fetch(&pipelineResyncCount, 1, __ATOMIC_RELAXED);
   }
@@ -408,8 +421,8 @@ void processSample(uint32_t red, uint32_t ir, uint64_t sequence,
     if (fingerDetected) {
       if (++fingerOffCount >= 100) {
         fingerOffCount = 0;
-      fingerDetected = false;
-      resetVitals();
+        fingerDetected = false;
+        resetVitals();
       }
     }
     return;
@@ -519,7 +532,8 @@ void wsEventHandler(WStype_t type, uint8_t *payload, size_t length) {
   case WStype_CONNECTED:
     wsConnected = true;
     wsRetryDelayMs = 5000;
-    Serial.printf("[WS] connected to bpm-server at %s:%u\n", serverAddress.toString().c_str(), (unsigned)SERVER_PORT);
+    Serial.printf("[WS] connected to bpm-server at %s:%u\n",
+                  serverAddress.toString().c_str(), (unsigned)SERVER_PORT);
     break;
   case WStype_DISCONNECTED:
     wsConnected = false;
@@ -568,12 +582,14 @@ void onWiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
 // ────────────────────────────────────────────────────────────────
 bool initSensor() {
   if (particleSensor.begin(Wire, I2C_SPEED_FAST)) {
-    byte powerLevel = 0x3C; // ~12mA LED current for strong PPG penetration & high SNR
+    byte powerLevel =
+        0x3C; // ~12mA LED current for strong PPG penetration & high SNR
     byte sampleAverage = 1; // No FIFO sample averaging
     byte ledMode = 2;       // Red + IR mode
     int sampleRate = 400;   // 400 Hz sampling rate
     int pulseWidth = 215;   // 17-bit resolution
-    int adcRange = 16384;   // [FIX #11] 17-bit pulse width requires 16.384uA range.
+    int adcRange =
+        16384; // [FIX #11] 17-bit pulse width requires 16.384uA range.
 
     particleSensor.setup(powerLevel, sampleAverage, ledMode, sampleRate,
                          pulseWidth, adcRange);
@@ -672,39 +688,48 @@ void reportVitals() {
     currentBPM = 0.0f;
     beatAvg = 0;
   }
-  livingTissue = fingerDetected && (perfusionPct >= MIN_PERFUSION_INDEX || beatRecent);
-  // Continuous measurement: maintain calculated heart rate and SpO2 as long as finger is in contact
+  livingTissue =
+      fingerDetected && (perfusionPct >= MIN_PERFUSION_INDEX || beatRecent);
+  // Continuous measurement: maintain calculated heart rate and SpO2 as long as
+  // finger is in contact
   int reportBpm = (fingerDetected && beatAvg > 0) ? beatAvg : 0;
   int reportSpo2 = (fingerDetected && estimatedSpo2 > 0) ? estimatedSpo2 : 0;
 
   if (wsConnected) {
     char json[352];
-    snprintf(json, sizeof(json),
-             "{\"type\":\"vitals\",\"bpm\":%d,\"spo2\":%d,\"irValue\":%ld,\"redValue\":%ld,\"fingerDetected\":%s,\"signal\":\"%s\",\"uptime\":%ld,\"perfusionPct\":%.2f,\"sensorError\":%s}",
-             reportBpm, reportSpo2, latestIR, latestRed,
-             fingerDetected ? "true" : "false", signalQuality, uptime, // [FIX #12] Raw contact is separate from valid-vitals gating.
-             perfusionPct, sensorError ? "true" : "false");
+    snprintf(
+        json, sizeof(json),
+        "{\"type\":\"vitals\",\"bpm\":%d,\"spo2\":%d,\"irValue\":%ld,"
+        "\"redValue\":%ld,\"fingerDetected\":%s,\"signal\":\"%s\",\"uptime\":%"
+        "ld,\"perfusionPct\":%.2f,\"sensorError\":%s}",
+        reportBpm, reportSpo2, latestIR, latestRed,
+        fingerDetected ? "true" : "false", signalQuality,
+        uptime, // [FIX #12] Raw contact is separate from valid-vitals gating.
+        perfusionPct, sensorError ? "true" : "false");
     ws.sendTXT(json);
   }
 
   // [FIX #4] One compact diagnostic line at 1 Hz, outside the sample path.
   if (millis() - lastSerialMs >= 1000) {
     lastSerialMs = millis();
-    Serial.printf("[V] bpm=%d spo2=%d finger=%u ir=%ld red=%ld pi=%.2f wifi=%u ws=%u sensorErr=%u fifoOvf=%lu ringOvf=%lu resync=%lu\n",
+    Serial.printf("[V] bpm=%d spo2=%d finger=%u ir=%ld red=%ld pi=%.2f wifi=%u "
+                  "ws=%u sensorErr=%u fifoOvf=%lu ringOvf=%lu resync=%lu\n",
                   reportBpm, reportSpo2, fingerDetected ? 1 : 0, latestIR,
-                  latestRed, perfusionPct, wifiOk ? 1 : 0,
-                  wsConnected ? 1 : 0, sensorError ? 1 : 0,
-                  (unsigned long)fifoOverflowCount,
+                  latestRed, perfusionPct, wifiOk ? 1 : 0, wsConnected ? 1 : 0,
+                  sensorError ? 1 : 0, (unsigned long)fifoOverflowCount,
                   (unsigned long)ringOverflowCount,
                   (unsigned long)pipelineResyncCount);
   }
 }
-// [FIX #5] MAX30102 register helpers; called only by the FIFO task under i2cMutex.
+// [FIX #5] MAX30102 register helpers; called only by the FIFO task under
+// i2cMutex.
 bool readMaxRegister(uint8_t reg, uint8_t &value) {
   Wire.beginTransmission(SENSOR_I2C_ADDRESS);
   Wire.write(reg);
-  if (Wire.endTransmission(false) != 0) return false;
-  if (Wire.requestFrom((uint8_t)SENSOR_I2C_ADDRESS, (uint8_t)1) != 1) return false;
+  if (Wire.endTransmission(false) != 0)
+    return false;
+  if (Wire.requestFrom((uint8_t)SENSOR_I2C_ADDRESS, (uint8_t)1) != 1)
+    return false;
   value = Wire.read();
   return true;
 }
@@ -741,7 +766,8 @@ void fifoDrainTask(void *parameter) {
           sensorTaskReady = false;
           ++failuresSinceSuccess;
           sensorInitFailures = failuresSinceSuccess;
-          if (failuresSinceSuccess >= SENSOR_INIT_FAILURE_LIMIT) sensorError = true;
+          if (failuresSinceSuccess >= SENSOR_INIT_FAILURE_LIMIT)
+            sensorError = true;
         }
       }
       lastSensorRetryMs = millis();
@@ -766,67 +792,75 @@ void fifoDrainTask(void *parameter) {
   }
 }
 
-// [FIX #1/#3] Resolve mDNS first, then check Windows host mDNS, cached address, or fallback IP.
+// [FIX #1/#3] Resolve mDNS first, then check Windows host mDNS, cached address,
+// or fallback IP.
 bool resolveServerAddress() {
-  if (cachedServerAddress != IPAddress(0, 0, 0, 0)) {
+  IPAddress localIp = WiFi.localIP();
+  // Check if cached server address is valid and on same /24 subnet as local IP
+  if (cachedServerAddress != IPAddress(0, 0, 0, 0) &&
+      (cachedServerAddress[0] == localIp[0] && cachedServerAddress[1] == localIp[1] && cachedServerAddress[2] == localIp[2])) {
     serverAddress = cachedServerAddress;
     serverResolved = true;
-    Serial.printf("[NET] using verified server address %s\n", serverAddress.toString().c_str());
+    Serial.printf("[NET] using verified server address %s\n",
+                  serverAddress.toString().c_str());
     return true;
   }
   IPAddress discovered = MDNS.queryHost(SERVER_MDNS_HOST, 1200);
   if (discovered == IPAddress(0, 0, 0, 0)) {
-    // Windows native mDNS reliably resolves the machine hostname (e.g. LAPTOP-RSME6K8B.local)
+    // Windows native mDNS reliably resolves the machine hostname (e.g.
+    // LAPTOP-RSME6K8B.local)
     discovered = MDNS.queryHost(SERVER_WINDOWS_HOST, 1200);
   }
-  if (discovered != IPAddress(0, 0, 0, 0)) {
+  if (discovered != IPAddress(0, 0, 0, 0) &&
+      (discovered[0] == localIp[0] && discovered[1] == localIp[1] && discovered[2] == localIp[2])) {
     serverAddress = discovered;
-    if (discovered != cachedServerAddress) {
-      cachedServerAddress = discovered;
-      preferences.putUInt("server_ip", (uint32_t)discovered);
-    }
+    cachedServerAddress = discovered;
+    preferences.begin("bpm-server", false);
+    preferences.putUInt("server_ip", (uint32_t)discovered);
+    preferences.end();
     serverResolved = true;
-    Serial.printf("[mDNS] server resolved to %s\n", discovered.toString().c_str());
-    return true;
-  }
-  if (cachedServerAddress != IPAddress(0, 0, 0, 0)) {
-    serverAddress = cachedServerAddress;
-    serverResolved = true;
-    Serial.printf("[mDNS] mDNS lookup timed out; using cached server address %s\n",
-                  cachedServerAddress.toString().c_str());
+    Serial.printf("[mDNS] server resolved to %s\n",
+                  discovered.toString().c_str());
     return true;
   }
   // Fall back to configured server IP (laptop on ElderCare WiFi)
   serverAddress = SERVER_FALLBACK_IP;
   cachedServerAddress = serverAddress;
+  preferences.begin("bpm-server", false);
   preferences.putUInt("server_ip", (uint32_t)serverAddress);
+  preferences.end();
   serverResolved = true;
-  Serial.printf("[mDNS] mDNS unavailable; falling back to configured server IP %s\n",
-                serverAddress.toString().c_str());
+  Serial.printf(
+      "[NET] fallback to configured server IP %s\n",
+      serverAddress.toString().c_str());
   return true;
 }
 
 void wsInit() {
-  if (!wifiOk || !serverResolved || wsInitialized) return;
+  if (!wifiOk || !serverResolved || wsInitialized)
+    return;
   ws.onEvent(wsEventHandler);
   ws.setReconnectInterval(5000);
   ws.disableHeartbeat();
-  Serial.printf("[WS] connecting to %s:%u%s\n", serverAddress.toString().c_str(),
-                (unsigned)SERVER_PORT, SERVER_PATH);
+  Serial.printf("[WS] connecting to %s:%u%s\n",
+                serverAddress.toString().c_str(), (unsigned)SERVER_PORT,
+                SERVER_PATH);
   ws.begin(serverAddress, SERVER_PORT, SERVER_PATH);
   wsInitialized = true;
   lastWsRetryMs = millis();
 }
 
 void wsReconnect() {
-  if (!wifiOk) return;
+  if (!wifiOk)
+    return;
   if (wsInitialized) {
     ws.disconnect(); // [FIX #3] Tear down old client state before re-begin.
     wsInitialized = false;
     wsConnected = false;
   }
   serverResolved = resolveServerAddress();
-  if (serverResolved) wsInit();
+  if (serverResolved)
+    wsInit();
   lastWsRetryMs = millis();
   wsRetryDelayMs = min(wsRetryDelayMs * 2UL, 60000UL);
 }
@@ -843,18 +877,26 @@ void serviceConnectivity(unsigned long now) {
   }
   if (wifiGotIpEvent) {
     wifiGotIpEvent = false;
-    Serial.printf("[WiFi] connected ip=%s\n", WiFi.localIP().toString().c_str());
-    if (!mdnsStarted) mdnsStarted = MDNS.begin("jeevan-bracelet");
+    Serial.printf("[WiFi] connected ip=%s\n",
+                  WiFi.localIP().toString().c_str());
+    if (!mdnsStarted)
+      mdnsStarted = MDNS.begin("jeevan-bracelet");
     serverResolved = resolveServerAddress();
-    if (!serverResolved) Serial.println(F("[WS] server mDNS unavailable; cached address unavailable"));
+    if (!serverResolved)
+      Serial.println(
+          F("[WS] server mDNS unavailable; cached address unavailable"));
     wsInit();
     wsRetryDelayMs = 15000;
   }
   if (WiFi.status() == WL_CONNECTED) {
     wifiOk = true;
-    if (wsInitialized) ws.loop();
-    if (!wsInitialized && (now - lastWsRetryMs >= wsRetryDelayMs)) wsReconnect();
-    else if (wsInitialized && !wsConnected && (now - lastWsRetryMs >= wsRetryDelayMs)) wsReconnect();
+    if (wsInitialized)
+      ws.loop();
+    if (!wsInitialized && (now - lastWsRetryMs >= wsRetryDelayMs))
+      wsReconnect();
+    else if (wsInitialized && !wsConnected &&
+             (now - lastWsRetryMs >= wsRetryDelayMs))
+      wsReconnect();
   } else {
     wifiOk = false;
     wsConnected = false;
@@ -869,10 +911,12 @@ void configureTaskWatchdog() {
   config.idle_core_mask = 0;
   config.trigger_panic = true;
   esp_err_t err = esp_task_wdt_init(&config);
-  if (err == ESP_ERR_INVALID_STATE) esp_task_wdt_reconfigure(&config);
+  if (err == ESP_ERR_INVALID_STATE)
+    esp_task_wdt_reconfigure(&config);
 #else
   esp_err_t err = esp_task_wdt_init(10, true);
-  if (err == ESP_ERR_INVALID_STATE) esp_task_wdt_init(10, true);
+  if (err == ESP_ERR_INVALID_STATE)
+    esp_task_wdt_init(10, true);
 #endif
   esp_task_wdt_add(NULL);
 }
@@ -881,8 +925,9 @@ void setup() {
   Serial.begin(115200);
   delay(300);
   bootMs = millis();
-  Serial.printf("[BOOT] resetReason=%d (brownout reset indicates supply/rail issue)\n",
-                (int)esp_reset_reason()); // [FIX #10] Surface power brownouts.
+  Serial.printf(
+      "[BOOT] resetReason=%d (brownout reset indicates supply/rail issue)\n",
+      (int)esp_reset_reason()); // [FIX #10] Surface power brownouts.
 
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, LOW);
@@ -893,7 +938,8 @@ void setup() {
 
   Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN, 400000);
   i2cMutex = xSemaphoreCreateMutex();
-  if (!i2cMutex) sensorError = true;
+  if (!i2cMutex)
+    sensorError = true;
   if (display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
     oledFound = true;
     display.clearDisplay();
@@ -906,17 +952,14 @@ void setup() {
   }
   resetVitals();
 
-  preferences.begin("bpm-server", true);
-  uint32_t savedIp = preferences.getUInt("server_ip", 0);
-  preferences.end();
-  if (savedIp != 0) {
-    cachedServerAddress = IPAddress(savedIp);
-  } else {
-    cachedServerAddress = SERVER_FALLBACK_IP;
-  }
   preferences.begin("bpm-server", false);
+  preferences.clear();
+  preferences.putUInt("server_ip", (uint32_t)SERVER_FALLBACK_IP);
+  preferences.end();
+  cachedServerAddress = SERVER_FALLBACK_IP;
 
-  // [FIX #4] Sensor sampling is isolated from networking, display, and DSP work.
+  // [FIX #4] Sensor sampling is isolated from networking, display, and DSP
+  // work.
   BaseType_t taskCreated = xTaskCreatePinnedToCore(
       fifoDrainTask, "max30102-fifo", 4096, nullptr, 2, &fifoTaskHandle, 0);
   if (taskCreated != pdPASS) {
@@ -941,7 +984,8 @@ void setup() {
   configureTaskWatchdog();
   WiFi.setSleep(false);
   WiFi.setAutoReconnect(true);
-  WiFi.setTxPower(WIFI_POWER_19_5dBm); // [FIX #10] Hardware rail must tolerate TX bursts.
+  WiFi.setTxPower(
+      WIFI_POWER_19_5dBm); // [FIX #10] Hardware rail must tolerate TX bursts.
   WiFi.begin(activeSSID.c_str(), WIFI_PASS);
   lastReportMs = millis();
   lastWsRetryMs = millis();
@@ -963,7 +1007,8 @@ void loop() {
     if (sensorError) {
       fingerDetected = false;
       resetVitals();
-      Serial.println(F("[SENSOR] sensorError=true; WiFi telemetry remains active"));
+      Serial.println(
+          F("[SENSOR] sensorError=true; WiFi telemetry remains active"));
     } else {
       Serial.println(F("[SENSOR] recovered; acquisition resumed"));
     }
@@ -976,7 +1021,8 @@ void loop() {
   if (beatActive && (now - beatTriggerMs >= BEAT_BEEP_MS)) {
     beatActive = false;
     digitalWrite(LED_PIN, LOW);
-    if (ENABLE_BUZZER && BUZZER_PIN >= 0) digitalWrite(BUZZER_PIN, LOW);
+    if (ENABLE_BUZZER && BUZZER_PIN >= 0)
+      digitalWrite(BUZZER_PIN, LOW);
   }
 
   updateDisplay();

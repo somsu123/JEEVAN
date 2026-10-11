@@ -13,6 +13,7 @@ interface SidebarProps {
   onTriggerSOS: () => void;
   fallCount: number;
   pendingRxCount?: number;
+  cardiacSosActive?: boolean;
 }
 
 const menuItems: { id: ViewType; name: string; icon: React.ElementType; badge?: string; badgeType?: 'live' | 'alert' | 'iot' | 'ai' | 'rx' | 'hist' }[] = [
@@ -26,7 +27,7 @@ const menuItems: { id: ViewType; name: string; icon: React.ElementType; badge?: 
 ];
 
 export default function Sidebar({
-  currentView, onViewChange, activeAlert, onTriggerSOS, fallCount, pendingRxCount = 0
+  currentView, onViewChange, activeAlert, onTriggerSOS, fallCount, pendingRxCount = 0, cardiacSosActive = false
 }: SidebarProps) {
   return (
     <aside className="w-[280px] shrink-0 h-screen bg-white border-r border-slate-200/80 flex flex-col px-5 py-6 gap-6 z-30 relative shadow-2xs">
@@ -48,6 +49,7 @@ export default function Sidebar({
           const isActive = currentView === item.id;
           const Icon = item.icon;
           const isFallAlert = item.id === 'fall-alerts' && (activeAlert || fallCount > 0);
+          const isMedboxSos = item.id === 'medicine' && cardiacSosActive;
 
           return (
             <motion.button
@@ -66,6 +68,8 @@ export default function Sidebar({
                   className={`h-5 w-5 transition-colors shrink-0 ${
                     isActive
                       ? 'text-blue-600'
+                      : isMedboxSos
+                      ? 'text-rose-600 animate-pulse'
                       : isFallAlert
                       ? 'text-rose-600'
                       : 'text-slate-400 group-hover:text-slate-600'
@@ -74,17 +78,19 @@ export default function Sidebar({
                 <span className="text-sm font-medium">{item.name}</span>
               </div>
 
-              {item.badge && (
+              {(item.badge || isMedboxSos) && (
                 <span
                   className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                    isFallAlert
+                    isMedboxSos
+                      ? 'bg-rose-100 text-rose-700 border border-rose-200 animate-pulse font-bold'
+                      : isFallAlert
                       ? 'bg-rose-100 text-rose-700 border border-rose-200 animate-pulse'
                       : isActive
                       ? 'bg-blue-100 text-blue-700'
                       : 'bg-slate-100 text-slate-500'
                   }`}
                 >
-                  {isFallAlert ? fallCount.toString() : item.badge}
+                  {isMedboxSos ? 'SOS' : isFallAlert ? fallCount.toString() : item.badge}
                 </span>
               )}
             </motion.button>

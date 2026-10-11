@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Activity, User, ShieldCheck } from 'lucide-react';
+import { Activity, User, ShieldCheck, AlertTriangle } from 'lucide-react';
 import Sidebar from './components/Sidebar';
 import Overview from './components/Overview';
 import ReportScanner from './components/ReportScanner';
@@ -8,7 +8,7 @@ import FallAlerts from './components/FallAlerts';
 import MedicineBox from './components/MedicineBox';
 import RxReview from './components/RxReview';
 import DoseHistory from './components/DoseHistory';
-import { VitalState, ViewType, ScanResult, FallEvent, MedicineSlot, MedboxStatus, MedboxDeviceState } from './types';
+import { VitalState, ViewType, ScanResult, FallEvent, MedicineSlot, MedboxStatus, MedboxDeviceState, CardiacSosState } from './types';
 import { motion, AnimatePresence } from 'motion/react';
 
 const makeDefaultVitals = (): VitalState => ({
@@ -99,6 +99,70 @@ export default function App() {
   });
   const [pendingRxCount, setPendingRxCount] = useState(0);
 
+  // ─── Emergency Cardiac SOS State & Handlers ──────────────────────────────
+  const [cardiacSos, setCardiacSos] = useState<CardiacSosState | null>(null);
+  const lastCardiacAutoOpenRef = useRef<number>(0);
+
+  const handleRemoteOpen = useCallback(async (compartmentIndex = 0) => {
+    setLidOpen(true);
+    try {
+      await fetch('/api/hardware/remote-open', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          compartment: compartmentIndex,
+          label: 'EMERGENCY SOS',
+          emergency: true,
+        }),
+      });
+    } catch (err) {
+      console.error('[MEDBOX] Failed to trigger remote lid open:', err);
+    }
+  }, []);
+
+  const triggerCardiacSos = useCallback((bpm: number, type: 'bradycardia' | 'tachycardia', forced = false) => {
+    const now = Date.now();
+    setCardiacSos({
+      active: true,
+      type,
+      bpm,
+      timestamp: new Date().toLocaleTimeString('en-US', { hour12: false }),
+      autoOpened: true,
+      designatedSlot: 1,
+      dismissed: false,
+    });
+    setActiveAlert(true);
+
+    // Auto-open hardware lid with 25s cooldown unless forced simulation
+    if (forced || now - lastCardiacAutoOpenRef.current > 25000) {
+      lastCardiacAutoOpenRef.current = now;
+      setLidOpen(true);
+      fetch('/api/hardware/remote-open', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          compartment: 0,
+          label: type === 'bradycardia' ? 'SOS BRADY ≤45' : 'SOS TACHY >120',
+          emergency: true,
+          bpm,
+        }),
+      }).catch((err) => console.error('[CARDIAC SOS] Remote lid open failed:', err));
+    }
+  }, []);
+
+  const triggerCardiacSosRef = useRef(triggerCardiacSos);
+  useEffect(() => {
+    triggerCardiacSosRef.current = triggerCardiacSos;
+  }, [triggerCardiacSos]);
+
+  const handleDismissCardiacSos = useCallback(() => {
+    setCardiacSos(prev => prev ? { ...prev, dismissed: true, active: false } : null);
+  }, []);
+
+  const handleSimulateCardiacSos = useCallback((simulatedBpm: number) => {
+    triggerCardiacSos(simulatedBpm, simulatedBpm <= 45 ? 'bradycardia' : 'tachycardia', true);
+  }, [triggerCardiacSos]);
+
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
@@ -155,6 +219,14 @@ export default function App() {
           bloodLevelSeconds: packetFresh && Number.isFinite(Number(data.bloodLevelSeconds)) ? Number(data.bloodLevelSeconds) : null,
           roomPresence: packetFresh && typeof data.roomPresence === 'boolean' ? data.roomPresence : null,
         }));
+
+        // Cardiac SOS: Check if BPM is <= 45 (bradycardia) or > 120 (tachycardia)
+        const rawBpm = Number(data.heartRate);
+        const isValidBpm = packetFresh && Boolean(data.fingerPresent) && Number.isFinite(rawBpm) && rawBpm > 0;
+        if (isValidBpm && (rawBpm <= 45 || rawBpm > 120)) {
+          triggerCardiacSosRef.current(rawBpm, rawBpm <= 45 ? 'bradycardia' : 'tachycardia');
+        }
+
         if (data.isFall && !previousFallActive.current) {
           handleIncomingFall({
             source: data.fallSource === 'bracelet' ? 'bracelet' : 'camera',
@@ -333,6 +405,16 @@ export default function App() {
       } catch { /* malformed SSE — fall back to poll */ fetchSchedule(); }
     });
 
+    es.addEventListener('emergency_taken', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        console.log('[SSE] ✅ Emergency medication taken confirmed by hardware button (Box ' + (data?.box || 1) + ')');
+        setCardiacSos(prev => prev ? { ...prev, active: false, dismissed: true } : null);
+        setActiveAlert(false);
+        setLidOpen(false);
+      } catch { /* malformed SSE */ }
+    });
+
     // Also pick up lid state from the medicine-state endpoint
     const lidPoll = setInterval(async () => {
       try {
@@ -463,10 +545,37 @@ export default function App() {
 
   const renderView = () => {
     switch (currentView) {
-      case 'overview': return <Overview scannedHistory={scannedHistory} onNavigate={setCurrentView} activeAlert={activeAlert} vitals={vitals} hardwareOnline={hardwareOnline} espConnected={espConnected} />;
+      case 'overview': return (
+        <Overview
+          scannedHistory={scannedHistory}
+          onNavigate={setCurrentView}
+          activeAlert={activeAlert}
+          vitals={vitals}
+          hardwareOnline={hardwareOnline}
+          espConnected={espConnected}
+          cardiacSos={cardiacSos}
+          onDismissCardiacSos={handleDismissCardiacSos}
+        />
+      );
       case 'live-vitals': return <LiveVitals vitals={vitals} hardwareOnline={hardwareOnline} espConnected={espConnected} />;
       case 'fall-alerts': return <FallAlerts fallEvents={fallEvents} activeAlert={activeAlert} onResolveEvent={handleResolveFall} onClearAll={handleClearFalls} />;
-      case 'medicine': return <MedicineBox slots={medicineSlots} lidOpen={lidOpen} medboxStatus={medboxStatus} onMarkTaken={handleMarkTaken} onMarkMissed={handleMarkMissed} onResetSlot={handleResetSlot} onDeleteSlot={handleDeleteSlot} onUpdateSlots={handleUpdateSlots} />;
+      case 'medicine': return (
+        <MedicineBox
+          slots={medicineSlots}
+          lidOpen={lidOpen}
+          medboxStatus={medboxStatus}
+          onMarkTaken={handleMarkTaken}
+          onMarkMissed={handleMarkMissed}
+          onResetSlot={handleResetSlot}
+          onDeleteSlot={handleDeleteSlot}
+          onUpdateSlots={handleUpdateSlots}
+          vitals={vitals}
+          cardiacSos={cardiacSos}
+          onTriggerRemoteOpen={() => handleRemoteOpen(0)}
+          onDismissCardiacSos={handleDismissCardiacSos}
+          onSimulateCardiacSos={handleSimulateCardiacSos}
+        />
+      );
       case 'report-scanner': return <ReportScanner onAddScanResult={(res) => setScannedHistory(p => [res, ...p])} scannedHistory={scannedHistory} />;
       case 'rx-review': return <RxReview />;
       case 'dose-history': return <DoseHistory />;
@@ -479,9 +588,48 @@ export default function App() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-[#F8FAFC] font-body text-slate-700 antialiased selection:bg-blue-100 selection:text-blue-800 relative">
-      <Sidebar currentView={currentView} onViewChange={setCurrentView} activeAlert={activeAlert} onTriggerSOS={() => setActiveAlert(true)} fallCount={activeFallCount} pendingRxCount={pendingRxCount} />
+      <Sidebar
+        currentView={currentView}
+        onViewChange={setCurrentView}
+        activeAlert={activeAlert}
+        onTriggerSOS={() => setActiveAlert(true)}
+        fallCount={activeFallCount}
+        pendingRxCount={pendingRxCount}
+        cardiacSosActive={Boolean(cardiacSos?.active && !cardiacSos?.dismissed)}
+      />
 
       <div className="flex-1 flex flex-col min-w-0 relative z-10">
+        {/* Top Cardiac SOS Emergency Banner */}
+        {cardiacSos?.active && !cardiacSos.dismissed && (
+          <div className="bg-rose-600 text-white px-8 py-2.5 flex flex-wrap items-center justify-between text-xs sm:text-sm shadow-md border-b border-rose-700 animate-pulse z-30">
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="h-5 w-5 text-amber-300 shrink-0" />
+              <div>
+                <span className="font-bold uppercase tracking-wider">CARDIAC SOS ACTIVE: </span>
+                <span>
+                  Heart Rate at <strong>{cardiacSos.bpm} BPM</strong> (
+                  {cardiacSos.type === 'bradycardia' ? 'Critical Bradycardia ≤45' : 'Critical Tachycardia >120'}
+                  ). Smart Medicine Box lid auto-opened for <strong>Compartment 1 (Emergency Slot)</strong>.
+                </span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 mt-1 sm:mt-0">
+              <button
+                onClick={() => setCurrentView('medicine')}
+                className="px-3 py-1 bg-white text-rose-700 font-bold rounded-xl text-xs hover:bg-rose-50 transition cursor-pointer"
+              >
+                View Emergency Slot →
+              </button>
+              <button
+                onClick={handleDismissCardiacSos}
+                className="px-2.5 py-1 bg-rose-700 hover:bg-rose-800 text-white font-medium rounded-xl text-xs border border-rose-500 transition cursor-pointer"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Floating Top Nav */}
         <header className="h-16 shrink-0 px-8 flex items-center justify-between z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/80 shadow-2xs">
           <div className="flex items-center gap-4 pointer-events-auto">

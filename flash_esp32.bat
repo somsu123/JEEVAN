@@ -52,7 +52,7 @@ if %ERRORLEVEL% == 0 (
   echo  ================================================================
   echo    SUCCESS! ESP32 flashed!
   echo    WiFi SSID : ElderCare
-  echo    Server    : ws://10.122.37.135:3001/ws/esp32
+  echo    Server    : ws://10.91.87.135:3001/ws/esp32
   echo    Baud rate : 115200  (open Serial Monitor to verify)
   echo  ================================================================
   echo.

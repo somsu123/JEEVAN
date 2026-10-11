@@ -53,7 +53,7 @@ if %ERRORLEVEL% == 0 (
   echo    Sensor     : MPU-6050 (SDA: GPIO 21, SCL: GPIO 22)
   echo    Buzzer     : GPIO 25 (Heavy-Fall Alarm Siren)
   echo    WiFi SSID  : ElderCare
-  echo    Dashboard  : http://10.122.37.135:5050
+  echo    Dashboard  : http://10.91.87.135:5050
   echo  ================================================================
   echo.
 ) else (

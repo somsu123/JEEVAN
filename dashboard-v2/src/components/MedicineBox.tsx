@@ -20,8 +20,11 @@ import {
   Trash2,
   Timer,
   RefreshCw,
+  Heart,
+  ShieldAlert,
+  Zap,
 } from 'lucide-react';
-import { MedicineSlot, MedboxStatus, MedboxDeviceState } from '../types';
+import { MedicineSlot, MedboxStatus, MedboxDeviceState, VitalState, CardiacSosState } from '../types';
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 interface MedicineBoxProps {
@@ -33,6 +36,11 @@ interface MedicineBoxProps {
   onResetSlot: (id: string) => void;
   onDeleteSlot?: (id: string) => void;
   onUpdateSlots: (slots: MedicineSlot[]) => void;
+  vitals?: VitalState;
+  cardiacSos?: CardiacSosState | null;
+  onTriggerRemoteOpen?: () => Promise<void> | void;
+  onDismissCardiacSos?: () => void;
+  onSimulateCardiacSos?: (bpm: number) => void;
 }
 
 // ─── Countdown hook ───────────────────────────────────────────────────────────
@@ -281,6 +289,11 @@ function BoxCard({
                 {slot.medicineName}
               </h3>
               <span className="text-xs text-slate-500 font-medium block truncate">{slot.dosage}</span>
+              {slot.slotNumber === 1 && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-md mt-1">
+                  ⚡ Overlaps Emergency SOS Slot
+                </span>
+              )}
             </div>
           </div>
 
@@ -638,6 +651,344 @@ function AddSlotForm({ onAdd, onClose }: {
   );
 }
 
+// ─── Designated Emergency Medicine Box Slot Section ──────────────────────────
+interface EmergencyMedicineSectionProps {
+  lidOpen: boolean;
+  medboxStatus: MedboxStatus;
+  vitals?: VitalState;
+  cardiacSos?: CardiacSosState | null;
+  overlappingSlot?: MedicineSlot;
+  onTriggerRemoteOpen?: () => Promise<void> | void;
+  onDismissCardiacSos?: () => void;
+  onSimulateCardiacSos?: (bpm: number) => void;
+}
+
+function EmergencyMedicineSection({
+  lidOpen,
+  medboxStatus,
+  vitals,
+  cardiacSos,
+  overlappingSlot,
+  onTriggerRemoteOpen,
+  onDismissCardiacSos,
+  onSimulateCardiacSos,
+}: EmergencyMedicineSectionProps) {
+  const currentBpm = vitals?.heartRate !== undefined && vitals.heartRate !== '--'
+    ? Number(vitals.heartRate)
+    : null;
+
+  const isBpmCritical = currentBpm !== null && Number.isFinite(currentBpm) && (currentBpm <= 45 || currentBpm > 120);
+  const isSosActive = Boolean((cardiacSos?.active && !cardiacSos?.dismissed) || isBpmCritical);
+  const activeBpm = cardiacSos?.bpm || (currentBpm !== null ? currentBpm : 0);
+  const isBradycardia = (cardiacSos?.type === 'bradycardia') || (currentBpm !== null && currentBpm <= 45);
+
+  const [openingLid, setOpeningLid] = useState(false);
+
+  const handleManualOpen = async () => {
+    setOpeningLid(true);
+    try {
+      await onTriggerRemoteOpen?.();
+    } finally {
+      setTimeout(() => setOpeningLid(false), 2000);
+    }
+  };
+
+  return (
+    <section
+      id="emergency-medicine-slot-section"
+      className={`rounded-3xl border transition-all duration-300 relative overflow-hidden shadow-xs ${
+        isSosActive
+          ? 'bg-gradient-to-br from-rose-50 via-white to-amber-50/40 border-rose-300 ring-2 ring-rose-500/20 shadow-md'
+          : 'bg-gradient-to-br from-slate-50/70 via-white to-blue-50/20 border-slate-200 hover:border-slate-300'
+      }`}
+    >
+      {/* Top Accent Strip */}
+      <div className={`h-2 w-full ${isSosActive ? 'bg-gradient-to-r from-rose-500 via-red-600 to-amber-500 animate-pulse' : 'bg-gradient-to-r from-blue-600 via-indigo-500 to-slate-400'}`} />
+
+      <div className="p-6 sm:p-7 space-y-6">
+
+        {/* ── Section Header ── */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="flex items-start gap-3.5">
+            <div className={`p-3 rounded-2xl shrink-0 ${isSosActive ? 'bg-rose-100 text-rose-600 ring-2 ring-rose-400 animate-pulse' : 'bg-rose-50 text-rose-600 border border-rose-100'}`}>
+              <ShieldAlert className="h-6 w-6" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-lg font-headline font-bold text-slate-800 tracking-tight">
+                  Designated Emergency Medication Box Slot
+                </h2>
+                <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${
+                  isSosActive
+                    ? 'bg-rose-100 text-rose-800 border-rose-300 animate-pulse'
+                    : 'bg-slate-100 text-slate-600 border-slate-200'
+                }`}>
+                  {isSosActive ? '🚨 SOS TRIGGER ACTIVE' : '● Auto-Trigger Armed'}
+                </span>
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                  Thresholds: ≤45 BPM or &gt;120 BPM
+                </span>
+              </div>
+              <p className="text-xs sm:text-sm text-slate-500 font-medium mt-1">
+                Automated hardware servo lid actuation: Opens automatically on critical bradycardia (≤45 BPM) or tachycardia (&gt;120 BPM).
+              </p>
+            </div>
+          </div>
+
+          {/* Quick Actuator Actions */}
+          <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
+            <button
+              onClick={handleManualOpen}
+              disabled={openingLid}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-bold transition shadow-xs cursor-pointer ${
+                lidOpen
+                  ? 'bg-amber-100 text-amber-800 border border-amber-300 hover:bg-amber-200'
+                  : 'bg-rose-600 text-white hover:bg-rose-700 active:scale-95'
+              }`}
+            >
+              <Package className="h-4 w-4" />
+              {openingLid ? 'Opening Servo...' : lidOpen ? '🔓 Lid Is Open' : 'Open Emergency Lid'}
+            </button>
+
+            {isSosActive && (
+              <>
+                <button
+                  onClick={async () => {
+                    try {
+                      await fetch('/api/hardware/medbox-event', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          event: 'DOSE_TAKEN',
+                          box: 1,
+                          medicine: 'Emergency Cardiac Dose',
+                          dosage: '1 dose',
+                          deviceId: 'medbox-01',
+                        }),
+                      });
+                    } catch (e) {
+                      console.error('[MEDBOX] Failed to trigger button override:', e);
+                    }
+                    onDismissCardiacSos?.();
+                  }}
+                  className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs text-xs font-bold transition cursor-pointer"
+                  title="Simulate or confirm the physical button press on D4"
+                >
+                  <CheckCircle2 className="h-4 w-4" /> Accept Dose (Button Override)
+                </button>
+
+                <button
+                  onClick={() => onDismissCardiacSos?.()}
+                  className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 text-xs font-semibold transition cursor-pointer"
+                >
+                  Acknowledge SOS
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* ── Active Alert Banner (conditional) ── */}
+        {isSosActive && (
+          <div className="p-4 rounded-2xl bg-rose-500 text-white shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3 animate-pulse">
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="h-6 w-6 text-amber-200 shrink-0" />
+              <div>
+                <span className="font-bold text-sm block">
+                  🚨 CARDIAC SOS TRIGGERED: {isBradycardia ? 'Critical Bradycardia (≤45 BPM)' : 'Critical Tachycardia (>120 BPM)'} Detected!
+                </span>
+                <span className="text-xs text-rose-100 mt-0.5 block">
+                  Patient pulse reached {activeBpm > 0 ? `${activeBpm} BPM` : 'critical threshold'}. Medicine Box lid opened automatically. ONLY Slot 1 LED is blinking repeatedly — box closes ONLY after pressing the physical Confirm Button (D4) on the box.
+                </span>
+              </div>
+            </div>
+            <div className="text-right shrink-0">
+              <span className="inline-block px-3 py-1 bg-white/20 backdrop-blur-xs rounded-xl text-xs font-bold border border-white/30">
+                Lid State: {lidOpen ? '🔓 OPEN (90°)' : 'Actuation Dispatched'}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* ── Hardware Overlap Notice ── */}
+        <div className="p-4 rounded-2xl bg-amber-50/80 border border-amber-200 text-slate-700 text-xs space-y-1">
+          <div className="flex items-center gap-2 font-bold text-amber-900 text-sm">
+            <Zap className="h-4 w-4 text-amber-600" />
+            Hardware Compartment Overlap Notice (Limited Physical Sections)
+          </div>
+          <p className="text-slate-600 leading-relaxed">
+            As the hardware medicine box has a limited number of physical compartments (Boxes 1–4),
+            <strong className="text-slate-800"> Compartment 1 (Box #1)</strong> is designated as the
+            <strong className="text-rose-700"> Overlapping Emergency Medication Slot</strong>. Both daily routine medication
+            {overlappingSlot?.medicineName ? ` (${overlappingSlot.medicineName})` : ''} and rapid-response emergency cardiac medications
+            are stored in Compartment 1. Upon any cardiac BPM threshold breach, the automated servo lid unlocks Compartment 1 immediately.
+          </p>
+        </div>
+
+        {/* ── Designated Emergency Slot Grid ── */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+          {/* Compartment 1 Overview Card */}
+          <div className="p-5 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-3 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Designated Compartment</span>
+                <span className="px-2 py-0.5 bg-rose-50 text-rose-700 border border-rose-200 text-[11px] font-bold rounded-lg">
+                  ⚡ Overlapping Slot
+                </span>
+              </div>
+              <div className="flex items-center gap-3 mt-3">
+                <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-rose-500 to-red-600 text-white font-bold text-xl flex items-center justify-center shadow-xs">
+                  1
+                </div>
+                <div>
+                  <h4 className="text-base font-bold font-headline text-slate-800">Compartment #1</h4>
+                  <span className="text-xs text-slate-500 font-medium">Dual-Assigned Hardware Section</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-2 border-t border-slate-100 space-y-1 text-xs">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Regular Schedule:</span>
+                <span className="font-semibold text-slate-700">{overlappingSlot?.medicineName || 'Scheduled Dose'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Emergency Meds:</span>
+                <span className="font-bold text-rose-700">Nitroglycerin / Aspirin / Atropine</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Physical Actuator:</span>
+                <span className={`font-semibold ${lidOpen ? 'text-amber-700' : 'text-slate-700'}`}>
+                  {lidOpen ? '🔓 90° Servo Open' : '🔒 0° Servo Closed'}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">LED Indicator:</span>
+                <span className={`font-semibold ${isSosActive ? 'text-rose-600 animate-pulse' : 'text-slate-700'}`}>
+                  {isSosActive ? '💡 Only Slot 1 Blinking (4 Hz)' : '○ Standby'}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Lid Closure:</span>
+                <span className={`font-semibold ${isSosActive ? 'text-amber-700' : 'text-slate-700'}`}>
+                  {isSosActive ? '🔒 Closes ONLY on Confirm Button (D4)' : 'Ready'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Emergency Med 1: High BPM / Tachycardia */}
+          <div className="p-5 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-3 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-rose-600">High Pulse Emergency (&gt;120 BPM)</span>
+                <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-[10px] font-semibold rounded-lg">Box #1 Slot</span>
+              </div>
+              <h4 className="text-base font-bold font-headline text-slate-800 mt-2">
+                Nitroglycerin (Sorbitrate) 0.5mg + Aspirin 325mg
+              </h4>
+              <p className="text-xs text-slate-500 font-medium mt-1">
+                Sublingual tablet (under tongue) + Chewable Aspirin.
+              </p>
+            </div>
+
+            <div className="pt-2 border-t border-slate-100 space-y-1 text-xs">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Trigger:</span>
+                <span className="font-bold text-rose-600">BPM &gt; 120 (Tachycardia)</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Clinical Action:</span>
+                <span className="font-semibold text-slate-700">Rapid coronary vasodilation</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Instructions:</span>
+                <span className="text-slate-600">Dissolve under tongue; sit down.</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Emergency Med 2: Low BPM / Bradycardia */}
+          <div className="p-5 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-3 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-indigo-600">Low Pulse Emergency (≤45 BPM)</span>
+                <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-[10px] font-semibold rounded-lg">Box #1 Slot</span>
+              </div>
+              <h4 className="text-base font-bold font-headline text-slate-800 mt-2">
+                Cardiac Stimulant / Atropine Support
+              </h4>
+              <p className="text-xs text-slate-500 font-medium mt-1">
+                Oral emergency cardiotonic support tablet.
+              </p>
+            </div>
+
+            <div className="pt-2 border-t border-slate-100 space-y-1 text-xs">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Trigger:</span>
+                <span className="font-bold text-indigo-600">BPM ≤ 45 (Bradycardia)</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Clinical Action:</span>
+                <span className="font-semibold text-slate-700">Sinus node pulse restoration</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Instructions:</span>
+                <span className="text-slate-600">Take immediately with small sip of water.</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        {/* ── Live Telemetry & Diagnostic Verification Strip ── */}
+        <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-xl bg-white border border-slate-200 text-blue-600">
+              <Activity className="h-4 w-4" />
+            </div>
+            <div>
+              <span className="font-bold text-slate-700 block">
+                Live Bracelet Pulse Telemetry: {currentBpm !== null ? `${currentBpm} BPM` : 'Standby / Awaiting Packet'}
+              </span>
+              <span className="text-slate-500 mt-0.5 block">
+                Safety bounds: 46–120 BPM. Any reading ≤45 or &gt;120 initiates automatic emergency lid trigger.
+              </span>
+            </div>
+          </div>
+
+          {/* Testing / Simulator controls */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Test Trigger:</span>
+            <button
+              onClick={() => onSimulateCardiacSos?.(42)}
+              className="px-2.5 py-1.5 rounded-xl bg-white hover:bg-slate-100 border border-slate-200 text-indigo-700 font-bold transition cursor-pointer"
+            >
+              Simulate ≤45 BPM (42)
+            </button>
+            <button
+              onClick={() => onSimulateCardiacSos?.(135)}
+              className="px-2.5 py-1.5 rounded-xl bg-white hover:bg-slate-100 border border-slate-200 text-rose-700 font-bold transition cursor-pointer"
+            >
+              Simulate &gt;120 BPM (135)
+            </button>
+            {isSosActive && (
+              <button
+                onClick={() => onDismissCardiacSos?.()}
+                className="px-2.5 py-1.5 rounded-xl bg-white hover:bg-slate-100 border border-slate-200 text-slate-600 font-semibold transition cursor-pointer"
+              >
+                Reset
+              </button>
+            )}
+          </div>
+        </div>
+
+      </div>
+    </section>
+  );
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function MedicineBox({
   slots = [],
@@ -648,6 +999,11 @@ export default function MedicineBox({
   onResetSlot,
   onDeleteSlot,
   onUpdateSlots,
+  vitals,
+  cardiacSos,
+  onTriggerRemoteOpen,
+  onDismissCardiacSos,
+  onSimulateCardiacSos,
 }: MedicineBoxProps) {
   const [showAddForm, setShowAddForm] = useState(false);
 
@@ -748,6 +1104,18 @@ export default function MedicineBox({
           </div>
         )}
       </div>
+
+      {/* ── Emergency SOS Medicine Slot Section (Designated & Overlapping) ── */}
+      <EmergencyMedicineSection
+        lidOpen={lidOpen}
+        medboxStatus={medboxStatus}
+        vitals={vitals}
+        cardiacSos={cardiacSos}
+        overlappingSlot={safeSlots.find(s => s.slotNumber === 1)}
+        onTriggerRemoteOpen={onTriggerRemoteOpen}
+        onDismissCardiacSos={onDismissCardiacSos}
+        onSimulateCardiacSos={onSimulateCardiacSos}
+      />
 
       {/* ── Physical 4-box grid ─────────────────────────────────────────────── */}
       <div>

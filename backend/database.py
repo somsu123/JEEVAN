@@ -10,10 +10,11 @@ from pymongo import MongoClient
 from dotenv import load_dotenv
 
 # Load env variables from .env file
+load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 load_dotenv()
 
-MONGO_URI = os.getenv("MONGO_URI")
+MONGO_URI = os.getenv("MONGO_URI") or "mongodb+srv://sumitkumarmishraarcade25_db_user:v7UAyAUOMrCMBFF0@cluster0.wuqns3e.mongodb.net/JEEVAN"
 if not MONGO_URI:
     raise ValueError("Environment variable MONGO_URI is not set. Please define it in your .env file.")
 

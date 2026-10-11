@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import {
-  FileText, Sparkles, Stethoscope, ArrowRight, Upload
+  FileText, Sparkles, Stethoscope, ArrowRight, Upload, AlertTriangle
 } from 'lucide-react';
-import { ScanResult, VitalState } from '../types';
+import { ScanResult, VitalState, CardiacSosState } from '../types';
 import AiDictator from './AiDictator';
 import LiveVitals from './LiveVitals';
 import { motion, AnimatePresence } from 'motion/react';
@@ -14,9 +14,20 @@ interface OverviewProps {
   vitals?: VitalState;
   hardwareOnline?: boolean;
   espConnected?: boolean;
+  cardiacSos?: CardiacSosState | null;
+  onDismissCardiacSos?: () => void;
 }
 
-export default function Overview({ scannedHistory, onNavigate, activeAlert, vitals, hardwareOnline = false, espConnected = false }: OverviewProps) {
+export default function Overview({
+  scannedHistory,
+  onNavigate,
+  activeAlert,
+  vitals,
+  hardwareOnline = false,
+  espConnected = false,
+  cardiacSos,
+  onDismissCardiacSos,
+}: OverviewProps) {
   const [selectedReportIdx, setSelectedReportIdx] = useState<number>(0);
   const [dictatorOpen, setDictatorOpen] = useState(false);
   const [greeting, setGreeting] = useState('');
@@ -70,6 +81,46 @@ export default function Overview({ scannedHistory, onNavigate, activeAlert, vita
           </motion.button>
         </div>
       </motion.header>
+
+      {/* ── Cardiac SOS Emergency Banner ── */}
+      {cardiacSos?.active && !cardiacSos.dismissed && (
+        <motion.div
+          initial={{ opacity: 0, y: -8, scale: 0.99 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          className="bg-gradient-to-r from-rose-600 via-red-600 to-amber-600 rounded-3xl p-6 text-white shadow-lg flex flex-col md:flex-row md:items-center justify-between gap-4 z-20 relative animate-pulse"
+        >
+          <div className="flex items-center gap-4">
+            <div className="p-3 bg-white/20 rounded-2xl shrink-0 backdrop-blur-xs">
+              <AlertTriangle className="h-7 w-7 text-amber-200" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-bold text-lg">🚨 CARDIAC SOS TRIGGERED: Critical Pulse ({cardiacSos.bpm} BPM)</span>
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-white text-rose-700 shadow-2xs">
+                  {cardiacSos.type === 'bradycardia' ? 'Bradycardia ≤45 BPM' : 'Tachycardia >120 BPM'}
+                </span>
+              </div>
+              <p className="text-xs sm:text-sm text-rose-100 mt-1">
+                Smart Medicine Box SG90 servo lid opened automatically for <strong>Designated Emergency Compartment 1</strong>. Overlapping slot contains Nitroglycerin / Aspirin / Atropine.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2.5 shrink-0">
+            <button
+              onClick={() => onNavigate('medicine')}
+              className="px-4 py-2.5 bg-white text-rose-700 font-bold rounded-2xl text-xs hover:bg-rose-50 transition shadow-xs cursor-pointer flex items-center gap-1.5"
+            >
+              View Emergency Slot <ArrowRight className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => onDismissCardiacSos?.()}
+              className="px-3.5 py-2.5 bg-white/20 hover:bg-white/30 text-white font-medium rounded-2xl text-xs border border-white/30 transition cursor-pointer"
+            >
+              Dismiss
+            </button>
+          </div>
+        </motion.div>
+      )}
 
       {/* ── Live Vitals Integration ── */}
       <motion.div 

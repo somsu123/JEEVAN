@@ -7,6 +7,8 @@ import {
   User,
   Radio,
   TrendingUp,
+  ShieldAlert,
+  AlertTriangle,
 } from 'lucide-react';
 import { VitalState } from '../types';
 
@@ -328,11 +330,50 @@ export default function LiveVitals({ vitals, hardwareOnline, espConnected = fals
               </p>
             )}
             {fingerPresent && typeof vitals.heartRate === 'number' && vitals.heartRate > 0 && (
-              <div className="flex items-center gap-1.5 mt-1 text-xs text-emerald-700 font-semibold bg-emerald-50 px-3 py-1 rounded-full border border-emerald-100">
-                <Heart className="h-3.5 w-3.5 text-rose-500 animate-pulse" />
-                <span>Normal sinus pulse detected</span>
-              </div>
+              vitals.heartRate <= 45 ? (
+                <div className="flex items-center gap-1.5 mt-1 text-xs text-rose-800 font-bold bg-rose-50 px-3 py-1 rounded-full border border-rose-300 animate-pulse">
+                  <AlertTriangle className="h-3.5 w-3.5 text-rose-600" />
+                  <span>Critical Bradycardia (≤45 BPM) — Medbox Lid Open</span>
+                </div>
+              ) : vitals.heartRate > 120 ? (
+                <div className="flex items-center gap-1.5 mt-1 text-xs text-rose-800 font-bold bg-rose-50 px-3 py-1 rounded-full border border-rose-300 animate-pulse">
+                  <AlertTriangle className="h-3.5 w-3.5 text-rose-600" />
+                  <span>Critical Tachycardia (&gt;120 BPM) — Medbox Lid Open</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 mt-1 text-xs text-emerald-700 font-semibold bg-emerald-50 px-3 py-1 rounded-full border border-emerald-100">
+                  <Heart className="h-3.5 w-3.5 text-rose-500 animate-pulse" />
+                  <span>Normal sinus pulse detected</span>
+                </div>
+              )
             )}
+          </div>
+
+          {/* Cardiac SOS Medicine Box Link Widget */}
+          <div className={`p-3 rounded-2xl border text-xs flex items-center justify-between gap-2 mb-2 ${
+            fingerPresent && typeof vitals.heartRate === 'number' && vitals.heartRate > 0 && (vitals.heartRate <= 45 || vitals.heartRate > 120)
+              ? 'bg-rose-50 border-rose-300 text-rose-800 animate-pulse'
+              : 'bg-slate-50 border-slate-200 text-slate-600'
+          }`}>
+            <div className="flex items-center gap-2">
+              <ShieldAlert className={`h-4 w-4 shrink-0 ${
+                fingerPresent && typeof vitals.heartRate === 'number' && vitals.heartRate > 0 && (vitals.heartRate <= 45 || vitals.heartRate > 120)
+                  ? 'text-rose-600'
+                  : 'text-blue-600'
+              }`} />
+              <span className="font-medium">
+                {fingerPresent && typeof vitals.heartRate === 'number' && vitals.heartRate > 0 && (vitals.heartRate <= 45 || vitals.heartRate > 120)
+                  ? '🚨 SOS Triggered: Smart Medicine Box lid actuated for Compartment 1'
+                  : 'Emergency Trigger Armed: Auto-opens med box if BPM ≤45 or >120'}
+              </span>
+            </div>
+            <span className={`font-bold text-[10px] uppercase px-2 py-0.5 rounded-lg border ${
+              fingerPresent && typeof vitals.heartRate === 'number' && vitals.heartRate > 0 && (vitals.heartRate <= 45 || vitals.heartRate > 120)
+                ? 'bg-rose-600 text-white border-rose-700'
+                : 'bg-white text-slate-600 border-slate-200'
+            }`}>
+              {fingerPresent && typeof vitals.heartRate === 'number' && vitals.heartRate > 0 && (vitals.heartRate <= 45 || vitals.heartRate > 120) ? 'Active SOS' : 'Armed'}
+            </span>
           </div>
 
           {/* BPM Stats Chips */}

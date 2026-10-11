@@ -8,8 +8,8 @@
  * ============================================================
  */
 
-import React, { useState, useEffect } from 'react';
-import { Heart, Activity } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Heart, Activity, AlertTriangle, ShieldAlert, Package, Zap } from 'lucide-react';
 import useSocket from './hooks/useSocket.js';
 import BpmCard from './components/BpmCard.jsx';
 import SpO2Card from './components/SpO2Card.jsx';
@@ -31,6 +31,39 @@ export default function App() {
   } = useSocket();
 
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [sosDismissed, setSosDismissed] = useState(false);
+  const lastAutoOpenRef = useRef(0);
+
+  const isBpmCritical = Boolean(sensorStatus.fingerDetected && bpm && Number(bpm) > 0 && (Number(bpm) <= 45 || Number(bpm) > 120));
+  const isBradycardia = Boolean(isBpmCritical && Number(bpm) <= 45);
+
+  // Trigger remote open when BPM <= 45 or > 120
+  useEffect(() => {
+    if (isBpmCritical && !sosDismissed) {
+      const now = Date.now();
+      if (now - lastAutoOpenRef.current > 25000) {
+        lastAutoOpenRef.current = now;
+        fetch('http://localhost:5050/api/hardware/remote-open', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            compartment: 0,
+            label: isBradycardia ? 'SOS BRADY ≤45' : 'SOS TACHY >120',
+            emergency: true,
+            bpm,
+          }),
+        }).catch(() => {});
+      }
+    }
+  }, [isBpmCritical, isBradycardia, bpm, sosDismissed]);
+
+  const handleManualOpen = () => {
+    fetch('http://localhost:5050/api/hardware/remote-open', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ compartment: 0, label: 'EMERGENCY SOS', emergency: true }),
+    }).catch(() => {});
+  };
 
   useEffect(() => {
     const interval = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -65,6 +98,76 @@ export default function App() {
           </div>
         </div>
       </header>
+
+      {/* ── Emergency SOS & Designated Medicine Box Slot Section ── */}
+      {isBpmCritical && !sosDismissed && (
+        <section className="max-w-7xl mx-auto mb-8 bg-gradient-to-r from-rose-950/80 via-red-900/60 to-slate-900 border-2 border-rose-500 rounded-3xl p-6 text-white shadow-2xl animate-pulse">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-rose-500/30 pb-4">
+            <div className="flex items-center gap-3.5">
+              <div className="p-3 bg-rose-500 text-white rounded-2xl shrink-0">
+                <AlertTriangle className="w-6 h-6 animate-bounce" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-xl font-bold tracking-tight">
+                    🚨 CARDIAC SOS TRIGGERED: {isBradycardia ? 'Critical Bradycardia (≤45 BPM)' : 'Critical Tachycardia (>120 BPM)'}
+                  </h2>
+                  <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-500 text-white">
+                    {bpm} BPM
+                  </span>
+                </div>
+                <p className="text-xs sm:text-sm text-rose-200 mt-0.5">
+                  Lid opened automatically. ONLY Slot 1 LED is blinking repeatedly — box closes ONLY upon pressing the physical Confirm Button (D4).
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={handleManualOpen}
+                className="px-4 py-2 bg-rose-500 hover:bg-rose-600 text-white font-bold rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <Package className="w-4 h-4" /> Re-open Lid
+              </button>
+              <button
+                onClick={() => setSosDismissed(true)}
+                className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl text-xs border border-slate-700 transition cursor-pointer"
+              >
+                Acknowledge
+              </button>
+            </div>
+          </div>
+
+          {/* Overlapping Slot & Designated Emergency Meds Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+            <div className="bg-slate-900/80 border border-rose-500/30 rounded-2xl p-4">
+              <div className="flex justify-between items-center text-xs text-rose-300 mb-2">
+                <span className="font-bold">DESIGNATED SLOT</span>
+                <span className="bg-rose-500/20 text-rose-300 px-2 py-0.5 rounded-md font-bold">Overlapping</span>
+              </div>
+              <div className="text-base font-bold text-white">Compartment #1 (Box 1)</div>
+              <p className="text-xs text-slate-400 mt-1">
+                Due to limited physical compartments, Compartment 1 holds both routine meds and emergency cardiac response medications.
+              </p>
+            </div>
+
+            <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4">
+              <span className="text-xs font-bold text-rose-400 uppercase tracking-wider block mb-1">High Pulse Emergency (&gt;120)</span>
+              <div className="text-sm font-bold text-white">Nitroglycerin 0.5mg + Aspirin 325mg</div>
+              <p className="text-xs text-slate-400 mt-1">
+                Sublingual tablet under tongue immediately. Rapid coronary vasodilation.
+              </p>
+            </div>
+
+            <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4">
+              <span className="text-xs font-bold text-indigo-400 uppercase tracking-wider block mb-1">Low Pulse Emergency (≤45)</span>
+              <div className="text-sm font-bold text-white">Emergency Cardiotonic / Atropine</div>
+              <p className="text-xs text-slate-400 mt-1">
+                Oral cardiac support dose for profound bradycardia. Restores sinus rate.
+              </p>
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* ── Main Grid ─────────────────────────────────────── */}
       <main className="max-w-7xl mx-auto">

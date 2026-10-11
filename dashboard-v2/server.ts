@@ -115,14 +115,15 @@ async function connectFirebase() {
   try {
     const mongoUri = process.env.MONGO_URI;
     if (!mongoUri) {
-      throw new Error("MONGO_URI is not set in environment.");
+      console.warn("[MongoDB] MONGO_URI not set. Running in local in-memory mode.");
+      return;
     }
-    mongoClient = new MongoClient(mongoUri);
+    mongoClient = new MongoClient(mongoUri, { serverSelectionTimeoutMS: 4000, connectTimeoutMS: 4000 });
     await mongoClient.connect();
     mongoDb = mongoClient.db("JEEVAN");
     console.log(`[MongoDB] ✅ Connected to Atlas -> JEEVAN`);
   } catch (err: any) {
-    console.error("[MongoDB] ❌ Failed to initialize:", err.message);
+    console.warn(`[MongoDB] ⚠️ Atlas offline (${err.message}). Using resilient local in-memory cache.`);
   }
 }
 
@@ -1450,6 +1451,8 @@ const medboxStatus: MedboxStatusRecord = {
 
 let remoteOpenFlag = false;
 let medboxLidOpen = false;
+let emergencySosActive = false;
+let emergencyCompartment = 0;
 let pendingCompartmentAssign: { compartment: number; label: string; time: string; timestamp: number } | null = null;
 
 // Mark offline if no heartbeat for 30 s
@@ -1538,6 +1541,11 @@ app.post(["/api/medication/schedule", "/api/medication/schedule-esp"], async (re
   }
 });
 
+let dynamicEsp32BaseUrl = process.env.ESP32_BASE_URL || "";
+function getEffectiveEsp32Url(): string {
+  return (dynamicEsp32BaseUrl || process.env.ESP32_BASE_URL || "").replace(/\/$/, "");
+}
+
 // ── POST /api/hardware/heartbeat (ESP32 heartbeat telemetry) ──────────────────
 app.post("/api/hardware/heartbeat", (req, res) => {
   const { deviceId, state, presenceDetected, nextDoseTime, uptime, lidOpen } = req.body as {
@@ -1548,6 +1556,12 @@ app.post("/api/hardware/heartbeat", (req, res) => {
     uptime: number;
     lidOpen?: boolean;
   };
+
+  // Dynamically record ESP32's actual network IP address from incoming connection
+  const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress?.replace(/^.*:/, '') || '';
+  if (clientIp && clientIp !== '127.0.0.1' && clientIp !== 'localhost' && !clientIp.startsWith('::')) {
+    dynamicEsp32BaseUrl = `http://${clientIp}`;
+  }
 
   medboxStatus.online = true;
   medboxStatus.lastSeen = new Date().toISOString();
@@ -1568,6 +1582,7 @@ app.post("/api/hardware/heartbeat", (req, res) => {
       { _id: "medbox-01" as any },
       {
         ...medboxStatus,
+        espIp: dynamicEsp32BaseUrl,
         updatedAt: new Date().toISOString()
       },
       { upsert: true }
@@ -1584,9 +1599,19 @@ app.post("/api/hardware/heartbeat", (req, res) => {
     epoch: Math.floor(now.getTime() / 1000),
     time: now.toLocaleTimeString('en-IN', { hour12: false, timeZone: 'Asia/Kolkata' }),
     gmtOffset: 19800,
+    status: "ok",
+    nextDose: medboxStatus.nextDoseTime
   };
-  if (remoteOpenFlag) {
-    console.log(`[HEARTBEAT] Served remote lid-open request to medbox. Resetting flag.`);
+  if (emergencySosActive) {
+    response.remoteOpen = true;
+    response.emergency = true;
+    response.compartment = emergencyCompartment;
+    response.label = "EMERGENCY DOSE";
+    console.log(`[HEARTBEAT] Served EMERGENCY trigger to medbox for compartment ${emergencyCompartment} (LED blinking armed).`);
+  } else if (remoteOpenFlag) {
+    console.log(`[HEARTBEAT] Served remote lid-open request to medbox for Slot 1.`);
+    response.remoteOpen = true;
+    response.compartment = 0; // Strictly Slot 1
     remoteOpenFlag = false;
   }
   if (pendingCompartmentAssign && (Date.now() - pendingCompartmentAssign.timestamp < 30_000)) {
@@ -1614,59 +1639,154 @@ app.get("/api/hardware/time", (req, res) => {
   });
 });
 
-// ── POST /api/hardware/medbox-event (ESP32 pill intake confirmation) ──────────
+// ── POST /api/hardware/medbox-event (ESP32 pill intake & miss telemetry) ───────
 app.post("/api/hardware/medbox-event", async (req, res) => {
-  const { event, box, medicine, dosage, timestamp, deviceId } = req.body as {
+  const { event, box, medicine, dosage, timestamp, deviceId, retryAttempt, maxRetries, nextRetryTime } = req.body as {
     event: string;
     box: number;
     medicine: string;
     dosage: string;
     timestamp: string;
     deviceId: string;
+    retryAttempt?: number;
+    maxRetries?: number;
+    nextRetryTime?: string;
   };
 
+  if (!event) return res.status(400).json({ error: "Missing event" });
+
+  // Log to MongoDB medbox_events collection
+  await appendMedboxEvent({
+    event: event as any,
+    boxNumber: Number(box) || 1,
+    medicine: medicine || "Unknown",
+    dosage: dosage || "",
+    retryAttempt,
+    maxRetries,
+    nextRetryTime,
+    timestamp: timestamp || new Date().toISOString(),
+    deviceId: deviceId || "medbox-01"
+  });
+
+  const schedule = await readSchedule();
+  let updated = false;
+
   if (event === "DOSE_TAKEN") {
-    console.log(`[EVENT] Box ${box}: ${medicine} (${dosage}) taken at ${timestamp} on ${deviceId}`);
-
-    // Log to MongoDB medbox_events collection
-    await appendMedboxEvent({ event, boxNumber: box, medicine, dosage, timestamp, deviceId });
-
-    // Auto-update taken state in MongoDB medbox_schedule
-    const schedule = await readSchedule();
-    let updated = false;
+    console.log(`[EVENT] ✅ Box ${box}: ${medicine} (${dosage}) taken at ${timestamp} on ${deviceId}`);
     const payloadTimeHHMM = timestamp && timestamp.length >= 5 ? timestamp.substring(0, 5) : "";
-
     const updatedSchedule = schedule.map((dose) => {
-      const medicineMatches = dose.medicine.toLowerCase().trim() === medicine.toLowerCase().trim();
-      const timeMatches = dose.time === payloadTimeHHMM || (timestamp && timestamp.includes(dose.time));
+      const medicineMatches = dose.medicine.toLowerCase().trim() === (medicine || "").toLowerCase().trim();
       const boxMatches = Number(dose.boxNumber) === Number(box);
-
-      if (medicineMatches && timeMatches && boxMatches) {
+      if (boxMatches || medicineMatches) {
         dose.taken = true;
-        dose.takenAt = timestamp;
+        dose.missed = false;
+        dose.completelyMissed = false;
+        dose.inSnooze = false;
+        dose.takenAt = timestamp || new Date().toLocaleTimeString("en-US", { hour12: false });
         updated = true;
       }
       return dose;
     });
 
+    if (emergencySosActive) {
+      emergencySosActive = false;
+      medboxLidOpen = false;
+      broadcastSSE("emergency_taken", { box: Number(box), timestamp });
+      console.log(`[EVENT] ✅ Emergency dose taken confirmed by hardware button for box ${box}. Emergency state cleared.`);
+    }
+
     if (updated) {
       await writeSchedule(updatedSchedule);
       broadcastSSE("schedule_updated", { doses: updatedSchedule });
-      broadcastSSE("medicine_taken", { box: Number(box), timestamp });
-    }
+      broadcastSSE("medicine_taken", { box: Number(box), timestamp, medicine, dosage });
 
+      try {
+        const msg = `Medication taken: ${medicine || "Unknown"} (Box ${box})`;
+        await flaskPost("/api/events/log", { type: "medicine", message: msg, severity: "info" });
+      } catch { }
+    }
+    return res.json({ success: true, matched: updated });
+  } else if (event === "DOSE_MISSED_SNOOZE") {
+    console.log(`[EVENT] ⏳ Box ${box}: ${medicine} snooze retry reported from hardware (Attempt ${retryAttempt}/${maxRetries}, Next: ${nextRetryTime})`);
+    const updatedSchedule = schedule.map((dose) => {
+      if (Number(dose.boxNumber) === Number(box) && !dose.taken) {
+        dose.inSnooze = true;
+        dose.missed = false;
+        dose.currentRetry = (dose.currentRetry || 0) + 1;
+        if (nextRetryTime) dose.nextRetryTime = nextRetryTime;
+        updated = true;
+      }
+      return dose;
+    });
+    if (updated) {
+      await writeSchedule(updatedSchedule);
+      broadcastSSE("schedule_updated", { doses: updatedSchedule });
+      broadcastSSE("medicine_snooze", { box: Number(box), currentRetry: retryAttempt, nextRetryTime, medicine });
+
+      try {
+        const msg = `Medication snooze (${retryAttempt || 1}/${maxRetries || 3}): ${medicine || "Unknown"} (Box ${box}) next at ${nextRetryTime || "soon"}`;
+        await flaskPost("/api/events/log", { type: "medicine", message: msg, severity: "info" });
+      } catch { }
+    }
+    return res.json({ success: true, matched: updated });
+  } else if (event === "DOSE_COMPLETELY_MISSED" || event === "DOSE_MISSED") {
+    console.log(`[EVENT] ❌ Box ${box}: ${medicine} completely missed reported from hardware`);
+    const updatedSchedule = schedule.map((dose) => {
+      if (Number(dose.boxNumber) === Number(box) && !dose.taken) {
+        dose.missed = true;
+        dose.completelyMissed = true;
+        dose.inSnooze = false;
+        updated = true;
+      }
+      return dose;
+    });
+    if (updated) {
+      await writeSchedule(updatedSchedule);
+      broadcastSSE("schedule_updated", { doses: updatedSchedule });
+      broadcastSSE("medicine_missed", { box: Number(box), completelyMissed: true, timestamp, medicine });
+
+      // Trigger Gmail caregiver alert
+      sendMissedDoseAlert(
+        medicine || "Unknown",
+        timestamp || new Date().toLocaleTimeString("en-US", { hour12: false }),
+        dosage || ""
+      ).catch((e) => console.error("[MAIL] Failed to send alert:", e?.message));
+
+      try {
+        const msg = `Medication completely missed: ${medicine || "Unknown"} (Box ${box})`;
+        await flaskPost("/api/events/log", { type: "medicine", message: msg, severity: "warning" });
+      } catch { }
+    }
     return res.json({ success: true, matched: updated });
   }
 
-  return res.status(400).json({ error: "Unknown event type" });
+  return res.json({ success: true, received: true });
 });
 
 // ── POST /api/hardware/remote-open (Caregiver triggers remote open lid) ────────
 app.post(["/api/hardware/remote-open", "/api/medicine-remote-open"], (req, res) => {
   remoteOpenFlag = true;
   medboxLidOpen = true; // immediately update lid state in server memory
-  console.log("[MEDBOX] Remote lid-open request registered.");
-  return res.json({ success: true, message: "Remote open lid request queued." });
+  const { compartment, label, emergency, bpm } = (req.body || {}) as {
+    compartment?: number;
+    label?: string;
+    emergency?: boolean;
+    bpm?: number;
+  };
+  if (emergency) {
+    emergencySosActive = true;
+    emergencyCompartment = 0; // Strictly Slot 1 for emergency BPM medicine
+    pendingCompartmentAssign = null; // Prevent assignedSlot from overwriting emergency state
+  } else if (typeof compartment === "number") {
+    pendingCompartmentAssign = {
+      compartment,
+      label: label || "Caregiver Open",
+      time: new Date().toLocaleTimeString("en-IN", { hour12: false, timeZone: "Asia/Kolkata" }),
+      timestamp: Date.now(),
+    };
+  }
+  console.log(`[MEDBOX] Remote lid-open request registered${emergency ? ` (EMERGENCY SOS: BPM=${bpm ?? '?'}, Slot 1)` : ''}.`);
+  return res.json({ success: true, message: "Remote open lid request queued.", remoteOpen: true, emergency: Boolean(emergency) });
 });
 
 // ── AI COMPANION (OLLAMA RASPBERRY PI) INTEGRATION ───────────────────────────
@@ -2171,105 +2291,6 @@ app.post("/api/ai-dictator/ask", async (req, res) => {
   }
 });
 
-app.post("/api/hardware/medbox-event", async (req, res) => {
-  const { event, box, medicine, timestamp, deviceId, dosage } = req.body as {
-    event: "DOSE_TAKEN" | "DOSE_MISSED";
-    box: number;
-    medicine: string;
-    dosage?: string;
-    timestamp: string;
-    deviceId?: string;
-  };
-
-  if (!event || !box) return res.status(400).json({ error: "event and box are required" });
-
-  // 1. Save to MongoDB medbox_events collection
-  await appendMedboxEvent({ event, box, medicine, dosage, timestamp, deviceId: deviceId || "medbox-01" });
-
-  // 2. Update matching slot in MongoDB medbox_schedule
-  const schedule = await readSchedule();
-  const slot = schedule.find((d) => d.boxNumber === box);
-  if (slot) {
-    if (event === "DOSE_TAKEN") {
-      slot.taken = true;
-      slot.takenAt = timestamp || new Date().toLocaleTimeString("en-US", { hour12: false });
-      slot.missed = false;
-    } else {
-      slot.missed = true;
-    }
-    await writeSchedule(schedule);
-  }
-
-  // 3. If DOSE_MISSED, trigger Gmail alert
-  if (event === "DOSE_MISSED") {
-    sendMissedDoseAlert(
-      medicine || slot?.medicine || "Unknown",
-      slot?.time || timestamp,
-      dosage || slot?.dosage || ""
-    ).catch((e) => console.error("[MAIL] Failed to send alert:", e?.message));
-  }
-
-  // 4. Broadcast to React dashboard via SSE
-  const ssePayload = {
-    event,
-    box,
-    medicine: medicine || slot?.medicine,
-    dosage: dosage || slot?.dosage,
-    timestamp: timestamp || new Date().toISOString(),
-    deviceId: deviceId || "medbox-01",
-  };
-  broadcastSSE(event === "DOSE_TAKEN" ? "medicine_taken" : "medicine_missed", ssePayload);
-
-  // 5. Also log to Flask events collection in Atlas
-  try {
-    const severity = event === "DOSE_TAKEN" ? "info" : "warning";
-    const msg = event === "DOSE_TAKEN"
-      ? `Medication taken: ${medicine || slot?.medicine || "Unknown"} (Box ${box})`
-      : `Medication missed: ${medicine || slot?.medicine || "Unknown"} (Box ${box})`;
-    await flaskPost("/api/events/log", { type: "medicine", message: msg, severity });
-    console.log(`[MongoDB] Medbox event logged to Atlas: ${msg}`);
-  } catch (dbErr: any) {
-    console.error("[WARN] Failed to log medbox event via Flask:", dbErr?.message);
-  }
-
-  console.log(`[MEDBOX] ${event} — Box ${box} (${medicine}) @ ${timestamp}`);
-  return res.json({ received: true });
-});
-
-// ── POST /api/hardware/heartbeat ──────────────────────────────────────────────
-app.post("/api/hardware/heartbeat", async (req, res) => {
-  const { deviceId, state, presenceDetected, nextDoseTime, uptime } = req.body as {
-    deviceId?: string;
-    state?: string;
-    presenceDetected?: boolean;
-    nextDoseTime?: string;
-    uptime?: number;
-  };
-
-  medboxStatus.lastSeen = new Date().toISOString();
-  medboxStatus.state = state || "IDLE";
-  medboxStatus.presenceDetected = presenceDetected ?? false;
-  medboxStatus.nextDoseTime = nextDoseTime || await getNextDoseTime();
-  medboxStatus.uptime = uptime ?? 0;
-  medboxStatus.deviceId = deviceId || "medbox-01";
-  medboxStatus.online = true;
-
-  // Persist to MongoDB device_status
-  if (fireReady()) {
-    mongoDb!.collection("device_status").replaceOne(
-      { _id: "medbox-01" as any },
-      {
-        ...medboxStatus,
-        updatedAt: new Date().toISOString()
-      },
-      { upsert: true }
-    ).catch(() => { });
-  }
-
-  broadcastSSE("medbox_heartbeat", medboxStatus);
-  return res.json({ status: "ok", nextDose: medboxStatus.nextDoseTime });
-});
-
 // ── GET /api/medbox-status  (dashboard polling fallback) ─────────────────────
 app.get("/api/medbox-status", (_req, res) => {
   return res.json(medboxStatus);
@@ -2586,11 +2607,11 @@ let esp32OfflineSince: number | null = null;
 const ESP32_LOG_COOLDOWN_MS = 60_000; // only log once per minute when offline
 
 async function pollEsp32Schedule(): Promise<void> {
-  if (!ESP32_BASE_URL) return; // not configured
-
+  const espUrl = getEffectiveEsp32Url();
+  if (!espUrl) return; // not configured and no heartbeat seen yet
 
   try {
-    const res = await fetch(`${ESP32_BASE_URL}/api/schedule`, { signal: AbortSignal.timeout(5000) });
+    const res = await fetch(`${espUrl}/api/schedule`, { signal: AbortSignal.timeout(5000) });
     if (!res.ok) return;
     const data = await res.json() as { schedule: Esp32DoseEntry[] };
     const schedule: Esp32DoseEntry[] = Array.isArray(data.schedule) ? data.schedule : [];
@@ -2701,18 +2722,7 @@ app.get("/api/dose-events", async (req, res) => {
   return res.json({ events });
 });
 
-// ─── GET /api/bpm/history — proxy BPM/SpO2 history from bpm-server (port 3001) ──
-app.get("/api/bpm/history", async (req, res) => {
-  try {
-    const n = req.query.n || 60;
-    const r = await fetch(`http://localhost:3001/api/bpm/history?n=${n}`, { signal: AbortSignal.timeout(2000) });
-    if (r.ok) {
-      const data = await r.json();
-      return res.json(data);
-    }
-  } catch { }
-  return res.json({ history: [], stats: {} });
-});
+
 
 // ═════════════════════════════════════════════════════════════════════════════
 // RX UPLOAD — Prescription OCR + Local AI Vision Extraction
@@ -3110,10 +3120,11 @@ app.post("/api/rx/confirm/:changeId", async (req, res) => {
 
   // ── Step 1: Fetch the current live ESP32 schedule (with cache fallback if offline) ──
   let esp32Schedule: Esp32DoseEntry[] = [];
+  const effectiveEsp32Url = getEffectiveEsp32Url();
 
-  if (ESP32_BASE_URL) {
+  if (effectiveEsp32Url) {
     try {
-      const r = await fetch(`${ESP32_BASE_URL}/api/schedule`, { signal: AbortSignal.timeout(5000) });
+      const r = await fetch(`${effectiveEsp32Url}/api/schedule`, { signal: AbortSignal.timeout(5000) });
       if (r.ok) {
         const data = await r.json();
         esp32Schedule = Array.isArray(data.schedule) ? data.schedule : [];
@@ -3184,16 +3195,16 @@ app.post("/api/rx/confirm/:changeId", async (req, res) => {
   const merged: Esp32DoseEntry[] = Array.from(scheduleMap.values()).sort((a, b) => a.compartment - b.compartment);
 
   // ── Step 3: POST to ESP32 (single write point, warning on offline) ────────
-  if (ESP32_BASE_URL) {
+  if (effectiveEsp32Url) {
     try {
-      const postRes = await fetch(`${ESP32_BASE_URL}/api/schedule`, {
+      const postRes = await fetch(`${effectiveEsp32Url}/api/schedule`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ schedule: merged }),
         signal: AbortSignal.timeout(6000),
       });
       if (postRes.ok) {
-        console.log(`[RX CONFIRM] ✅ Schedule pushed to ESP32 — compartment ${comp}: "${change.proposedLabel}" at ${String(targetHour).padStart(2, "0")}:${String(targetMinute).padStart(2, "0")}`);
+        console.log(`[RX CONFIRM] ✅ Schedule pushed to ESP32 (${effectiveEsp32Url}) — compartment ${comp}: "${change.proposedLabel}" at ${String(targetHour).padStart(2, "0")}:${String(targetMinute).padStart(2, "0")}`);
       } else {
         console.warn(`[RX CONFIRM] ESP32 rejected schedule update (${postRes.status}), saved to database cache only.`);
       }
@@ -3201,7 +3212,7 @@ app.post("/api/rx/confirm/:changeId", async (req, res) => {
       console.warn("[RX CONFIRM] Could not reach ESP32 to push schedule, saved to database cache only:", err.message);
     }
   } else {
-    console.warn("[RX CONFIRM] ESP32_BASE_URL not set — skipping physical push, updating cache only");
+    console.warn("[RX CONFIRM] ESP32 URL not yet discovered — skipping physical push, updating cache only");
   }
 
   // ── Step 3b: Open assigned lid and glow assigned compartment light on ESP32 ──
@@ -3214,10 +3225,10 @@ app.post("/api/rx/confirm/:changeId", async (req, res) => {
     timestamp: Date.now()
   };
 
-  if (ESP32_BASE_URL) {
+  if (effectiveEsp32Url) {
     try {
-      console.log(`[RX CONFIRM] 🔓 Triggering assigned lid open & LED glow for compartment ${comp}...`);
-      const assignRes = await fetch(`${ESP32_BASE_URL}/api/compartment/assign`, {
+      console.log(`[RX CONFIRM] 🔓 Triggering assigned slot on ESP32 (${effectiveEsp32Url}) for compartment ${comp}...`);
+      const assignRes = await fetch(`${effectiveEsp32Url}/api/compartment/assign`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -3228,7 +3239,7 @@ app.post("/api/rx/confirm/:changeId", async (req, res) => {
         signal: AbortSignal.timeout(4000),
       });
       if (assignRes.ok) {
-        console.log(`[RX CONFIRM] ✅ Compartment ${comp} opened and LED glowing on ESP32 for reload.`);
+        console.log(`[RX CONFIRM] ✅ Compartment ${comp} assigned on ESP32.`);
       }
     } catch (assignErr: any) {
       console.warn(`[RX CONFIRM] Direct ESP32 assign trigger failed (${assignErr.message}); queued for next heartbeat.`);
@@ -3522,10 +3533,18 @@ async function setupViteIntegration() {
   });
 }
 
-// Connect to Firebase Firestore FIRST, then start Express + Vite
-connectFirebase().then(() => {
-  setupViteIntegration().catch((e) => {
-    console.error("Fatal startup error:", e);
-    process.exit(1);
-  });
+// Start Express + Vite immediately so dashboard and hardware endpoints are never blocked
+setupViteIntegration().catch((e) => {
+  console.error("Fatal startup error:", e);
+  process.exit(1);
 });
+
+// Connect to MongoDB Atlas in background
+connectFirebase();
+
+// Periodic background retry if Atlas was offline at startup
+setInterval(() => {
+  if (!fireReady()) {
+    connectFirebase();
+  }
+}, 30_000);

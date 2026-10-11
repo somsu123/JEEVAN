@@ -51,7 +51,7 @@ if %ERRORLEVEL% == 0 (
   echo  ================================================================
   echo    SUCCESS! ESP32 Medicine Box Flashed!
   echo    WiFi SSID  : ElderCare
-  echo    Dashboard  : http://10.122.37.135:5050
+  echo    Dashboard  : http://10.91.87.135:5050
   echo    Web Server : Port 80
   echo  ================================================================
   echo.
