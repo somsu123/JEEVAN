@@ -57,7 +57,7 @@
 #define WIFI_PASS         "ami bolbona"
 
 // Dashboard Telemetry Endpoint (PC running dashboard-v2 on Port 5050)
-#define DASHBOARD_HOST    "10.91.87.135"
+#define DASHBOARD_HOST    "10.167.243.135"
 #define DASHBOARD_PORT    5050
 #define DEVICE_ID         "medbox-01"
 

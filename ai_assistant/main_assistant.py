@@ -53,7 +53,7 @@ def discover_ollama_model():
         installed = [m for m in installed if m]
         
         # Priority list of models we prefer
-        preferred = ["llama3.2:latest", "llama3.2", "llama3:latest", "llama3", "phi3:latest", "gemma2:latest", "gemma:latest", "mistral:latest"]
+        preferred = ["gemma4:latest", "gemma4", "llama3.2:latest", "llama3.2", "llama3:latest", "llama3", "phi3:latest", "gemma2:latest", "gemma:latest", "mistral:latest"]
         for p in preferred:
             if p in installed:
                 return p
@@ -71,7 +71,7 @@ def discover_ollama_model():
     except Exception as e:
         print(f"[WARN]: Dynamic model discovery failed: {e}")
         
-    return "llama3.2:latest"  # Ultimate fallback
+    return "gemma4:latest"  # Ultimate fallback
 
 OLLAMA_MODEL = discover_ollama_model()
 WEATHER_CITY = "Kolkata"

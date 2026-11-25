@@ -43,7 +43,7 @@ export interface VitalState {
 
 // ─── Fall Detection ──────────────────────────────────────────────────────────
 export type FallSeverity = 'Critical Fall' | 'Stumble Warning' | 'Rapid Descent' | 'Fall Detected';
-export type FallSource = 'camera' | 'bracelet' | 'manual';
+export type FallSource = 'camera' | 'bracelet' | 'belt' | 'manual';
 
 export interface FallEvent {
   id: string;
@@ -55,6 +55,9 @@ export interface FallEvent {
   confidence: number | null;
   status: 'active' | 'resolved';
   resolvedAt?: string;
+  latitude?: number;
+  longitude?: number;
+  mapsUrl?: string;
 }
 
 // Legacy alias for backwards compat

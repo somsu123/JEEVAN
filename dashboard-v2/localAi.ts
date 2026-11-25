@@ -4,8 +4,8 @@ import dotenv from "dotenv";
 dotenv.config();
 
 export const OLLAMA_URL = (process.env.OLLAMA_URL || "http://localhost:11434").replace(/\/$/, "");
-export const VISION_MODEL = process.env.OLLAMA_VISION_MODEL || "llava:latest";
-export const TEXT_MODEL = process.env.OLLAMA_TEXT_MODEL || "llama3.2:latest";
+export const VISION_MODEL = process.env.OLLAMA_VISION_MODEL || "gemma4";
+export const TEXT_MODEL = process.env.OLLAMA_TEXT_MODEL || "gemma4";
 export const LOCAL_AI_ONLY = process.env.LOCAL_AI_ONLY?.toLowerCase() !== "false";
 
 interface OllamaMessage {

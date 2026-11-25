@@ -190,7 +190,7 @@ export default function FallAlerts({ fallEvents, activeAlert, onResolveEvent, on
           {filtered.map((event) => {
             const cfg = severityConfig(event.type);
             const Icon = cfg.icon;
-            const SourceIcon = event.source === 'camera' ? Camera : Watch;
+            const SourceIcon = event.source === 'camera' ? Camera : event.source === 'belt' ? Shield : Watch;
 
             return (
               <div
@@ -222,7 +222,7 @@ export default function FallAlerts({ fallEvents, activeAlert, onResolveEvent, on
                       </span>
                       <span className="flex items-center gap-1 text-xs text-slate-600 font-medium">
                         <SourceIcon className="h-3.5 w-3.5 text-slate-500" />
-                        {event.source === 'camera' ? 'Camera Vision' : 'Wrist Sensor'}
+                        {event.source === 'camera' ? 'Camera Vision' : event.source === 'belt' ? 'Smart Safety Belt' : 'Wrist Sensor'}
                       </span>
                       {event.status === 'resolved' && (
                         <span className="px-3 py-1 rounded-full text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold">
@@ -236,10 +236,22 @@ export default function FallAlerts({ fallEvents, activeAlert, onResolveEvent, on
                         <Clock className="h-3.5 w-3.5 text-slate-400" />
                         {event.timestamp}
                       </span>
-                      <span className="flex items-center gap-1.5">
-                        <MapPin className="h-3.5 w-3.5 text-slate-400" />
-                        {event.location}
-                      </span>
+                      {event.mapsUrl ? (
+                        <a
+                          href={event.mapsUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1.5 text-blue-600 hover:text-blue-700 underline font-semibold"
+                        >
+                          <MapPin className="h-3.5 w-3.5 text-rose-500 animate-bounce" />
+                          {event.location} (Open GPS Map)
+                        </a>
+                      ) : (
+                        <span className="flex items-center gap-1.5">
+                          <MapPin className="h-3.5 w-3.5 text-slate-400" />
+                          {event.location}
+                        </span>
+                      )}
                     </div>
 
                     <div className="space-y-1">

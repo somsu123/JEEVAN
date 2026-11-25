@@ -255,6 +255,9 @@ interface FallEventRecord {
   confidence: number | null;
   status: "active" | "resolved";
   resolvedAt?: string;
+  latitude?: number;
+  longitude?: number;
+  mapsUrl?: string;
 }
 
 // ── MongoDB-backed fall event helpers ─────────────────────────────────────────
@@ -527,6 +530,21 @@ const braceletStatus = {
   deviceId: "bracelet-01",
 };
 
+// In-memory smart fall detection belt status (online/offline tracking)
+const beltStatus = {
+  online: false,
+  lastSeen: "",
+  fallPhase: "IDLE",
+  uptime: 0,
+  deviceId: "belt-01",
+  impactG: 0,
+  tiltAngle: 0,
+  haveGps: false,
+  lat: 0,
+  lng: 0,
+  mapsUrl: "",
+};
+
 // ── Camera online tracker (updated whenever Pi sends a fall-event) ────────────
 const cameraStatus = {
   online: false,
@@ -543,6 +561,26 @@ setInterval(() => {
     }
   }
 }, 30_000);
+
+// Mark belt offline if no heartbeat for 30 s
+setInterval(async () => {
+  if (beltStatus.lastSeen) {
+    const age = Date.now() - new Date(beltStatus.lastSeen).getTime();
+    if (age > 30_000 && beltStatus.online) {
+      beltStatus.online = false;
+      broadcastSSE("belt_offline", { deviceId: beltStatus.deviceId });
+      console.log("[BELT] Went offline — no heartbeat for 30s");
+
+      // Auto-resolve stale belt fall events in MongoDB
+      const resolved = await resolveAllFallEventsBySource("belt");
+      resolveAllFallEventsBySourceLocally("belt");
+      if (resolved > 0) {
+        console.log(`[BELT] Auto-resolved ${resolved} stale belt fall event(s) in MongoDB`);
+        broadcastSSE("fall_resolved_batch", { source: "belt", count: resolved });
+      }
+    }
+  }
+}, 15_000);
 
 // Mark bracelet offline if no heartbeat for 30 s
 setInterval(async () => {
@@ -638,16 +676,65 @@ app.get("/api/bracelet/status", (_req, res) => {
   return res.json(braceletStatus);
 });
 
-
-
-
 // ─────────────────────────────────────────────────────────────────────────────
-// FALL ALERTS — Gmail + SMS notifications
+// SMART FALL DETECTION BELT — ESP32 + MPU-6050 Waist Sensor Endpoints
 // ─────────────────────────────────────────────────────────────────────────────
 
-// 5-minute cooldown per alert type so we don't spam on rapid events
+// POST /api/belt/heartbeat — belt sends heartbeat periodically over Wi-Fi
+app.post("/api/belt/heartbeat", (req, res) => {
+  const { deviceId, fallPhase, uptime, impactG, tiltAngle, haveGps, lat, lng } = req.body as {
+    deviceId?: string;
+    fallPhase?: string;
+    uptime?: number;
+    impactG?: number;
+    tiltAngle?: number;
+    haveGps?: boolean;
+    lat?: number;
+    lng?: number;
+  };
+
+  beltStatus.online = true;
+  beltStatus.lastSeen = new Date().toISOString();
+  beltStatus.fallPhase = fallPhase ?? "IDLE";
+  beltStatus.uptime = uptime ?? 0;
+  beltStatus.deviceId = deviceId ?? "belt-01";
+  if (impactG != null) beltStatus.impactG = Number(impactG);
+  if (tiltAngle != null) beltStatus.tiltAngle = Number(tiltAngle);
+  if (haveGps != null) beltStatus.haveGps = Boolean(haveGps);
+  if (lat != null && lat !== 0) beltStatus.lat = Number(lat);
+  if (lng != null && lng !== 0) beltStatus.lng = Number(lng);
+  if (beltStatus.haveGps && beltStatus.lat && beltStatus.lng) {
+    beltStatus.mapsUrl = `https://maps.google.com/?q=${beltStatus.lat.toFixed(6)},${beltStatus.lng.toFixed(6)}`;
+  }
+
+  // Sync to MongoDB
+  if (fireReady()) {
+    mongoDb!.collection("device_status").replaceOne(
+      { _id: "belt" as any },
+      {
+        ...beltStatus,
+        updatedAt: new Date().toISOString()
+      },
+      { upsert: true }
+    ).catch(() => { });
+  }
+
+  broadcastSSE("belt_heartbeat", beltStatus);
+  return res.json({ status: "ok" });
+});
+
+// GET /api/belt/status — belt status query
+app.get("/api/belt/status", (_req, res) => {
+  return res.json(beltStatus);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FALL ALERTS — Twilio Voice Call, Twilio SMS & Email Notifications
+// ─────────────────────────────────────────────────────────────────────────────
+
+// 30-second cooldown per alert type so we don't spam on rapid loops
 const lastFallAlertAt = new Map<string, number>();
-function isFallAlertCooling(key: string, cooldownMs = 5 * 60 * 1000): boolean {
+function isFallAlertCooling(key: string, cooldownMs = 30 * 1000): boolean {
   const last = lastFallAlertAt.get(key) ?? 0;
   return Date.now() - last < cooldownMs;
 }
@@ -655,10 +742,9 @@ function markFallAlerted(key: string) {
   lastFallAlertAt.set(key, Date.now());
 }
 
-// Per-device rate limit: hard block repeated fall POSTs from same device
-// This is the last line of defence — firmware cooldown + this = no spam
+// Per-device rate limit: 30 seconds per device
 const deviceFallRateLimit = new Map<string, number>();
-const DEVICE_FALL_RATE_MS = 2 * 60 * 1000; // 2 minutes per device
+const DEVICE_FALL_RATE_MS = 30 * 1000; // 30 seconds per device
 function isDeviceFallRateLimited(deviceId: string): boolean {
   const last = deviceFallRateLimit.get(deviceId) ?? 0;
   return Date.now() - last < DEVICE_FALL_RATE_MS;
@@ -667,17 +753,76 @@ function markDeviceFallFired(deviceId: string) {
   deviceFallRateLimit.set(deviceId, Date.now());
 }
 
-// ── Gmail alert for fall event ─────────────────────────────────────────────
-async function sendFallEmailAlert(event: FallEventRecord) {
-  // Removed
+
+// ── Voice Call alert for fall event via Twilio ────────────────────────────────
+async function sendFallVoiceCall(event: FallEventRecord, address: string) {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  const fromNumber = process.env.TWILIO_FROM_NUMBER;
+  const toNumber = process.env.CAREGIVER_PHONE;
+
+  if (!accountSid || !authToken || !fromNumber || !toNumber) {
+    console.warn("[VOICE CALL] Twilio credentials or caregiver phone not set — skipping fall voice call");
+    return;
+  }
+
+  const client = twilio(accountSid, authToken);
+
+  const deviceTitle = event.source === "belt" ? "Smart Safety Belt"
+    : event.source === "bracelet" ? "Fall Detector Bracelet"
+      : event.source === "camera" ? "Vision Safety Camera" : "Fall Sensor";
+
+  // Sanitize address for XML/TwiML
+  const safeAddress = address.replace(/[<>&'"]/g, " ").trim();
+
+  const isOutdoor = Boolean(event.mapsUrl || (event.location && event.location.toLowerCase().includes("outdoor")));
+  const locationSpeech = isOutdoor
+    ? `A fall has been detected outdoors by the ${deviceTitle}. Real-time GPS location coordinates have been sent to your phone via SMS and marked on the care dashboard.`
+    : `A fall has been detected inside the home by the ${deviceTitle}. Patient residence address: ${safeAddress}.`;
+
+  const repeatSpeech = isOutdoor
+    ? `Repeating: Fall detected outdoors. Real-time GPS coordinates dispatched.`
+    : `Repeating: Fall detected inside the home by ${deviceTitle}. Address: ${safeAddress}.`;
+
+  const twiml = `
+<Response>
+  <Pause length="1"/>
+  <Say voice="alice" language="en-IN">
+    Emergency Alert! Emergency Alert!
+    ${locationSpeech}
+    Immediate assistance is required. Please check on the patient or contact emergency services immediately.
+  </Say>
+  <Pause length="2"/>
+  <Say voice="alice" language="en-IN">
+    ${repeatSpeech}
+    Please take immediate action.
+  </Say>
+  <Pause length="1"/>
+</Response>`.trim();
+
+  try {
+    const call = await client.calls.create({
+      twiml,
+      to: toNumber,
+      from: fromNumber,
+    });
+    console.log(`[VOICE CALL] 📞 Fall emergency call initiated via Twilio to ${toNumber} (Call SID: ${call.sid})`);
+    return call.sid;
+  } catch (err: any) {
+    console.error(`[VOICE CALL] ❌ Twilio voice call failed to ${toNumber}:`, err.message);
+    if (err.code === 21219 || err.code === 21216) {
+      console.warn(`[VOICE CALL] 💡 Twilio trial notice: Number ${toNumber} must be verified in Twilio console (Console -> Phone Numbers -> Verified Caller IDs).`);
+    }
+    throw err;
+  }
 }
 
 // ── SMS alert for fall event via Twilio ────────────────────────────────────
-async function sendFallSmsAlert(event: FallEventRecord) {
+async function sendFallSmsAlert(event: FallEventRecord, address: string) {
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
   const authToken = process.env.TWILIO_AUTH_TOKEN;
-  const fromNumber = process.env.TWILIO_FROM_NUMBER;   // e.g. "+12025551234"
-  const toNumber = process.env.CAREGIVER_PHONE;      // e.g. "+919876543210"
+  const fromNumber = process.env.TWILIO_FROM_NUMBER;
+  const toNumber = process.env.CAREGIVER_PHONE;
 
   if (!accountSid || !authToken || !fromNumber || !toNumber) {
     console.warn("[SMS] Twilio credentials not fully set — skipping fall SMS");
@@ -686,70 +831,75 @@ async function sendFallSmsAlert(event: FallEventRecord) {
 
   const client = twilio(accountSid, authToken);
 
-  const sourceLabel = event.source === "bracelet" ? "Bracelet"
-    : event.source === "camera" ? "Camera"
-      : event.source === "both" ? "Bracelet+Camera" : event.source;
+  const sourceLabel = event.source === "belt" ? "Smart Safety Belt"
+    : event.source === "bracelet" ? "Bracelet"
+      : event.source === "camera" ? "Camera"
+        : event.source === "both" ? "Belt+Camera" : event.source;
+
+  const locationSection = event.mapsUrl
+    ? `Location: Outdoor\nMap: ${event.mapsUrl}`
+    : `Location: Inside Home\nAddress: ${address}`;
 
   const body =
-    `🚨 ELDERCARE ALERT\n` +
-    `${event.type.toUpperCase()} detected!\n` +
-    `Patient: Care recipient\n` +
-    `Source: ${sourceLabel}\n` +
-    `Location: ${event.location}\n` +
+    `🚨 ELDERCARE ALERT: FALL DETECTED\n` +
+    `Device: ${sourceLabel}\n` +
+    `Status: ${event.type}\n` +
+    `${locationSection}\n` +
     `Confidence: ${event.confidence == null ? "unavailable" : `${Math.round(event.confidence * 100)}%`}\n` +
     `Time: ${event.timestamp}\n` +
-    `Please respond immediately or call 112.`;
+    `Please respond immediately or call emergency services!`;
 
-  await client.messages.create({ body, from: fromNumber, to: toNumber });
-  console.log(`[SMS] Fall alert SMS sent to ${toNumber} — ${event.type}`);
+  try {
+    await client.messages.create({ body, from: fromNumber, to: toNumber });
+    console.log(`[SMS] Fall alert SMS sent to ${toNumber} — ${event.type}`);
+  } catch (err: any) {
+    console.error(`[SMS] ❌ Twilio SMS failed to ${toNumber}:`, err.message);
+    throw err;
+  }
+}
+
+// ── Gmail alert for fall event ─────────────────────────────────────────────
+async function sendFallEmailAlert(event: FallEventRecord) {
+  // Optional email dispatch hook
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FALL EVENTS — receive from camera/bracelet, store, alert caregiver
+// FALL EVENTS — receive from Belt / Bracelet / Camera, store, alert caregiver
 // ─────────────────────────────────────────────────────────────────────────────
-app.post("/api/fall-event", async (req, res) => {
+app.post(["/api/fall-event", "/api/belt/fall"], async (req, res) => {
   try {
     const body = req.body;
 
-    // ── Bracelet sends is_fall:false as a reset — ignore it silently ──────
+    // ── Device sends is_fall:false as a reset — ignore it silently ──────
     if (body.is_fall === false) {
       return res.json({ received: true, ignored: "fall reset" });
     }
 
-    const source: string = body.source || "camera";
+    const source: string = body.source || (req.path.includes("/belt") ? "belt" : "camera");
 
-    // ── BUG FIX: Validate source device is actually online ────────────────
-    // A device that is disconnected/offline cannot physically detect a fall.
-    // Accepting reports from offline devices causes ghost alerts.
-    if (source === "bracelet" && !braceletStatus.online) {
-      console.warn(`[FALL] REJECTED — bracelet source but bracelet is OFFLINE (deviceId=${braceletStatus.deviceId})`);
-      return res.status(409).json({
-        received: false,
-        rejected: "bracelet is offline — cannot report fall events while disconnected",
-      });
-    }
-    if (source === "camera" && !cameraStatus.online) {
-      // Camera gets a grace period: if it just came online it may not have
-      // sent a heartbeat yet. Only reject if it has been seen before but is now offline.
-      if (cameraStatus.lastSeen) {
-        console.warn(`[FALL] REJECTED — camera source but camera is OFFLINE (last seen: ${cameraStatus.lastSeen})`);
-        return res.status(409).json({
-          received: false,
-          rejected: "camera is offline — cannot report fall events while disconnected",
-        });
+    // ── Update belt and bracelet online status on incoming fall signal ───
+    if (source === "belt") {
+      beltStatus.online = true;
+      beltStatus.lastSeen = new Date().toISOString();
+      if (body.impactG != null) beltStatus.impactG = Number(body.impactG);
+      if (body.tiltAngle != null) beltStatus.tiltAngle = Number(body.tiltAngle);
+      if (body.haveGps != null) beltStatus.haveGps = Boolean(body.haveGps);
+      if (body.latitude != null && body.latitude !== 0) beltStatus.lat = Number(body.latitude);
+      if (body.longitude != null && body.longitude !== 0) beltStatus.lng = Number(body.longitude);
+      if (beltStatus.haveGps && beltStatus.lat && beltStatus.lng) {
+        beltStatus.mapsUrl = `https://maps.google.com/?q=${beltStatus.lat.toFixed(6)},${beltStatus.lng.toFixed(6)}`;
       }
-      // First-time camera event: mark it online and allow through
-    }
-
-    // ── Update camera online status on every valid camera event ───────────
-    if (source === "camera") {
+    } else if (source === "bracelet") {
+      braceletStatus.online = true;
+      braceletStatus.lastSeen = new Date().toISOString();
+    } else if (source === "camera") {
       cameraStatus.online = true;
       cameraStatus.lastSeen = new Date().toISOString();
     }
 
-    // ── Per-device rate limit: hard-block same device firing within 2 min ─
-    const deviceId: string = body.deviceId || source;
-    if (isDeviceFallRateLimited(deviceId)) {
+    // ── Per-device rate limit: 30s block unless forceAlert ───────────────
+    const deviceId: string = body.deviceId || (source === "belt" ? "belt-01" : source);
+    if (!body.forceAlert && isDeviceFallRateLimited(deviceId)) {
       console.warn(`[FALL] RATE-LIMITED — deviceId="${deviceId}" already fired within ${DEVICE_FALL_RATE_MS / 1000}s`);
       return res.status(429).json({
         received: false,
@@ -762,10 +912,31 @@ app.post("/api/fall-event", async (req, res) => {
     const now = new Date();
     const confidence = body.confidence != null && Number.isFinite(Number(body.confidence))
       ? Number(body.confidence)
-      : null;
+      : 0.95;
     let type = "Fall Detected";
     if (confidence != null && confidence >= 0.85) type = "Critical Fall";
     else if (confidence != null && confidence >= 0.65) type = "Rapid Descent";
+
+    // ── Determine Address & GPS for Telemetry and Twilio Voice Call ────────
+    const latitude = body.latitude != null ? Number(body.latitude) : undefined;
+    const longitude = body.longitude != null ? Number(body.longitude) : undefined;
+    const haveGps = Boolean(body.haveGps || (latitude && longitude && (latitude !== 0 || longitude !== 0)));
+    const mapsUrl = (typeof body.mapsUrl === "string" && body.mapsUrl.trim())
+      ? body.mapsUrl.trim()
+      : (haveGps && latitude && longitude ? `https://maps.google.com/?q=${latitude.toFixed(6)},${longitude.toFixed(6)}` : undefined);
+
+    const eventLocation = (
+      typeof body.location === "string" && body.location.trim()
+        ? body.location.trim()
+        : haveGps ? "Outdoor (GPS Coordinates)" : (source === "belt" ? "Smart Safety Belt (Inside Home)" : "Living Room")
+    );
+
+    const patientAddress = (
+      mapsUrl ? mapsUrl :
+      (typeof body.address === "string" && body.address.trim()
+        ? body.address.trim()
+        : process.env.PATIENT_ADDRESS || "Flat 402, Green Valley Apartments, Kolkata, West Bengal - 700091")
+    );
 
     const event: FallEventRecord = {
       id: `fall-${Date.now()}`,
@@ -776,15 +947,18 @@ app.post("/api/fall-event", async (req, res) => {
         now.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
       type,
       source,
-      location: typeof body.location === "string" && body.location.trim() ? body.location : "Unknown location",
+      location: eventLocation,
       confidence,
       status: "active",
+      latitude,
+      longitude,
+      mapsUrl,
     };
 
-    // Persist to Firebase and Local files
+    // Persist to MongoDB and Local files
     await saveFallEvent(event);
     saveFallEventLocally(event);
-    logEventLocally("fall", `Fall detected: ${event.type} at ${event.location}`, "critical");
+    logEventLocally("fall", `Fall detected: ${event.type} via ${source} at ${event.location}`, "critical");
 
     // Forward to Flask backend
     try {
@@ -795,31 +969,41 @@ app.post("/api/fall-event", async (req, res) => {
       });
     } catch { /* Flask might be offline */ }
 
-    // Broadcast to dashboard via SSE
+    // Broadcast to dashboard via SSE (triggers real-time UI popup & alert banner)
     broadcastSSE("fall_event", event);
-    console.log(`[FALL] ${type} at ${event.location} — source: ${event.source} — confidence: ${event.confidence}`);
+    console.log(`[FALL] 🚨 ${type} received via ${event.source} — Location: ${event.location} — Address: ${patientAddress}`);
 
-    // ── Send Gmail + SMS alerts (5-minute cooldown to prevent spam) ────────
+    // ── Trigger Twilio Emergency Voice Call + SMS ────────────────────────
     const alertKey = `fall-${type}`;
-    if (!isFallAlertCooling(alertKey)) {
+    const shouldDispatch = Boolean(body.forceAlert) || !isFallAlertCooling(alertKey);
+    if (shouldDispatch) {
       markFallAlerted(alertKey);
 
-      // Fire both alerts in parallel — don't await so response is fast
+      // Trigger Voice Call, SMS, and Email in parallel
       Promise.allSettled([
+        sendFallVoiceCall(event, patientAddress),
+        sendFallSmsAlert(event, patientAddress),
         sendFallEmailAlert(event),
-        sendFallSmsAlert(event),
       ]).then(results => {
         results.forEach((r, i) => {
+          const action = i === 0 ? "Twilio Voice Call" : i === 1 ? "Twilio SMS" : "Email";
           if (r.status === "rejected") {
-            console.error(`[ALERT] ${i === 0 ? "Email" : "SMS"} failed:`, r.reason?.message);
+            console.error(`[ALERT] ⚠️ ${action} failed:`, r.reason?.message);
+          } else {
+            console.log(`[ALERT] ✅ ${action} successfully processed.`);
           }
         });
       });
     } else {
-      console.log(`[ALERT] Cooldown active — skipping Gmail/SMS for ${type}`);
+      console.log(`[ALERT] Cooldown active — skipping Twilio Voice/SMS for ${type}`);
     }
 
-    return res.json({ success: true, eventId: event.id, alertSent: !isFallAlertCooling(alertKey) });
+    return res.json({
+      success: true,
+      eventId: event.id,
+      address: patientAddress,
+      alertSent: shouldDispatch
+    });
   } catch (err: any) {
     return res.status(500).json({ error: err?.message });
   }

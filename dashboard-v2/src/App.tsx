@@ -273,6 +273,16 @@ export default function App() {
         setScannedHistory(data.reports.map((r: any) => ({ fileName: r.fileName || 'unnamed document', timestamp: r.scanDate || new Date(r.createdAt * 1000).toLocaleString() || '', summary: r.summary || '' })));
       }
     }).catch(() => { });
+
+    // Initial fetch for Fall Events
+    fetch('/api/fall-events').then(r => r.json()).then(data => {
+      if (data && Array.isArray(data.events)) {
+        setFallEvents(data.events);
+        if (data.events.some((e: any) => e.status === 'active')) {
+          setActiveAlert(true);
+        }
+      }
+    }).catch(() => { });
   }, []);
 
   // ─── Medbox: Fetch schedule on mount ──────────────────────────────────────
@@ -412,6 +422,29 @@ export default function App() {
         setCardiacSos(prev => prev ? { ...prev, active: false, dismissed: true } : null);
         setActiveAlert(false);
         setLidOpen(false);
+      } catch { /* malformed SSE */ }
+    });
+
+    es.addEventListener('fall_event', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        console.log('[SSE] 🚨 Real-time fall event received:', data);
+        setFallEvents(prev => [data, ...prev.filter(f => f.id !== data.id)]);
+        setActiveAlert(true);
+      } catch { /* malformed SSE */ }
+    });
+
+    es.addEventListener('fall_resolved', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        setFallEvents(prev => prev.map(f => f.id === data.id ? { ...f, status: 'resolved', resolvedAt: data.resolvedAt || new Date().toLocaleTimeString('en-US') } : f));
+      } catch { /* malformed SSE */ }
+    });
+
+    es.addEventListener('fall_resolved_batch', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        setFallEvents(prev => prev.map(f => f.source === data.source ? { ...f, status: 'resolved', resolvedAt: new Date().toLocaleTimeString('en-US') } : f));
       } catch { /* malformed SSE */ }
     });
 

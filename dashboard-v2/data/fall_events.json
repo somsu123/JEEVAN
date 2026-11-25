@@ -1,12 +1,105 @@
 [
   {
-    "id": "fall-1780220580108",
-    "isoTimestamp": "2026-05-31T09:43:00.108Z",
-    "timestamp": "15:13:00 — May 31, 2026",
-    "type": "Stumble Warning",
-    "source": "camera",
-    "location": "Living Room",
-    "confidence": 0.589,
-    "status": "active"
+    "id": "fall-1793396980620",
+    "isoTimestamp": "2026-10-30T21:49:40.620Z",
+    "timestamp": "03:19:40 — Oct 31, 2026",
+    "type": "Critical Fall",
+    "source": "belt",
+    "location": "Inside Home (Smart Safety Belt)",
+    "confidence": 0.95,
+    "status": "resolved",
+    "latitude": 0,
+    "longitude": 0,
+    "resolvedAt": "03:22:33"
+  },
+  {
+    "id": "fall-1793394373273",
+    "isoTimestamp": "2026-10-30T21:06:13.273Z",
+    "timestamp": "02:36:13 — Oct 31, 2026",
+    "type": "Critical Fall",
+    "source": "belt",
+    "location": "Smart Safety Belt (Waist)",
+    "confidence": 0.96,
+    "status": "resolved",
+    "resolvedAt": "02:36:46"
+  },
+  {
+    "id": "fall-1793388796921",
+    "isoTimestamp": "2026-10-30T19:33:16.921Z",
+    "timestamp": "01:03:16 — Oct 31, 2026",
+    "type": "Critical Fall",
+    "source": "belt",
+    "location": "Smart Safety Belt (Waist)",
+    "confidence": 0.95,
+    "status": "resolved",
+    "resolvedAt": "01:03:58"
+  },
+  {
+    "id": "fall-1793388765984",
+    "isoTimestamp": "2026-10-30T19:32:45.984Z",
+    "timestamp": "01:02:45 — Oct 31, 2026",
+    "type": "Critical Fall",
+    "source": "belt",
+    "location": "Smart Safety Belt (Waist)",
+    "confidence": 0.95,
+    "status": "resolved",
+    "resolvedAt": "01:03:58"
+  },
+  {
+    "id": "fall-1793387389812",
+    "isoTimestamp": "2026-10-30T19:09:49.812Z",
+    "timestamp": "00:39:49 — Oct 31, 2026",
+    "type": "Critical Fall",
+    "source": "belt",
+    "location": "Smart Safety Belt (Waist)",
+    "confidence": 0.95,
+    "status": "resolved",
+    "resolvedAt": "00:40:42"
+  },
+  {
+    "id": "fall-1793386779343",
+    "isoTimestamp": "2026-10-30T18:59:39.343Z",
+    "timestamp": "00:29:39 — Oct 31, 2026",
+    "type": "Critical Fall",
+    "source": "belt",
+    "location": "Outdoor (GPS Coordinates)",
+    "confidence": 0.95,
+    "status": "resolved",
+    "latitude": 22.572645,
+    "longitude": 88.363892,
+    "mapsUrl": "https://maps.google.com/?q=22.572645,88.363892",
+    "resolvedAt": "00:31:12"
+  },
+  {
+    "id": "fall-1793386627961",
+    "isoTimestamp": "2026-10-30T18:57:07.960Z",
+    "timestamp": "00:27:07 — Oct 31, 2026",
+    "type": "Critical Fall",
+    "source": "belt",
+    "location": "Indoor (Smart Safety Belt)",
+    "confidence": 0.95,
+    "status": "resolved",
+    "resolvedAt": "00:31:12"
+  },
+  {
+    "id": "fall-1793383053066",
+    "isoTimestamp": "2026-10-30T17:57:33.066Z",
+    "timestamp": "23:27:33 — Oct 30, 2026",
+    "type": "Critical Fall",
+    "source": "belt",
+    "location": "Living Room / Bedroom",
+    "confidence": 0.96,
+    "status": "resolved",
+    "resolvedAt": "23:28:14"
+  },
+  {
+    "id": "fall-1793382361283",
+    "isoTimestamp": "2026-10-30T17:46:01.283Z",
+    "timestamp": "23:16:01 — Oct 30, 2026",
+    "type": "Critical Fall",
+    "source": "belt",
+    "location": "Living Room / Bedroom",
+    "confidence": 0.96,
+    "status": "resolved"
   }
 ]
